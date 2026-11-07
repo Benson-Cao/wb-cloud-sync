@@ -130,6 +130,21 @@ curl --noproxy '*' -s http://127.0.0.1:50973/__wbsync/spike | grep -A4 eventShap
 → **Q1 完成闭环**：宿主 emit → 插件订阅 → 落盘日志，三方 `seq` 一致。W1 Spike 三问至此全部具备运行时证据。
 > `probe.json` 仍是 0 条（启动快照），路由是 19 条（实时对象）——**「快照 vs 实时」的区分被实测证实**，不再只是设计说明。
 
+#### 4.1.3 卸载后无残留（18:41 · TC-4.10 真机 PASS）
+
+| 检查 | 实测 |
+|---|---|
+| `127.0.0.1:50973/__wbsync/spike` | **HTTP 404**（此前为 200 + 完整 probe JSON） |
+| profile `package.json` / `pnpm-lock.yaml` / `cordis.patch.yml` | `wb-cloud-sync-spike` 命中数均 **0** |
+| `plugin-operations/operations.jsonl` | 18:41:19 `remove/started` → 18:41:20 `remove/settled`，`application=applied` |
+| DSH 主进程 | **PID 2196，StartTime 14:14:00，未重启**；端口 3082 / 9230 / 50973 未变 |
+
+→ **关键在于「未重启」**：404 不是「重启后压根没加载插件」造成的，而是同一进程内 `ctx.effect` 的 disposer **在运行时撤回了路由**。这是 P7「可逆副作用」与 TC-4.10「卸载后无残留路由 / 定时器 / 监听」的直接证据，比重启后看 404 强得多。
+
+> 顺带解开端口之谜：`3082` 的 502 响应体是 `engine-switch upstream: connect ECONNREFUSED 127.0.0.1:3080`，说明它是 `dsh-engine-switch` 的反向代理口、转发目标 3080 未启动；`9230` 是另一个内部服务；**50973 才是 `ctx.webServer`**。
+
+**唯一残留**：`~/.dsh/wbsync-spike/probe.json`（648 B，18:10:44）仍在。它是证据**数据文件**，不是路由 / 定时器 / WS 连接，不违反 TC-4.10；但若 P1 要求「卸载后零痕迹」，产品插件需在 disposer 中定义保留 / 清理策略 —— 记为 P1 待办。
+
 ---
 
 ## 5. P0 门禁逐项判定（01 §9 / 05 P0）
@@ -141,7 +156,7 @@ curl --noproxy '*' -s http://127.0.0.1:50973/__wbsync/spike | grep -A4 eventShap
 | pinned commit 锁定 | **MET** | `upstream_commit=66491b05…`（tag `dsh-v0.2.2-rc.1`），tag / commit / package.json 三重交叉验证；另保留 asar SHA256 作二进制指纹 |
 | 协议冻结 | **待会签** | 04 已按 D-01~D-07 修订为 `wbsync/1 r1`，`PROTOCOL.md` 单向同步 + CHANGELOG 齐备；ADR-007~009 仍为「提议中」 |
 
-> **结论：W1 Spike 三问已 PASS，P0 只剩「四方会签 + ADR 会签」一项硬阻塞**；卸载残留（TC-4.10）转入 M1 验收，不属于 R-02 三问。按 01 §9，会签完成前仍不得进入 P1 编码。
+> **结论：W1 Spike 三问 PASS，TC-4.10 真机卸载残留亦 PASS（§4.1.3）**，P0 只剩「四方会签 + ADR 会签」一项硬阻塞。按 01 §9，会签完成前仍不得进入 P1 编码。
 
 ---
 
@@ -166,7 +181,7 @@ curl --noproxy '*' -s http://127.0.0.1:50973/__wbsync/spike | grep -A4 eventShap
 
 剩余：
 
-1. **卸载残留（转 M1 / TC-4.10）**：`dsh plugin remove` 后查 `127.0.0.1:50973/__wbsync/spike` 应为 404。唯一剩下的真机动作，不影响 Spike 判定。
+1. **P1 待办 · 卸载后证据文件清理**：TC-4.10 真机已 PASS（§4.1.3），但 `~/.dsh/wbsync-spike/probe.json` 未随卸载删除；产品插件需在 disposer 中定义保留 / 清理策略。不阻塞当前门禁。
 2. **ADR-007~009 会签 + 四方文档会签**（01 §9）：协议字段变更需 ARC 会签，安全项一票否决。
 3. **补构建链环境并接 CI**：命令行 Node ≥ 24.9 + pnpm 11、`dsh` CLI 加 PATH（注意 DSH 进程内已是 24.21.0，两者不同）；CI 接入 `sync-protocol.mjs --check`、`check-plugin.mjs`、pinned commit 校验。
 4. **解决上表 #2 / #3 / #4**：配对密钥与账号绑定、配对状态权威归属、白名单端点覆盖。
@@ -177,7 +192,7 @@ curl --noproxy '*' -s http://127.0.0.1:50973/__wbsync/spike | grep -A4 eventShap
 ## 8. 边界声明（本报告**没有**证明的事）
 
 - **已在真实 DSH 桌面版完成加载 + 事件闭环**（§4.1 / §4.1.2）：19 条运行时事件与落盘日志窗口逐条对齐。但 `apply()` 的 8 项动态断言本身仍来自 mock Context，未在真机上跑单元测试。
-- 未验证卸载后路由 404（TC-4.10 真机部分），已转 M1 验收。
+- 卸载验证（§4.1.3）覆盖了「路由 404 + profile 配置移除 + 进程未重启」，但**未做进程级监听 / 定时器 / WS 句柄的存活扫描**（需宿主调试接口），TC-4.10 的「无残留监听」仍只有离线 mock 的等价证据。
 - 本轮会话无工具调用，`sourceEventSeqs` / `tool/call` ↔ `tool/result` 配对只在离线日志样本上验证过，未做运行时验证。
 - 未验证 `prompt()` 在「执行中投递 → 进队列 → 按序处理」的完整运行时行为（FR-4.7 / TC-4.3）。
 - 未验证流式 `assistant/chunk` 是否在内存中产生但不落盘（D-01 只证明日志里没有）。

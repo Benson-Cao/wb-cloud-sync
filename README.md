@@ -120,7 +120,9 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 
 > 手机端发的消息不会触发 PC 端探针——这正是 BR-1「同账号 ≠ 同数据，会话跟随执行位置」。
 
-**仍待验证**：卸载后路由 404（TC-4.10，已转 M1 验收）。
+**卸载验证（18:41 · TC-4.10 真机 PASS）**：卸载后 `50973/__wbsync/spike` → **404**，profile 三处配置命中数 0，operations 日志 `remove/settled`；DSH 主进程**未重启**（PID 2196 / 14:14 启动），证明是 `ctx.effect` disposer 在运行时撤回路由，不是「重启后没加载」。顺带确认 3082 是 `dsh-engine-switch` 的反向代理口（转发 3080 未启动故 502），50973 才是 `ctx.webServer`。
+
+唯一残留是历史证据文件 `~/.dsh/wbsync-spike/probe.json`（不违反 TC-4.10，P1 产品插件需定保留 / 清理策略）。**P0 门禁至此只剩四方会签 + ADR 会签。**
 
 ---
 
