@@ -89,6 +89,31 @@
 **未覆盖**：`eventShapes[]` 仍为空（需发一句话触发 `session/event`）；卸载后 404 未验。
 > `probe.json` 是 `apply()` 的启动快照；实时 `eventShapes` 由状态路由返回同一个内存对象，不回写文件。
 
+#### 4.1.1 事件触发诊断（18:23 · 用户报告「发了」后复测）
+
+复测：路由仍 **HTTP 200**、`errors: []`、`eventShapes: 0`；`probe.json` 同为 0 —— 两者一致，**排除「只看快照」的误判**，订阅回调确实一次都没被调用。
+
+只读旁证（全部指向「消息没进入这个进程」）：
+
+| 证据 | 数值 |
+|---|---|
+| `~/.dsh/sessions/**/session.v4.jsonl.zstd` 18:05 后被修改的文件 | **0**（全库最新 11-06 21:13） |
+| `~/.dsh/storages/session_projcache` 最新 mtime | 16:16 |
+| 18:10 后 `~/.dsh` 下的文件变动 | 仅 3 个：profile `package.json`、`probe.json`、`nas-sync/store.json` |
+| 18:14 的目录变动 | nas-sync mirror 同步产生，均为 `--data-user-0-com.dsh.harness-files-home-*`（Android 路径）**空目录**，files=0 |
+| DSH 主进程 | 仅 1 个（PID 2196），端口 3082 / 9230 / 50973 未变，无第二实例 |
+
+→ **结论：截至 18:23，PC 桌面版 DSH 进程内没有任何会话事件产生**，因此「探针没收到事件」不等于「订阅失效」。待排除两种情形：① 消息发在**手机端 DSH**（18:14 同步痕迹 + Android 路径前缀），按 BR-1「同账号 ≠ 同数据、会话跟随执行位置」，PC 端探针本就收不到；② PC 端消息未成功提交（模型未配置 / 仅输入未发送 / 请求失败）。
+
+自检（在 **PC 桌面版** 发一句话、等它开始回复后立刻跑）：
+
+```bash
+find ~/.dsh/sessions -name 'session.v4.jsonl.zstd' -mmin -5 | wc -l   # 期望 >= 1
+curl --noproxy '*' -s http://127.0.0.1:50973/__wbsync/spike | grep -A4 eventShapes
+```
+
+第一条为 `0` → 消息没落到本机，与探针无关；第一条 `>= 1` 而路由仍空 → 才是订阅作用域问题，需查 Cordis context 层级。这是把「没有事件」与「没有收到」分开的最小判据。
+
 ---
 
 ## 5. P0 门禁逐项判定（01 §9 / 05 P0）
