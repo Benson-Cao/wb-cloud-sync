@@ -1,0 +1,100 @@
+{
+  "schema": "wbsync-gate-check/1",
+  "capturedAt": "2026-11-07T10:57:27.176Z",
+  "git": {
+    "head": "274b752faf8f26b1b850edc50db867a75e11d20f",
+    "branch": "main",
+    "worktreeClean": false
+  },
+  "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
+  "evidenceSha256": {
+    "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
+    "check-plugin.json": "2922e8df21ce3eec230f9d86be6e905596095af4074753d1388a6bc9ff07d420",
+    "REPORT.md": "05b1d338f6797668fc26e04cecdd67c23ae2720f59b08dd56079f98ded7549dc",
+    "PROTOCOL.md": "249aeab1fb45b80745aada77af0b887add995f820177ffc61552b37498bf13d6",
+    "dist-tarball": "8348fdf9e495b1e71dd94a2b644d88f234492347dc88155bbef406dc0f4ba862"
+  },
+  "automated": [
+    {
+      "id": "G1",
+      "label": "三问离线取证 Q1/Q2/Q3 全 PASS",
+      "pass": true
+    },
+    {
+      "id": "G2",
+      "label": "插件加载验证 check-plugin PASS",
+      "pass": true
+    },
+    {
+      "id": "G3",
+      "label": "上游 commit 已锁定（40 位 SHA）",
+      "pass": true
+    },
+    {
+      "id": "G4",
+      "label": "PROTOCOL.md 与 docs/04 单向同步一致",
+      "pass": true
+    },
+    {
+      "id": "G5",
+      "label": "真机加载 + 运行时事件闭环已记录（REPORT §4.1.2）",
+      "pass": true
+    },
+    {
+      "id": "G6",
+      "label": "TC-4.10 真机卸载已记录（REPORT §4.1.3）",
+      "pass": true
+    },
+    {
+      "id": "G7",
+      "label": "ADR-007~009 已写入 03",
+      "pass": true
+    },
+    {
+      "id": "G8",
+      "label": "git 全历史无 PAT/密钥命中",
+      "pass": true
+    }
+  ],
+  "automatedPassed": 8,
+  "automatedTotal": 8,
+  "manual": [
+    {
+      "id": "M1",
+      "label": "四方文档会签（01 §9：PM / 架构师 / 安全 Owner / QA Owner）",
+      "status": "NOT MET",
+      "owner": "PM"
+    },
+    {
+      "id": "M2",
+      "label": "ADR-007 事件契约以宿主实测为准",
+      "status": "提议中，待会签",
+      "owner": "ARC + PM"
+    },
+    {
+      "id": "M3",
+      "label": "ADR-008 幂等与写入权归宿主",
+      "status": "提议中，待会签",
+      "owner": "ARC + PM"
+    },
+    {
+      "id": "M4",
+      "label": "ADR-009 PROTOCOL.md 为唯一契约源",
+      "status": "提议中，待会签",
+      "owner": "ARC"
+    },
+    {
+      "id": "M5",
+      "label": "安全项一票否决权行使（08 / 01 §6）",
+      "status": "待安全 Owner",
+      "owner": "安全 Owner"
+    },
+    {
+      "id": "M6",
+      "label": "构建链环境 Node ≥24.9 + pnpm 11 + CI 接入",
+      "status": "NOT MET",
+      "owner": "HE-A + BE-RL"
+    }
+  ],
+  "gate": "BLOCKED_BY_SIGNOFF"
+}

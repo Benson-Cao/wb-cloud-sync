@@ -62,7 +62,7 @@ dsh --profile web --dump-config | grep wb-cloud-sync-spike
 
 **2. 状态路由返回探针结果**
 
-桌面版端口是**动态分配**的，先查 DSH 进程实际监听端口（本机实测 `50973`，不是 3080）：
+桌面版端口是**动态分配**的，**重启后会变**（实测 18:41 前 `50973` → 18:49 重启后 `55056`；不是 3080）。先查 DSH 进程实际监听端口：
 
 ```powershell
 Get-NetTCPConnection -State Listen | Where-Object {
@@ -72,7 +72,7 @@ Get-NetTCPConnection -State Listen | Where-Object {
 
 ```bash
 # ⚠️ 有全局 http_proxy 时测 localhost 必须绕代理，否则拿到的是代理的 404/502
-PORT=50973   # 换成上面查到的端口
+PORT=55056   # 换成上面查到的端口，别写死
 curl --noproxy '*' -s http://127.0.0.1:$PORT/__wbsync/spike
 ```
 
@@ -120,9 +120,11 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 
 > 手机端发的消息不会触发 PC 端探针——这正是 BR-1「同账号 ≠ 同数据，会话跟随执行位置」。
 
-**卸载验证（18:41 · TC-4.10 真机 PASS）**：卸载后 `50973/__wbsync/spike` → **404**，profile 三处配置命中数 0，operations 日志 `remove/settled`；DSH 主进程**未重启**（PID 2196 / 14:14 启动），证明是 `ctx.effect` disposer 在运行时撤回路由，不是「重启后没加载」。顺带确认 3082 是 `dsh-engine-switch` 的反向代理口（转发 3080 未启动故 502），50973 才是 `ctx.webServer`。
+**卸载验证（18:41 · TC-4.10 真机 PASS，强证据）**：卸载后 `50973/__wbsync/spike` → **404**，profile 三处配置命中数 0，operations 日志 `remove/settled`；观测时主进程 PID 2196（14:14 启动）**未重启**，故为 `ctx.effect` disposer 运行时撤回。
 
-唯一残留是历史证据文件 `~/.dsh/wbsync-spike/probe.json`（不违反 TC-4.10，P1 产品插件需定保留 / 清理策略）。**P0 门禁至此只剩四方会签 + ADR 会签。**
+> ⚠️ **18:49:52 DSH 重启过**（新 PID 26668，端口 **50973 → 55056**）。重启后 `55056/__wbsync/spike` 也是 404，但只证明「重启后没加载已卸载插件」，**不可复用上面的强证据结论**。完整时间线见 `SIGN-OFF.md` §四。顺带确认 3082 是 `dsh-engine-switch` 反向代理口（转发 3080 未启动故 502）；当时 webServer 是 50973、现在是 55056。
+
+唯一残留是历史证据文件 `~/.dsh/wbsync-spike/probe.json`（不违反 TC-4.10，P1 产品插件需定保留 / 清理策略）。**P0 门禁自动项 8/8 PASS，只剩四方会签 + ADR 会签** → 见 [`SIGN-OFF.md`](SIGN-OFF.md)（会签包）与 `node scripts/gate-check.mjs --check`（自动核查）。
 
 ---
 
@@ -136,11 +138,14 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 ├─ dist/*.tgz                   # 预打好的可安装 tarball
 ├─ PROTOCOL.md                  # 04 的发布副本（sync-protocol.mjs 单向生成）
 ├─ CHANGELOG.md                 # 契约变更记录（wbsync/1 r1）
+├─ SIGN-OFF.md                  # P0 会签包：自动项 8/8、待签 M1~M6、签署栏
 ├─ pinned-commit.txt            # DSH 锁定基线 66491b0…（dsh-v0.2.2-rc.1）
 ├─ docs/                        # 设计冻结包 v1.1（11 份，含 ADR-007~009）
 ├─ scripts/
+│  ├─ gate-check.mjs            # P0 门禁自动核查（--check 供 CI，输出证据快照）
 │  ├─ sync-protocol.mjs         # ADR-009：生成 PROTOCOL.md + --check CI 校验
-│  └─ apply-spike-revisions.mjs # v1.0→v1.1 文档修订（带断言与原文备份）
+│  ├─ apply-spike-revisions.mjs # v1.0→v1.1 文档修订（带断言与原文备份）
+│  └─ apply-realdevice-updates.mjs # 真机结论回填（3 处，带断言）
 ├─ spike/
 │  ├─ REPORT.md                 # W1 Spike 报告：三问判定 + 7 处文档偏差 + P0 门禁
 │  ├─ README.md                 # 取证脚本运行说明

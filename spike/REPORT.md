@@ -139,7 +139,10 @@ curl --noproxy '*' -s http://127.0.0.1:50973/__wbsync/spike | grep -A4 eventShap
 | `plugin-operations/operations.jsonl` | 18:41:19 `remove/started` → 18:41:20 `remove/settled`，`application=applied` |
 | DSH 主进程 | **PID 2196，StartTime 14:14:00，未重启**；端口 3082 / 9230 / 50973 未变 |
 
-→ **关键在于「未重启」**：404 不是「重启后压根没加载插件」造成的，而是同一进程内 `ctx.effect` 的 disposer **在运行时撤回了路由**。这是 P7「可逆副作用」与 TC-4.10「卸载后无残留路由 / 定时器 / 监听」的直接证据，比重启后看 404 强得多。
+→ **关键在于取证时点**：18:41 观测 404 时，主进程 PID 2196（StartTime 14:14:00）**尚未重启**，因此那是同一进程内 `ctx.effect` disposer **运行时撤回路由**的证据（P7 / TC-4.10）。
+
+> ⚠️ **证据时效性（18:52 用户纠正后补充）**：**18:49:52 DSH 确实重启过** —— 新主进程 **PID 26668**，webServer 端口 **50973 → 55056**。重启后 `55056/__wbsync/spike` 同样是 404，但这一条**只能证明「重启后没加载已卸载的插件」，是弱证据**，不能拿来支撑「disposer 运行时撤回」。
+> 两个说法都对，只是时点不同：**18:41 的强证据成立；18:52 之后的 404 不可复用该结论**。复跑时务必先查进程 StartTime 与实际端口，再判定证据等级。完整时间线见 `SIGN-OFF.md` §四。
 
 > 顺带解开端口之谜：`3082` 的 502 响应体是 `engine-switch upstream: connect ECONNREFUSED 127.0.0.1:3080`，说明它是 `dsh-engine-switch` 的反向代理口、转发目标 3080 未启动；`9230` 是另一个内部服务；**50973 才是 `ctx.webServer`**。
 
