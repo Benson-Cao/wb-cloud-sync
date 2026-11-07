@@ -1,5 +1,7 @@
 # wb-cloud-sync · W1 Spike
 
+[![gate](https://github.com/Benson-Cao/wb-cloud-sync/actions/workflows/gate.yml/badge.svg)](https://github.com/Benson-Cao/wb-cloud-sync/actions/workflows/gate.yml)
+
 **WB-Cloud-Sync 的 DSH 宿主接缝验证仓库**：https://github.com/Benson-Cao/wb-cloud-sync
 
 根目录本身就是一个**可直接装进 DSH 的探针 bundle**（`dsh-wb-cloud-sync-spike`），用来在真机上跑 `09_风险登记册.md` R-02 的 P0 门禁三问。

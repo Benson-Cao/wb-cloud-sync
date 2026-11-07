@@ -1,29 +1,24 @@
 {
   "schema": "wbsync-gate-check/1",
-  "capturedAt": "2026-11-07T11:02:31.917Z",
+  "capturedAt": "2026-11-07T11:03:54.625Z",
   "git": {
-    "head": "c50ef2dbb4025c0affefe360abe49ee0bebf46e2",
+    "head": "bcefdf5c64707cac5e1eae0c2de5fe3416b50d4f",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "previousCapturedAt": "2026-11-07T11:01:37.896Z",
+    "previousCapturedAt": "2026-11-07T11:02:31.917Z",
     "previousGitHead": "c50ef2dbb4025c0affefe360abe49ee0bebf46e2",
-    "changedInputs": [
-      "check-plugin.json"
-    ],
+    "changedInputs": [],
     "ageDays": 0,
     "maxAgeDays": 30,
-    "reason": "证据输入已变化：check-plugin.json",
     "supersedes": {
-      "previousStatus": "STALE",
-      "capturedAt": "2026-11-07T11:01:37.896Z",
+      "previousStatus": "CURRENT",
+      "capturedAt": "2026-11-07T11:02:31.917Z",
       "gitHead": "c50ef2dbb4025c0affefe360abe49ee0bebf46e2",
-      "changedInputs": [
-        "check-plugin.json"
-      ]
+      "changedInputs": []
     }
   },
   "evidenceSha256": {
@@ -109,8 +104,14 @@
       "owner": "安全 Owner"
     },
     {
-      "id": "M6",
-      "label": "构建链环境 Node ≥24.9 + pnpm 11 + CI 接入",
+      "id": "M6a",
+      "label": "CI 闸门接入（GitHub Actions · gate.yml）",
+      "status": "MET · run 42366496926",
+      "owner": "HE-A + BE-RL"
+    },
+    {
+      "id": "M6b",
+      "label": "本地构建链 Node ≥24.9 + pnpm 11",
       "status": "NOT MET",
       "owner": "HE-A + BE-RL"
     }

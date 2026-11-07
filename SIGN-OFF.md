@@ -32,9 +32,11 @@
 | M3 | ADR-008 幂等与写入权归宿主 | 提议中，待会签 | ARC + PM |
 | M4 | ADR-009 `PROTOCOL.md` 为唯一契约源 | 提议中，待会签 | ARC |
 | M5 | 安全项一票否决权行使（`08` / `01` §6） | 待安全 Owner | 安全 Owner |
-| M6 | 构建链 Node ≥24.9 + pnpm 11 + CI 接入 | NOT MET | HE-A + BE-RL |
+| M6a | CI 闸门接入（GitHub Actions · `gate.yml`） | **MET** · run `42366496926` success | HE-A + BE-RL |
+| M6b | 本地构建链 Node ≥24.9 + pnpm 11 | NOT MET | HE-A + BE-RL |
 
-> M6 不阻塞会签，但阻塞 P1 构建链。注意 **DSH 进程内 Node 已是 24.21.0**，未达标的是命令行构建链，两者不要混。
+> M6a 已完成：CI 用 Node 24，跑 `sync-protocol --check` → `gate-check --check --assert-fresh` → `check-plugin` → `npm pack --dry-run`，commit `bcefdf5` 首次绿灯（5 秒）。
+> M6b 不阻塞会签，但阻塞 P1 本地构建。注意 **DSH 进程内 Node 已是 24.21.0**，未达标的是命令行构建链，两者不要混。
 
 ## 三、会签依据索引
 

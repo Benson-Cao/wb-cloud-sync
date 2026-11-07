@@ -116,7 +116,8 @@ const manual = [
   { id: 'M3', label: 'ADR-008 幂等与写入权归宿主', status: '提议中，待会签', owner: 'ARC + PM' },
   { id: 'M4', label: 'ADR-009 PROTOCOL.md 为唯一契约源', status: '提议中，待会签', owner: 'ARC' },
   { id: 'M5', label: '安全项一票否决权行使（08 / 01 §6）', status: '待安全 Owner', owner: '安全 Owner' },
-  { id: 'M6', label: '构建链环境 Node ≥24.9 + pnpm 11 + CI 接入', status: 'NOT MET', owner: 'HE-A + BE-RL' },
+  { id: 'M6a', label: 'CI 闸门接入（GitHub Actions · gate.yml）', status: 'MET · run 42366496926', owner: 'HE-A + BE-RL' },
+  { id: 'M6b', label: '本地构建链 Node ≥24.9 + pnpm 11', status: 'NOT MET', owner: 'HE-A + BE-RL' },
 ]
 
 const result = {
