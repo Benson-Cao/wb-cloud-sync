@@ -1,32 +1,38 @@
 {
-  "schema": "wbsync-gate-check/1",
-  "capturedAt": "2026-11-07T11:03:54.625Z",
+  "schema": "wbsync-gate-check/2",
+  "capturedAt": "2026-11-07T11:07:15.469Z",
   "git": {
-    "head": "bcefdf5c64707cac5e1eae0c2de5fe3416b50d4f",
+    "head": "174a7dd8d63858d506da2bb6ae18464d36c739b0",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "previousCapturedAt": "2026-11-07T11:02:31.917Z",
-    "previousGitHead": "c50ef2dbb4025c0affefe360abe49ee0bebf46e2",
-    "changedInputs": [],
+    "dataChanged": [],
+    "narrativeChanged": [],
+    "previousCapturedAt": "2026-11-07T11:06:47.938Z",
+    "previousGitHead": "174a7dd8d63858d506da2bb6ae18464d36c739b0",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-07T11:02:31.917Z",
-      "gitHead": "c50ef2dbb4025c0affefe360abe49ee0bebf46e2",
-      "changedInputs": []
+      "capturedAt": "2026-11-07T11:06:47.938Z",
+      "gitHead": "174a7dd8d63858d506da2bb6ae18464d36c739b0",
+      "dataChanged": [],
+      "narrativeChanged": []
     }
   },
-  "evidenceSha256": {
-    "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
-    "check-plugin.json": "f1acad52f08519843609de2314226240ff57822394c107f1433ce15f9b57d4f2",
-    "REPORT.md": "05b1d338f6797668fc26e04cecdd67c23ae2720f59b08dd56079f98ded7549dc",
-    "PROTOCOL.md": "249aeab1fb45b80745aada77af0b887add995f820177ffc61552b37498bf13d6",
-    "dist-tarball": "1aa73299902c2b09c12c2bc95679cfe9c0abdfabdb527d5915f31f71da2a95a6"
+  "fingerprints": {
+    "data": {
+      "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
+      "check-plugin.json": "f1acad52f08519843609de2314226240ff57822394c107f1433ce15f9b57d4f2",
+      "dist-tarball": "1aa73299902c2b09c12c2bc95679cfe9c0abdfabdb527d5915f31f71da2a95a6"
+    },
+    "narrative": {
+      "REPORT.md": "05b1d338f6797668fc26e04cecdd67c23ae2720f59b08dd56079f98ded7549dc",
+      "PROTOCOL.md": "249aeab1fb45b80745aada77af0b887add995f820177ffc61552b37498bf13d6"
+    }
   },
   "automated": [
     {

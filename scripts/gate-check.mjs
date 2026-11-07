@@ -54,40 +54,66 @@ try {
   secretClean = error?.status === 1
 }
 
-// 证据输入指纹：用来判断「入库快照是否还能代表当前证据」
-const evidenceSha = {
-  'host-probe.json': sha256('spike/evidence/host-probe.json'),
-  'check-plugin.json': sha256('spike/evidence/check-plugin.json'),
-  'REPORT.md': sha256('spike/REPORT.md'),
-  'PROTOCOL.md': sha256('PROTOCOL.md'),
-  'dist-tarball': sha256('dist/dsh-wb-cloud-sync-spike-0.1.0.tgz'),
+// 指纹分两组：**证据数据**（事实）与**描述文字**（说法）。
+// 事实一变必须重算快照；只是措辞变了不该拦 PR。
+const fingerprints = {
+  data: {
+    'host-probe.json': sha256('spike/evidence/host-probe.json'),
+    'check-plugin.json': sha256('spike/evidence/check-plugin.json'),
+    'dist-tarball': sha256('dist/dsh-wb-cloud-sync-spike-0.1.0.tgz'),
+  },
+  narrative: {
+    'REPORT.md': sha256('spike/REPORT.md'),
+    'PROTOCOL.md': sha256('PROTOCOL.md'),
+  },
 }
 
-// 新鲜度以「证据输入是否变化」为准，而不是 git HEAD：
-// 只改文档 / 提交信息不该让快照失效，但证据文件一变就必须重算。
 const SNAPSHOT = join(ROOT, 'spike/evidence/gate-check.json')
 let previous = null
 try { previous = JSON.parse(readFileSync(SNAPSHOT, 'utf8')) } catch { /* 首次运行 */ }
 
-const changedInputs = previous?.evidenceSha256
-  ? Object.keys(evidenceSha).filter((k) => previous.evidenceSha256[k] !== evidenceSha[k])
-  : Object.keys(evidenceSha)
+/** 返回变化的键；previous 缺该组（旧格式）时返回 null，表示无法比较。 */
+const diffGroup = (group) => (previous?.fingerprints?.[group]
+  ? Object.keys(fingerprints[group]).filter((k) => previous.fingerprints[group][k] !== fingerprints[group][k])
+  : null)
+
+const dataChanged = diffGroup('data')
+const narrativeChanged = diffGroup('narrative')
+const legacySnapshot = Boolean(previous) && !previous.fingerprints
+
 const ageDays = previous?.capturedAt
   ? Math.floor((Date.now() - Date.parse(previous.capturedAt)) / 86_400_000)
   : null
+
+// CURRENT  = 两组一致
+// DRIFTED  = 仅描述文字变化（不阻断，但留痕）
+// STALE    = 证据数据变化 / 旧格式快照 / 超过 30 天（阻断）
+let status
+if (!previous) status = 'FIRST_RUN'
+else if (legacySnapshot) status = 'STALE'
+else if (dataChanged?.length) status = 'STALE'
+else if (narrativeChanged?.length) status = 'DRIFTED'
+else status = 'CURRENT'
+
 const freshness = {
-  status: !previous ? 'FIRST_RUN' : changedInputs.length === 0 ? 'CURRENT' : 'STALE',
+  status,
+  dataChanged: dataChanged ?? [],
+  narrativeChanged: narrativeChanged ?? [],
   previousCapturedAt: previous?.capturedAt ?? null,
   previousGitHead: previous?.git?.head ?? null,
-  changedInputs: previous ? changedInputs : [],
   ageDays,
   maxAgeDays: 30,
 }
-if (freshness.status === 'CURRENT' && ageDays !== null && ageDays > freshness.maxAgeDays) {
+if (legacySnapshot) {
+  freshness.reason = '快照为 v1 格式（无分组指纹），需重算一次'
+} else if (status === 'STALE' && dataChanged?.length) {
+  freshness.reason = `证据数据已变化：${dataChanged.join(', ')}`
+} else if (status === 'DRIFTED') {
+  freshness.reason = `仅描述文字变化（不阻断）：${narrativeChanged.join(', ')}`
+}
+if ((status === 'CURRENT' || status === 'DRIFTED') && ageDays !== null && ageDays > freshness.maxAgeDays) {
   freshness.status = 'STALE'
   freshness.reason = `快照已 ${ageDays} 天，超过 ${freshness.maxAgeDays} 天上限`
-} else if (freshness.status === 'STALE' && changedInputs.length) {
-  freshness.reason = `证据输入已变化：${changedInputs.join(', ')}`
 }
 
 const automated = [
@@ -121,7 +147,7 @@ const manual = [
 ]
 
 const result = {
-  schema: 'wbsync-gate-check/1',
+  schema: 'wbsync-gate-check/2',
   capturedAt: new Date().toISOString(),
   git: {
     head: git('rev-parse', 'HEAD'),
@@ -130,7 +156,7 @@ const result = {
   },
   pinnedCommit: upstreamCommit,
   freshness,
-  evidenceSha256: evidenceSha,
+  fingerprints,
   automated,
   automatedPassed: automated.filter((c) => c.pass).length,
   automatedTotal: automated.length,
@@ -148,11 +174,14 @@ if (!process.argv.includes('--check')) {
     freshness: {
       ...freshness,
       status: 'CURRENT',
+      reason: undefined, // 上一份的判定理由归入 supersedes，避免快照自述为「需重算」
       supersedes: {
         previousStatus: freshness.status,
+        previousReason: freshness.reason,
         capturedAt: freshness.previousCapturedAt,
         gitHead: freshness.previousGitHead,
-        changedInputs: freshness.changedInputs,
+        dataChanged: freshness.dataChanged,
+        narrativeChanged: freshness.narrativeChanged,
       },
     },
   }
@@ -170,10 +199,14 @@ console.log('  证据:', out)
 
 if (process.argv.includes('--check')) {
   const ok = automated.every((c) => c.pass)
-  if (process.argv.includes('--assert-fresh') && freshness.status !== 'CURRENT') {
-    console.error(`  FAIL: 快照不新鲜（${freshness.status}）→ 先运行 node scripts/gate-check.mjs 重算`)
+  const stale = freshness.status === 'STALE'
+  if (process.argv.includes('--assert-fresh') && stale) {
+    console.error('  FAIL: 快照 STALE（证据数据变了 / 旧格式 / 超期）→ 先运行 node scripts/gate-check.mjs 重算并提交')
     process.exitCode = 2
   } else {
+    if (freshness.status === 'DRIFTED') {
+      console.log('  NOTE: 仅描述文字漂移，放行；建议顺手重算以消除漂移')
+    }
     process.exitCode = ok ? 0 : 1
   }
 }

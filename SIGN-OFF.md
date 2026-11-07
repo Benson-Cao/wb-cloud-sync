@@ -72,12 +72,19 @@ Get-NetTCPConnection -State Listen | Where-Object {
 | 载体 | 角色 | 何时更新 | 能否作为准入依据 |
 |---|---|---|---|
 | CI 每次运行的 `gate-check.mjs --check` | **闸门**：永远反映当前代码 | 每次 push / PR 自动跑 | **能**，但不落盘、不留档 |
-| `spike/evidence/gate-check.json` | **审计快照**：会签时点的证明 | 证据输入变化时由人重跑并提交 | **仅在 `freshness.status = CURRENT` 时**；`STALE` 只能当历史 |
+| `spike/evidence/gate-check.json` | **审计快照**：会签时点的证明 | 证据数据变化时由人重跑并提交 | **`CURRENT` 或 `DRIFTED` 可用**；`STALE` 只能当历史 |
 
-- 「新鲜」看**证据输入指纹**（`host-probe.json` / `check-plugin.json` / `REPORT.md` / `PROTOCOL.md` / `dist-tarball` 的 sha256），不是 git HEAD —— 只改文档或提交信息不该让快照失效。
-- 兜底上限 **30 天**：即使证据没变，超过 30 天的快照也判 `STALE`。
-- CI 用 `--check --assert-fresh`：快照 `STALE` 直接 exit 2，强制在 PR 里重算并提交，**防止有人拿旧绿灯当今天的准入**。
-- 会签时请抄下 `capturedAt` / `git.head` / `evidenceSha256` 写进签署栏备注，事后可复核。
+**指纹分两组**（不是按 git HEAD 判，只改提交信息不该让快照失效）：
+
+| 组 | 文件 | 变了意味着 | 判定 |
+|---|---|---|---|
+| **data（事实）** | `host-probe.json`、`check-plugin.json`、`dist-tarball` | 实测事实或发布物已变 | **`STALE`**，CI exit 2，必须重算 |
+| **narrative（说法）** | `REPORT.md`、`PROTOCOL.md` | 只是描述/措辞更新 | **`DRIFTED`**，放行 + 打印 NOTE，建议顺手重算 |
+
+- 三档：`CURRENT`（两组一致）／`DRIFTED`（仅描述漂移，不阻断）／`STALE`（数据变 / 旧格式快照 / 超期）。
+- 兜底上限 **30 天**：即使两组都没变，超过 30 天的快照也判 `STALE`。
+- 这样「改个错别字」不会被 `--assert-fresh` 拦下，但「证据数据变了还拿旧快照签字」会被拦死。
+- 会签时请抄下 `capturedAt` / `git.head` / `fingerprints.data` 摘要写进签署栏备注，事后可复核。
 
 ## 五、签署栏
 
