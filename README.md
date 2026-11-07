@@ -1,6 +1,8 @@
 # wb-cloud-sync · W1 Spike
 
-**WB-Cloud-Sync 的 DSH 宿主接缝验证仓库**。根目录本身就是一个**可直接装进 DSH 的探针 bundle**（`dsh-wb-cloud-sync-spike`），用来在真机上跑 `09_风险登记册.md` R-02 的 P0 门禁三问。
+**WB-Cloud-Sync 的 DSH 宿主接缝验证仓库**：https://github.com/Benson-Cao/wb-cloud-sync
+
+根目录本身就是一个**可直接装进 DSH 的探针 bundle**（`dsh-wb-cloud-sync-spike`），用来在真机上跑 `09_风险登记册.md` R-02 的 P0 门禁三问。
 
 > ⚠️ **这不是 P1 产品插件**，不会同步任何会话、不连 Relay、不发消息。它只读、只取证、只注册一条状态路由。
 > 完整取证结论与 7 处文档偏差见 [`spike/REPORT.md`](spike/REPORT.md)。
@@ -38,7 +40,15 @@ dsh plugin --profile web add git+https://github.com/Benson-Cao/wb-cloud-sync.git
 
 ### 方式 C · 只装探针、不想 clone
 
-下载 `dist/dsh-wb-cloud-sync-spike-0.1.0.tgz`（仓库页面或 Release 附件），然后 `dsh plugin --profile web add <下载路径>`。
+tarball 有稳定的 raw 直链，一行下载后本地安装：
+
+```bash
+curl -L -o dsh-wb-cloud-sync-spike-0.1.0.tgz \
+  https://raw.githubusercontent.com/Benson-Cao/wb-cloud-sync/main/dist/dsh-wb-cloud-sync-spike-0.1.0.tgz
+dsh plugin --profile web add ./dsh-wb-cloud-sync-spike-0.1.0.tgz
+```
+
+也可以从仓库页面 / Release 附件下载。直链已实测可达（HTTP 200），重新打包后可用 `sha256sum` 与仓库内 tgz 比对。
 
 ---
 
