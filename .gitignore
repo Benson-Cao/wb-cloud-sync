@@ -3,6 +3,7 @@ spike/evidence/dsh-home-*/
 spike/evidence/plugin-probe.json
 spike/evidence/host-probe.full.json
 .revisions-backup/
+.revisions-backup-realdevice/
 node_modules/
 *.tgz
 
