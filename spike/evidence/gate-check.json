@@ -1,33 +1,46 @@
 {
-  "schema": "wbsync-gate-check/2",
-  "capturedAt": "2026-11-07T11:07:15.469Z",
+  "schema": "wbsync-gate-check/3",
+  "capturedAt": "2026-11-07T11:11:16.794Z",
   "git": {
-    "head": "174a7dd8d63858d506da2bb6ae18464d36c739b0",
+    "head": "3d9c8664dc9ee8024c755ee720eebb89346d9ace",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [],
+    "dataChanged": [
+      "check-plugin.json"
+    ],
+    "artifactChanged": [],
     "narrativeChanged": [],
-    "previousCapturedAt": "2026-11-07T11:06:47.938Z",
-    "previousGitHead": "174a7dd8d63858d506da2bb6ae18464d36c739b0",
+    "notes": [],
+    "previousCapturedAt": "2026-11-07T11:10:46.608Z",
+    "previousGitHead": "3d9c8664dc9ee8024c755ee720eebb89346d9ace",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-07T11:06:47.938Z",
-      "gitHead": "174a7dd8d63858d506da2bb6ae18464d36c739b0",
-      "dataChanged": [],
+      "previousStatus": "STALE",
+      "previousReason": "运行代码/证据已变化（阻断）：check-plugin.json",
+      "capturedAt": "2026-11-07T11:10:46.608Z",
+      "gitHead": "3d9c8664dc9ee8024c755ee720eebb89346d9ace",
+      "dataChanged": [
+        "check-plugin.json"
+      ],
+      "artifactChanged": [],
       "narrativeChanged": []
     }
   },
   "fingerprints": {
     "data": {
+      "index.js": "639eeebca42695b1841a65d99b9812d77c37985171537d90e2429761cbe75523",
+      "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
+      "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
       "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
-      "check-plugin.json": "f1acad52f08519843609de2314226240ff57822394c107f1433ce15f9b57d4f2",
-      "dist-tarball": "1aa73299902c2b09c12c2bc95679cfe9c0abdfabdb527d5915f31f71da2a95a6"
+      "check-plugin.json": "730ab052c47e6b38e95bdba7eeb3e1f1a5583507b91753175ac640a6eef9d52d"
+    },
+    "artifact": {
+      "dist-tarball": "b8549748cc0f4efa17c94cd13cda80fb68417f6d3330e760c6bc380842cf52a7"
     },
     "narrative": {
       "REPORT.md": "05b1d338f6797668fc26e04cecdd67c23ae2720f59b08dd56079f98ded7549dc",

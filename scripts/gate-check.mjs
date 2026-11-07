@@ -57,11 +57,20 @@ try {
 // 指纹分两组：**证据数据**（事实）与**描述文字**（说法）。
 // 事实一变必须重算快照；只是措辞变了不该拦 PR。
 const fingerprints = {
+  // 运行代码 + 实测证据：这一组是「事实」，变了必须重算快照
   data: {
+    'index.js': sha256('index.js'),
+    'cordis.patch.yml': sha256('cordis.patch.yml'),
+    'package.json': sha256('package.json'),
     'host-probe.json': sha256('spike/evidence/host-probe.json'),
     'check-plugin.json': sha256('spike/evidence/check-plugin.json'),
+  },
+  // 发布物：tgz 里含 README，重建（哪怕只改了文档）不代表事实变了，
+  // 所以只提示核对，不阻断。
+  artifact: {
     'dist-tarball': sha256('dist/dsh-wb-cloud-sync-spike-0.1.0.tgz'),
   },
+  // 说法：描述文字
   narrative: {
     'REPORT.md': sha256('spike/REPORT.md'),
     'PROTOCOL.md': sha256('PROTOCOL.md'),
@@ -78,6 +87,7 @@ const diffGroup = (group) => (previous?.fingerprints?.[group]
   : null)
 
 const dataChanged = diffGroup('data')
+const artifactChanged = diffGroup('artifact')
 const narrativeChanged = diffGroup('narrative')
 const legacySnapshot = Boolean(previous) && !previous.fingerprints
 
@@ -85,9 +95,13 @@ const ageDays = previous?.capturedAt
   ? Math.floor((Date.now() - Date.parse(previous.capturedAt)) / 86_400_000)
   : null
 
-// CURRENT  = 两组一致
-// DRIFTED  = 仅描述文字变化（不阻断，但留痕）
-// STALE    = 证据数据变化 / 旧格式快照 / 超过 30 天（阻断）
+// CURRENT  = 三组一致
+// DRIFTED  = 仅发布物重建 / 描述文字变化（不阻断，但留痕）
+// STALE    = 运行代码或证据数据变化 / 旧格式快照 / 超过 30 天（阻断）
+// 发布物（tgz）是派生产物，且 npm pack 不可复现（gzip 头带时间戳）：
+// 同样内容两次打包 sha 不同。所以 artifact 变化**只记录、不参与判定**，
+// 否则每次 repack 都会误报。防「发布物与源码脱节」靠 G4 之外的实时校验，
+// 而不是快照指纹。
 let status
 if (!previous) status = 'FIRST_RUN'
 else if (legacySnapshot) status = 'STALE'
@@ -98,18 +112,23 @@ else status = 'CURRENT'
 const freshness = {
   status,
   dataChanged: dataChanged ?? [],
+  artifactChanged: artifactChanged ?? [],
   narrativeChanged: narrativeChanged ?? [],
+  notes: [],
   previousCapturedAt: previous?.capturedAt ?? null,
   previousGitHead: previous?.git?.head ?? null,
   ageDays,
   maxAgeDays: 30,
 }
+if (artifactChanged?.length) {
+  freshness.notes.push(`发布物已重建（仅记录，不影响判定）：${artifactChanged.join(', ')}`)
+}
 if (legacySnapshot) {
-  freshness.reason = '快照为 v1 格式（无分组指纹），需重算一次'
+  freshness.reason = `快照格式为 ${previous.schema ?? '未知'}（缺少分组指纹），需重算一次`
 } else if (status === 'STALE' && dataChanged?.length) {
-  freshness.reason = `证据数据已变化：${dataChanged.join(', ')}`
+  freshness.reason = `运行代码/证据已变化（阻断）：${dataChanged.join(', ')}`
 } else if (status === 'DRIFTED') {
-  freshness.reason = `仅描述文字变化（不阻断）：${narrativeChanged.join(', ')}`
+  freshness.reason = `描述文字变化（不阻断）：${narrativeChanged.join(', ')}`
 }
 if ((status === 'CURRENT' || status === 'DRIFTED') && ageDays !== null && ageDays > freshness.maxAgeDays) {
   freshness.status = 'STALE'
@@ -147,7 +166,7 @@ const manual = [
 ]
 
 const result = {
-  schema: 'wbsync-gate-check/2',
+  schema: 'wbsync-gate-check/3',
   capturedAt: new Date().toISOString(),
   git: {
     head: git('rev-parse', 'HEAD'),
@@ -181,6 +200,7 @@ if (!process.argv.includes('--check')) {
         capturedAt: freshness.previousCapturedAt,
         gitHead: freshness.previousGitHead,
         dataChanged: freshness.dataChanged,
+        artifactChanged: freshness.artifactChanged,
         narrativeChanged: freshness.narrativeChanged,
       },
     },
@@ -204,9 +224,8 @@ if (process.argv.includes('--check')) {
     console.error('  FAIL: 快照 STALE（证据数据变了 / 旧格式 / 超期）→ 先运行 node scripts/gate-check.mjs 重算并提交')
     process.exitCode = 2
   } else {
-    if (freshness.status === 'DRIFTED') {
-      console.log('  NOTE: 仅描述文字漂移，放行；建议顺手重算以消除漂移')
-    }
+    if (freshness.reason) console.log('  NOTE:', freshness.reason)
+    for (const note of freshness.notes ?? []) console.log('  NOTE:', note)
     process.exitCode = ok ? 0 : 1
   }
 }

@@ -74,16 +74,19 @@ Get-NetTCPConnection -State Listen | Where-Object {
 | CI 每次运行的 `gate-check.mjs --check` | **闸门**：永远反映当前代码 | 每次 push / PR 自动跑 | **能**，但不落盘、不留档 |
 | `spike/evidence/gate-check.json` | **审计快照**：会签时点的证明 | 证据数据变化时由人重跑并提交 | **`CURRENT` 或 `DRIFTED` 可用**；`STALE` 只能当历史 |
 
-**指纹分两组**（不是按 git HEAD 判，只改提交信息不该让快照失效）：
+**指纹分三组**（不按 git HEAD 判，只改提交信息不该让快照失效）：
 
 | 组 | 文件 | 变了意味着 | 判定 |
 |---|---|---|---|
-| **data（事实）** | `host-probe.json`、`check-plugin.json`、`dist-tarball` | 实测事实或发布物已变 | **`STALE`**，CI exit 2，必须重算 |
-| **narrative（说法）** | `REPORT.md`、`PROTOCOL.md` | 只是描述/措辞更新 | **`DRIFTED`**，放行 + 打印 NOTE，建议顺手重算 |
+| **data（事实）** | `index.js`、`cordis.patch.yml`、`package.json`、`host-probe.json`、`check-plugin.json` | 运行代码或实测证据已变 | **`STALE`** → CI exit 2，必须重算 |
+| **artifact（发布物）** | `dist/*.tgz` | 重新打包了 | **仅记录 + NOTE，不影响判定** |
+| **narrative（说法）** | `REPORT.md`、`PROTOCOL.md` | 措辞 / 描述更新 | **`DRIFTED`**，放行 + NOTE |
 
-- 三档：`CURRENT`（两组一致）／`DRIFTED`（仅描述漂移，不阻断）／`STALE`（数据变 / 旧格式快照 / 超期）。
-- 兜底上限 **30 天**：即使两组都没变，超过 30 天的快照也判 `STALE`。
-- 这样「改个错别字」不会被 `--assert-fresh` 拦下，但「证据数据变了还拿旧快照签字」会被拦死。
+- **为什么 artifact 不参与判定**：`npm pack` **不可复现**——同样内容两次打包 sha 不同（gzip 头带时间戳）。实测：只给 README 加一个空行再 repack，tgz sha 从 `6904a9e2…` 变成 `b8549748…`；恢复 README 再 repack 仍是新 sha。若纳入判定，每次打包都会误报。
+- 三档：`CURRENT`（data 与 narrative 一致）／`DRIFTED`（仅描述漂移，不阻断）／`STALE`（data 变 / 旧格式快照 / 超期）。
+- 兜底上限 **30 天**：即使数据没变，超过 30 天的快照也判 `STALE`。
+- 一句话：**改错别字不拦人，重新打包不误报，运行代码或实测证据一变就拦死。**
+- ⚠️ 已知缺口：「发布物与源码是否一致」目前**没有自动校验**（tgz 不可复现，无法用 sha 比对）——记为 P1 待办，会签时需人工核对 `dist/*.tgz` 的 `index.js` 与仓库一致。
 - 会签时请抄下 `capturedAt` / `git.head` / `fingerprints.data` 摘要写进签署栏备注，事后可复核。
 
 ## 五、签署栏
