@@ -1,0 +1,12 @@
+# dsh-wb-cloud-sync-spike · Cordis **bundle** patch 层
+#
+# 必须是 `- insert:` 形式：profile root 是 []，不带 insert 的 patch 会
+# 因「按 id 命中已存在条目」失败而被静默跳过，插件不会进入 Loader 树。
+# 写法对齐本机已验证可用的 dsh-nas-sync / dsh-remote。
+#
+# 本包是 host-only bundle：只声明 dsh.bundle，不声明 dsh.client。
+# 宿主 dsh-plugin-manager 明确以 dsh.bundle 作为「是否作为 profile 层激活」的判据，
+# 因此无需 client 半边，也避开 client 元数据缓存导致首次安装看不到入口的问题。
+- insert:
+    - id: wb-cloud-sync-spike
+      name: dsh-wb-cloud-sync-spike

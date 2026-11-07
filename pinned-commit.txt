@@ -1,0 +1,33 @@
+# WB-Cloud-Sync · DSH 锁定基线
+# 采集：2026-11-07（W1 Spike）｜证据：spike/evidence/host-probe.json
+#
+# ⚠️ 当前状态：本文件是「发行构建指纹」，**尚不满足** 01 §9 / 05 P0 要求的
+#    「上游 git commit SHA 锁定」。原因：本机装的是 Electron 桌面发行包，
+#    npm 包不含 gitHead，本机也没有上游源码 checkout。
+#    W2 前必须从上游仓库取到 commit 回填 upstream_commit，
+#    否则 CI 无法执行 06 §8 的「校验当前 checkout 与 pinned 一致」。
+#    在回填前，P0 门禁的「commit 锁定」一项应记为 NOT MET。
+#
+# 格式：key=value（# 开头为注释）
+
+package=@deepseek-ai/dsh
+version=0.2.2-rc.1
+upstream_repo=git+https://github.com/deepseek-ai/deepseek-harness.git
+upstream_commit=UNRESOLVED
+
+# 可复现指纹（本机实测）
+artifact=D:/Program AI/Deepseek Harness/resources/app.asar
+artifact_sha256=5fa8a6b21bceb8f3e99e30efa2270efd0cc773a11e42aa0488f804a64b34e637
+desktop_package=@deepseek-ai/dsh-desktop@0.2.2-rc.1
+asar_file_count=22102
+
+# 宿主关键包（全部同版本，取自 app.asar 内 package.json）
+host_pkg_session_persistence=@deepseek-ai/dsh-session-persistence-jsonl@0.2.2-rc.1
+host_pkg_session_controller=@deepseek-ai/dsh-api-session-controller@0.2.2-rc.1
+
+# 本机观察值（不达标，见 spike/REPORT.md 阻塞项）
+node_observed=22.22.2
+node_required=>=24.9
+pnpm_observed=NOT_INSTALLED
+pnpm_required=11.x
+dsh_cli_on_path=false

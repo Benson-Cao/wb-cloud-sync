@@ -1,0 +1,10 @@
+# Spike 运行产物：证据 JSON 保留入库（W1 会签附件），临时 DSH_HOME 不入库
+spike/evidence/dsh-home-*/
+spike/evidence/plugin-probe.json
+spike/evidence/host-probe.full.json
+node_modules/
+*.tgz
+
+# 例外：预打好的可安装 tarball 需要随仓库分发
+!dist/
+!dist/*.tgz

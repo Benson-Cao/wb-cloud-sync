@@ -1,0 +1,34 @@
+{
+  "name": "dsh-wb-cloud-sync-spike",
+  "version": "0.1.0",
+  "description": "WB-Cloud-Sync W1 Spike probe bundle — read-only verification of DSH host seams (session/event, sessionPersistence, webServer).",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "wb-cloud-sync",
+    "spike"
+  ],
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.2-rc.1 <0.3.0"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "verify": "node spike/check-plugin.mjs && node spike/probe-host.mjs"
+  }
+}

@@ -1,0 +1,168 @@
+{
+  "schema": "wbsync-spike-check/1",
+  "capturedAt": "2026-11-07T08:41:02.615Z",
+  "tempDshHome": "D:\\Dw phone\\wb-cloud-sync\\spike\\evidence\\dsh-home-vFEZCB",
+  "nodeVersion": "22.22.2",
+  "staticRules": [
+    {
+      "id": "R1",
+      "label": "具名导出 name",
+      "pattern": "export const name\\s*=",
+      "expect": "present",
+      "verdict": "PASS"
+    },
+    {
+      "id": "R2",
+      "label": "inject 声明依赖",
+      "pattern": "export const inject\\s*=",
+      "expect": "present",
+      "verdict": "PASS"
+    },
+    {
+      "id": "R3",
+      "label": "所有注册放进 ctx.effect",
+      "pattern": "ctx\\.effect\\s*\\(",
+      "expect": "present",
+      "verdict": "PASS"
+    },
+    {
+      "id": "R4",
+      "label": "effect 返回 disposer",
+      "pattern": "return\\s*\\(\\)\\s*=>",
+      "expect": "present",
+      "verdict": "PASS"
+    },
+    {
+      "id": "R5",
+      "label": "禁止 open(id,'write')",
+      "pattern": "\\.open\\s*\\([^)]*['\"]write['\"]",
+      "expect": "absent",
+      "verdict": "PASS"
+    },
+    {
+      "id": "R6",
+      "label": "禁止 append 写入",
+      "pattern": "\\.append\\s*\\(",
+      "expect": "absent",
+      "verdict": "PASS"
+    },
+    {
+      "id": "R7",
+      "label": "事件回调不落正文",
+      "pattern": "event\\.data",
+      "expect": "absent",
+      "verdict": "PASS"
+    },
+    {
+      "id": "R8",
+      "label": "Config 用 Schema.object（P1 强制）",
+      "pattern": "Schema\\.object\\s*\\(",
+      "expect": "present",
+      "verdict": "WAIVED",
+      "reason": "探针插件零依赖复跑，故意不引 schemastery；P1 产品插件不得豁免"
+    }
+  ],
+  "dynamic": {
+    "loaded": true,
+    "checks": [
+      {
+        "id": "D1",
+        "label": "apply() 不抛错",
+        "verdict": "PASS"
+      },
+      {
+        "id": "D2",
+        "label": "name 唯一可读",
+        "verdict": "PASS",
+        "observed": "wbsync-spike-probe"
+      },
+      {
+        "id": "D3",
+        "label": "inject 含 webServer + sessionPersistence",
+        "verdict": "PASS",
+        "observed": [
+          "webServer",
+          "sessionPersistence"
+        ]
+      },
+      {
+        "id": "D4",
+        "label": "订阅 session/event",
+        "verdict": "PASS"
+      },
+      {
+        "id": "D5",
+        "label": "注册 exact 路由",
+        "verdict": "PASS",
+        "observed": [
+          "exact:/__wbsync/spike"
+        ]
+      },
+      {
+        "id": "D6",
+        "label": "事件回调只留结构，不落 data 正文",
+        "verdict": "PASS",
+        "observed": {
+          "subjectType": "object",
+          "subjectHasHeader": true,
+          "subjectId": "spike-session-id",
+          "eventKeys": [
+            "data",
+            "seq",
+            "time",
+            "type"
+          ],
+          "type": "user/message",
+          "seq": 7
+        }
+      },
+      {
+        "id": "D7",
+        "label": "卸载后无残留监听/路由",
+        "verdict": "PASS",
+        "observed": {
+          "residualListeners": 0,
+          "residualRoutes": 0,
+          "disposals": [
+            "route:exact:/__wbsync/spike",
+            "listener:session/event"
+          ]
+        }
+      },
+      {
+        "id": "D8",
+        "label": "证据文件写出",
+        "verdict": "PASS",
+        "observed": "D:\\Dw phone\\wb-cloud-sync\\spike\\evidence\\plugin-probe.json"
+      }
+    ],
+    "errors": [],
+    "services": {
+      "sessionPersistence": {
+        "present": true,
+        "methods": [
+          "list",
+          "open",
+          "append"
+        ]
+      },
+      "webServer": {
+        "present": true,
+        "register": true
+      },
+      "effect": true,
+      "on": true
+    },
+    "calls": [
+      "effect:wbsync-spike: probe registrations",
+      "on:session/event",
+      "route:exact:/__wbsync/spike"
+    ]
+  },
+  "real": {
+    "verdict": "SKIP",
+    "reason": "dsh CLI 不在 PATH；本机无法自动做真机加载验证",
+    "dshCliDetected": null
+  },
+  "verdict": "PASS"
+}

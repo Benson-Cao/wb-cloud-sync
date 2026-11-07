@@ -1,0 +1,438 @@
+{
+  "schema": "wbsync-spike/1",
+  "env": {
+    "capturedAt": "2026-11-07T08:52:23.423Z",
+    "platform": "win32",
+    "arch": "x64",
+    "nodeVersion": "22.22.2",
+    "nodeSatisfies249": false,
+    "nodeOptions": "--require=\"D:/Program Files/WorkBuddy/resources/app.asar.unpacked/cli/vendor/shim/node-language-shim.cjs\"",
+    "nodeOptionsHasStripTypesGuard": false,
+    "pnpmVersion": null,
+    "corepackVersion": null,
+    "dshCliOnPath": null,
+    "dshHome": "C:\\Users\\Administrator\\.dsh",
+    "dshHomeExists": true,
+    "asarPath": "D:/Program AI/Deepseek Harness/resources/app.asar",
+    "asarExists": true,
+    "asarSha256": "5fa8a6b21bceb8f3e99e30efa2270efd0cc773a11e42aa0488f804a64b34e637",
+    "host": {
+      "desktopPackage": "@deepseek-ai/dsh-desktop",
+      "version": "0.2.2-rc.1",
+      "upstreamRepo": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+      "upstreamGitHead": null,
+      "asarFileCount": 22102
+    }
+  },
+  "questions": {
+    "Q1": {
+      "verdict": "PASS",
+      "seams": {
+        "session/event": {
+          "total": 85,
+          "hits": [
+            {
+              "file": "dsh-acp/lib/index.js"
+            },
+            {
+              "file": "dsh-agent-instructions/lib/index.js"
+            },
+            {
+              "file": "dsh-agent-loop/lib/index.js"
+            }
+          ]
+        },
+        "ctx.on(\"session/event\"": {
+          "total": 36,
+          "hits": [
+            {
+              "file": "dsh-acp/lib/index.js"
+            },
+            {
+              "file": "dsh-agent-instructions/lib/index.js"
+            },
+            {
+              "file": "dsh-agent-loop/lib/index.js"
+            }
+          ]
+        },
+        "ctx.on('session/event'": {
+          "total": 16,
+          "hits": [
+            {
+              "file": "dsh-agent-preset-registry/lib/types/index.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/types/history/listener.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/types/index.js"
+            }
+          ]
+        },
+        "persistContiguous": {
+          "total": 3,
+          "hits": [
+            {
+              "file": "dsh-session-persistence-jsonl/lib/index.js"
+            },
+            {
+              "file": "dsh-session-persistence-jsonl/lib/index.js"
+            },
+            {
+              "file": "dsh-session-persistence-jsonl/lib/index.js"
+            }
+          ]
+        }
+      },
+      "log": {
+        "file": "session-912ea4b8-2f1e-4516-836d-39b5b13798d6",
+        "compressedBytes": 857593,
+        "zstdFrames": 370,
+        "records": 668,
+        "decodeErrors": 0,
+        "totalSessionLogs": 21,
+        "surfaceOps": {
+          "append": 163
+        },
+        "sourceRefsByType": {
+          "tool/result": 73
+        },
+        "headerKeys": [
+          "agentPreset",
+          "createdAt",
+          "cwd",
+          "delegationDepth",
+          "id",
+          "isSeeded",
+          "type",
+          "version"
+        ],
+        "headerType": "session",
+        "headerVersion": 4,
+        "eventCount": 667,
+        "firstSeq": 0,
+        "lastSeq": 666,
+        "contiguous": true,
+        "seqEqualsLogLength": true,
+        "eventShapes": {
+          "data,seq,time,type": 504,
+          "data,seq,surfaceOp,time,type": 90,
+          "data,seq,sourceEventSeqs,surfaceOp,time,type": 73
+        },
+        "eventTypes": {
+          "permission/preset": 2,
+          "sandbox/mode": 2,
+          "approval/policy": 2,
+          "subagent/model-selection-policy": 1,
+          "agent-preset/selected": 3,
+          "session/end-seed": 7,
+          "agent/inbox/spliced": 16,
+          "turn/start": 5,
+          "step/start": 73,
+          "system/message": 1,
+          "user/message": 16,
+          "request/header": 4,
+          "request/context": 1,
+          "session/title": 2,
+          "session/title-llm-request": 1,
+          "session-log-deepseek/delivery-accepted": 77,
+          "assistant/message": 73,
+          "tool/call": 73,
+          "job/registered": 65,
+          "job/settled": 65,
+          "tool/result": 73,
+          "step/end": 73,
+          "approval/asked": 7,
+          "approval/decided": 7,
+          "assistant/attempt": 3,
+          "llm/retry": 3,
+          "llm/retry-started": 3,
+          "turn/end": 5,
+          "command/run": 1,
+          "command/done": 1,
+          "workspace/changes": 1,
+          "subagent/catalog": 1
+        },
+        "ignorableFieldCount": 0,
+        "timeFieldCount": 667,
+        "replay": {
+          "sinceSeq": 400,
+          "expected": 266,
+          "returned": 266,
+          "first": 401,
+          "last": 666
+        }
+      }
+    },
+    "Q2": {
+      "verdict": "PASS",
+      "seams": {
+        "async prompt(request": {
+          "total": 11,
+          "hits": [
+            {
+              "file": "dsh-api-session-controller/lib/index.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/index.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/typert.host.js"
+            }
+          ]
+        },
+        "hasPromptRequest": {
+          "total": 2,
+          "hits": [
+            {
+              "file": "dsh-api-session-controller/lib/index.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/types/commands.js"
+            }
+          ]
+        },
+        "rpcId 幂等键": {
+          "total": 4,
+          "hits": [
+            {
+              "file": "dsh-api-session-controller/lib/index.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/index.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/types/commands.js"
+            }
+          ]
+        },
+        "user-rpc 来源": {
+          "total": 0,
+          "hits": []
+        },
+        "SessionAlreadyOwnedError": {
+          "total": 16,
+          "hits": [
+            {
+              "file": "dsh-api-session-controller/lib/index.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/index.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/types/agent.js"
+            }
+          ]
+        },
+        "session/writer-held": {
+          "total": 8,
+          "hits": [
+            {
+              "file": "dsh-api-session-controller/lib/index.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/typert.host.js"
+            },
+            {
+              "file": "dsh-api-session-controller/lib/typert.host.js"
+            }
+          ]
+        },
+        "open(id,'write') 调用": {
+          "total": 0,
+          "hits": []
+        }
+      }
+    },
+    "Q3": {
+      "verdict": "PASS",
+      "seams": {
+        "async list(options": {
+          "total": 5,
+          "hits": [
+            {
+              "file": "dsh-llm-deepseek/lib/index.js"
+            },
+            {
+              "file": "dsh-session-persistence-jsonl/lib/index.js"
+            },
+            {
+              "file": "dsh-skill-filesystem/lib/index.js"
+            }
+          ]
+        },
+        "async open(id, access": {
+          "total": 1,
+          "hits": [
+            {
+              "file": "dsh-session-persistence-jsonl/lib/index.js"
+            }
+          ]
+        },
+        "read 句柄": {
+          "total": 1,
+          "hits": [
+            {
+              "file": "dsh-session-persistence-jsonl/lib/index.js"
+            }
+          ]
+        },
+        "async append(events": {
+          "total": 1,
+          "hits": [
+            {
+              "file": "dsh-session-persistence-jsonl/lib/index.js"
+            }
+          ]
+        },
+        "assertOpen": {
+          "total": 33,
+          "hits": [
+            {
+              "file": "dsh-acp/lib/index.js"
+            },
+            {
+              "file": "dsh-acp/lib/index.js"
+            },
+            {
+              "file": "dsh-acp/lib/index.js"
+            }
+          ]
+        },
+        "ctx.get(\"sessionPersistence\")": {
+          "total": 14,
+          "hits": [
+            {
+              "file": "dsh-agent-loop/lib/index.js"
+            },
+            {
+              "file": "dsh-agent-loop/lib/index.js"
+            },
+            {
+              "file": "dsh-agent-loop/lib/index.js"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "documentationDeltas": [
+    {
+      "id": "D-01",
+      "doc": "04 §3 / FR-4.3 / TC-1.3",
+      "topic": "assistant/chunk 折叠",
+      "observed": {
+        "presentInLog": false,
+        "sampleEventTypes": 32
+      },
+      "note": "真实日志按最终 assistant/message 落盘；流式 chunk 是否被持久化需在真机跑一轮确认"
+    },
+    {
+      "id": "D-02",
+      "doc": "04 §3 / FR-4.2 / BR-4 / TC-1.2",
+      "topic": "未知事件 ignorable 标记",
+      "observed": {
+        "ignorableFieldCount": 0,
+        "unlistedTypes": [
+          "permission/preset",
+          "sandbox/mode",
+          "approval/policy",
+          "subagent/model-selection-policy",
+          "agent-preset/selected",
+          "agent/inbox/spliced",
+          "session/title",
+          "session/title-llm-request",
+          "session-log-deepseek/delivery-accepted",
+          "job/registered",
+          "job/settled",
+          "approval/asked",
+          "approval/decided",
+          "assistant/attempt",
+          "llm/retry",
+          "llm/retry-started",
+          "command/run",
+          "command/done",
+          "workspace/changes",
+          "subagent/catalog"
+        ]
+      },
+      "note": "客户端会对着大量未分类事件；需明确默认跳过策略"
+    },
+    {
+      "id": "D-03",
+      "doc": "06 §3.2 最小骨架",
+      "topic": "ctx.on('session/event') 第一参数",
+      "observed": {},
+      "note": "宿主订阅回调首参是 session 对象，不是 sessionId 字符串；骨架里直接当 id 透传会出错"
+    },
+    {
+      "id": "D-04",
+      "doc": "04 §2 / ADR-001",
+      "topic": "自建 Idempotency 与 RouteLease 表",
+      "observed": {
+        "hostNativeIdempotency": true,
+        "hostNativeWriterLease": true
+      },
+      "note": "宿主已用 requestId/rpcId 幂等 + SessionAlreadyOwnedError 单写者；CP 自建表的必要性需重评"
+    },
+    {
+      "id": "D-05",
+      "doc": "04 §2 SessionHeader 注释",
+      "topic": "parentSession / origin 字段",
+      "observed": {
+        "headerKeys": [
+          "agentPreset",
+          "createdAt",
+          "cwd",
+          "delegationDepth",
+          "id",
+          "isSeeded",
+          "type",
+          "version"
+        ]
+      },
+      "note": "样本 header 未出现这两个字段（可能可选，不能断言不存在）"
+    },
+    {
+      "id": "D-06",
+      "doc": "00 / 06 §1 环境基线",
+      "topic": "Node ≥ 24.9 与 pnpm 11",
+      "observed": {
+        "nodeVersion": "22.22.2",
+        "pnpmVersion": null,
+        "dshCliOnPath": null
+      },
+      "note": "本机不满足基线；Spike 离线取证不受影响，但 P1 构建链需先补齐"
+    },
+    {
+      "id": "D-07",
+      "doc": "04 §3 / FR-4.3 / TC-1.3",
+      "topic": "surfaceOp 与 sourceEventSeqs 真实语义",
+      "observed": {
+        "surfaceOps": {
+          "append": 163
+        },
+        "sourceRefsByType": {
+          "tool/result": 73
+        },
+        "eventShapes": {
+          "data,seq,time,type": 504,
+          "data,seq,surfaceOp,time,type": 90,
+          "data,seq,sourceEventSeqs,surfaceOp,time,type": 73
+        }
+      },
+      "note": "宿主事件自带 surfaceOp 投影指令；sourceEventSeqs 实测只出现在 tool/result 上用于关联 tool/call，并非 chunk 折叠字段；04 §3 的折叠规则需改写"
+    }
+  ],
+  "gate": {
+    "spikesPass": true,
+    "blockers": [
+      "ENV: Node < 24.9",
+      "ENV: pnpm 未安装",
+      "ENV: dsh CLI 不在 PATH，真机加载验证走离线 mock",
+      "PIN: 宿主 npm 包无 gitHead，pinned-commit.txt 暂以构建指纹代替"
+    ]
+  },
+  "redacted": "宿主源码片段已移除；在本机运行 node probe-host.mjs --full 可生成完整证据（不入库）"
+}
