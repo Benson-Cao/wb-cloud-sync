@@ -5,7 +5,7 @@
 
 ## 结论先行
 
-**自动项 8/8 PASS；P0 唯一剩余硬阻塞是「会签」。** 会签完成前不得进入 P1 编码（`01` §9 / `05` W1）。
+**自动项 9/9 PASS；P0 唯一剩余硬阻塞是「会签」。** 会签完成前不得进入 P1 编码（`01` §9 / `05` W1）。
 当前门禁状态：`BLOCKED_BY_SIGNOFF`。
 
 ## 一、自动核查（可复跑，无需人工判断）
@@ -20,6 +20,7 @@
 | G6 | TC-4.10 真机卸载残留（REPORT §4.1.3） | PASS · 404 |
 | G7 | ADR-007~009 已写入 `03` | PASS · 3/3 |
 | G8 | 仓库跟踪文件无 PAT / 密钥 | PASS · 0 命中 |
+| G9 | 发布包内容与仓库源码逐文件一致（解包比对） | PASS · 5/5 文件 |
 
 复跑：`node scripts/gate-check.mjs --check`（自动项全过 exit 0）；CI 用 `--check --assert-fresh`（`.github/workflows/gate.yml`）。
 
@@ -86,7 +87,7 @@ Get-NetTCPConnection -State Listen | Where-Object {
 - 三档：`CURRENT`（data 与 narrative 一致）／`DRIFTED`（仅描述漂移，不阻断）／`STALE`（data 变 / 旧格式快照 / 超期）。
 - 兜底上限 **30 天**：即使数据没变，超过 30 天的快照也判 `STALE`。
 - 一句话：**改错别字不拦人，重新打包不误报，运行代码或实测证据一变就拦死。**
-- ⚠️ 已知缺口：「发布物与源码是否一致」目前**没有自动校验**（tgz 不可复现，无法用 sha 比对）——记为 P1 待办，会签时需人工核对 `dist/*.tgz` 的 `index.js` 与仓库一致。
+- ✅ 「发布物与源码是否一致」由 **G9 解包比对**覆盖：不比 tgz 本身（不可复现），而是解包后逐文件比 sha256，5/5 一致才 PASS。实测：改 `index.js` 但不 repack → G9 FAIL、自动项 8/9、exit 1。因此**保留 `dist/*.tgz` 在仓库、继续走 GitHub 分发**是安全的。
 - 会签时请抄下 `capturedAt` / `git.head` / `fingerprints.data` 摘要写进签署栏备注，事后可复核。
 
 ## 五、签署栏

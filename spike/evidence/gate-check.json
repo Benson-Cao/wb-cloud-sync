@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/3",
-  "capturedAt": "2026-11-07T11:11:16.794Z",
+  "capturedAt": "2026-11-07T11:59:23.823Z",
   "git": {
-    "head": "3d9c8664dc9ee8024c755ee720eebb89346d9ace",
+    "head": "51161f3663aa09e5872e818293a3d6357fca891d",
     "branch": "main",
     "worktreeClean": false
   },
@@ -12,22 +12,28 @@
     "dataChanged": [
       "check-plugin.json"
     ],
-    "artifactChanged": [],
+    "artifactChanged": [
+      "dist-tarball"
+    ],
     "narrativeChanged": [],
-    "notes": [],
-    "previousCapturedAt": "2026-11-07T11:10:46.608Z",
-    "previousGitHead": "3d9c8664dc9ee8024c755ee720eebb89346d9ace",
+    "notes": [
+      "发布物已重建（仅记录，不影响判定）：dist-tarball"
+    ],
+    "previousCapturedAt": "2026-11-07T11:58:38.460Z",
+    "previousGitHead": "51161f3663aa09e5872e818293a3d6357fca891d",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
       "previousReason": "运行代码/证据已变化（阻断）：check-plugin.json",
-      "capturedAt": "2026-11-07T11:10:46.608Z",
-      "gitHead": "3d9c8664dc9ee8024c755ee720eebb89346d9ace",
+      "capturedAt": "2026-11-07T11:58:38.460Z",
+      "gitHead": "51161f3663aa09e5872e818293a3d6357fca891d",
       "dataChanged": [
         "check-plugin.json"
       ],
-      "artifactChanged": [],
+      "artifactChanged": [
+        "dist-tarball"
+      ],
       "narrativeChanged": []
     }
   },
@@ -37,16 +43,43 @@
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
       "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
-      "check-plugin.json": "730ab052c47e6b38e95bdba7eeb3e1f1a5583507b91753175ac640a6eef9d52d"
+      "check-plugin.json": "9fa9b007eecf77766e1d91da7ab50df1cfd487c20db43817ff9cd618a46263d3"
     },
     "artifact": {
-      "dist-tarball": "b8549748cc0f4efa17c94cd13cda80fb68417f6d3330e760c6bc380842cf52a7"
+      "dist-tarball": "a4112bb894619efba2b45054c68fc8ff0345a5ea8faadb6eaef09876a47c9f99"
     },
     "narrative": {
       "REPORT.md": "05b1d338f6797668fc26e04cecdd67c23ae2720f59b08dd56079f98ded7549dc",
       "PROTOCOL.md": "249aeab1fb45b80745aada77af0b887add995f820177ffc61552b37498bf13d6"
     }
   },
+  "tarballFiles": [
+    {
+      "file": "index.js",
+      "present": true,
+      "matched": true
+    },
+    {
+      "file": "cordis.patch.yml",
+      "present": true,
+      "matched": true
+    },
+    {
+      "file": "package.json",
+      "present": true,
+      "matched": true
+    },
+    {
+      "file": "README.md",
+      "present": true,
+      "matched": true
+    },
+    {
+      "file": "LICENSE",
+      "present": true,
+      "matched": true
+    }
+  ],
   "automated": [
     {
       "id": "G1",
@@ -87,10 +120,15 @@
       "id": "G8",
       "label": "仓库跟踪文件无 PAT/密钥命中",
       "pass": true
+    },
+    {
+      "id": "G9",
+      "label": "发布包内容与仓库源码逐文件一致（解包比对）",
+      "pass": true
     }
   ],
-  "automatedPassed": 8,
-  "automatedTotal": 8,
+  "automatedPassed": 9,
+  "automatedTotal": 9,
   "manual": [
     {
       "id": "M1",

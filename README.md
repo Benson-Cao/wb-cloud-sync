@@ -126,7 +126,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 
 > ⚠️ **18:49:52 DSH 重启过**（新 PID 26668，端口 **50973 → 55056**）。重启后 `55056/__wbsync/spike` 也是 404，但只证明「重启后没加载已卸载插件」，**不可复用上面的强证据结论**。完整时间线见 `SIGN-OFF.md` §四。顺带确认 3082 是 `dsh-engine-switch` 反向代理口（转发 3080 未启动故 502）；当时 webServer 是 50973、现在是 55056。
 
-唯一残留是历史证据文件 `~/.dsh/wbsync-spike/probe.json`（不违反 TC-4.10，P1 产品插件需定保留 / 清理策略）。**P0 门禁自动项 8/8 PASS，只剩四方会签 + ADR 会签** → 见 [`SIGN-OFF.md`](SIGN-OFF.md)（会签包）与 `node scripts/gate-check.mjs --check`（自动核查）。
+唯一残留是历史证据文件 `~/.dsh/wbsync-spike/probe.json`（不违反 TC-4.10，P1 产品插件需定保留 / 清理策略）。**P0 门禁自动项 9/9 PASS，只剩四方会签 + ADR 会签** → 见 [`SIGN-OFF.md`](SIGN-OFF.md)（会签包）与 `node scripts/gate-check.mjs --check`（自动核查）。
 
 ---
 
@@ -140,7 +140,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 ├─ dist/*.tgz                   # 预打好的可安装 tarball
 ├─ PROTOCOL.md                  # 04 的发布副本（sync-protocol.mjs 单向生成）
 ├─ CHANGELOG.md                 # 契约变更记录（wbsync/1 r1）
-├─ SIGN-OFF.md                  # P0 会签包：自动项 8/8、待签 M1~M6、签署栏
+├─ SIGN-OFF.md                  # P0 会签包：自动项 9/9、待签 M1~M6、签署栏
 ├─ pinned-commit.txt            # DSH 锁定基线 66491b0…（dsh-v0.2.2-rc.1）
 ├─ docs/                        # 设计冻结包 v1.1（11 份，含 ADR-007~009）
 ├─ scripts/

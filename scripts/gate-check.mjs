@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { listTarEntries } from './lib/tar.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (p) => {
@@ -135,6 +136,31 @@ if ((status === 'CURRENT' || status === 'DRIFTED') && ageDays !== null && ageDay
   freshness.reason = `快照已 ${ageDays} 天，超过 ${freshness.maxAgeDays} 天上限`
 }
 
+// G9：发布包内容与仓库源码逐文件一致。
+// tgz 不可复现（gzip 头带时间），所以只比对**解包后的文件 sha**，不比 tgz 本身。
+// 这样既能保证「装到的东西 = 源码」，又不会被 repack 误报。
+const TARBALL = join(ROOT, 'dist/dsh-wb-cloud-sync-spike-0.1.0.tgz')
+const TARBALL_MAP = {
+  'package/index.js': 'index.js',
+  'package/cordis.patch.yml': 'cordis.patch.yml',
+  'package/package.json': 'package.json',
+  'package/README.md': 'README.md',
+  'package/LICENSE': 'LICENSE',
+}
+let tarballChecks = []
+try {
+  const entries = listTarEntries(readFileSync(TARBALL))
+  tarballChecks = Object.entries(TARBALL_MAP).map(([inTar, inRepo]) => {
+    const entry = entries.find((e) => e.path === inTar)
+    return {
+      file: inRepo,
+      present: Boolean(entry),
+      matched: Boolean(entry) && entry.sha256 === sha256(inRepo),
+    }
+  })
+} catch { tarballChecks = [] }
+const tarballConsistent = tarballChecks.length > 0 && tarballChecks.every((c) => c.present && c.matched)
+
 const automated = [
   { id: 'G1', label: '三问离线取证 Q1/Q2/Q3 全 PASS',
     pass: ['Q1', 'Q2', 'Q3'].every((q) => hostProbe.questions?.[q]?.verdict === 'PASS') },
@@ -152,6 +178,8 @@ const automated = [
     pass: (arch.match(/^### ADR-00[789]/gm) ?? []).length === 3 },
   { id: 'G8', label: '仓库跟踪文件无 PAT/密钥命中',
     pass: secretClean },
+  { id: 'G9', label: '发布包内容与仓库源码逐文件一致（解包比对）',
+    pass: tarballConsistent },
 ]
 
 // 脚本判不了、必须由人签署 / 人工复核的项
@@ -176,6 +204,7 @@ const result = {
   pinnedCommit: upstreamCommit,
   freshness,
   fingerprints,
+  tarballFiles: tarballChecks,
   automated,
   automatedPassed: automated.filter((c) => c.pass).length,
   automatedTotal: automated.length,
