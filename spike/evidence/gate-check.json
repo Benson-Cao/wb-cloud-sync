@@ -1,18 +1,37 @@
 {
   "schema": "wbsync-gate-check/1",
-  "capturedAt": "2026-11-07T10:57:27.176Z",
+  "capturedAt": "2026-11-07T11:02:31.917Z",
   "git": {
-    "head": "274b752faf8f26b1b850edc50db867a75e11d20f",
+    "head": "c50ef2dbb4025c0affefe360abe49ee0bebf46e2",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
+  "freshness": {
+    "status": "CURRENT",
+    "previousCapturedAt": "2026-11-07T11:01:37.896Z",
+    "previousGitHead": "c50ef2dbb4025c0affefe360abe49ee0bebf46e2",
+    "changedInputs": [
+      "check-plugin.json"
+    ],
+    "ageDays": 0,
+    "maxAgeDays": 30,
+    "reason": "证据输入已变化：check-plugin.json",
+    "supersedes": {
+      "previousStatus": "STALE",
+      "capturedAt": "2026-11-07T11:01:37.896Z",
+      "gitHead": "c50ef2dbb4025c0affefe360abe49ee0bebf46e2",
+      "changedInputs": [
+        "check-plugin.json"
+      ]
+    }
+  },
   "evidenceSha256": {
     "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
-    "check-plugin.json": "2922e8df21ce3eec230f9d86be6e905596095af4074753d1388a6bc9ff07d420",
+    "check-plugin.json": "f1acad52f08519843609de2314226240ff57822394c107f1433ce15f9b57d4f2",
     "REPORT.md": "05b1d338f6797668fc26e04cecdd67c23ae2720f59b08dd56079f98ded7549dc",
     "PROTOCOL.md": "249aeab1fb45b80745aada77af0b887add995f820177ffc61552b37498bf13d6",
-    "dist-tarball": "8348fdf9e495b1e71dd94a2b644d88f234492347dc88155bbef406dc0f4ba862"
+    "dist-tarball": "1aa73299902c2b09c12c2bc95679cfe9c0abdfabdb527d5915f31f71da2a95a6"
   },
   "automated": [
     {
@@ -52,7 +71,7 @@
     },
     {
       "id": "G8",
-      "label": "git 全历史无 PAT/密钥命中",
+      "label": "仓库跟踪文件无 PAT/密钥命中",
       "pass": true
     }
   ],

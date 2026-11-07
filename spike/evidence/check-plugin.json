@@ -1,7 +1,7 @@
 {
   "schema": "wbsync-spike-check/1",
-  "capturedAt": "2026-11-07T08:41:02.615Z",
-  "tempDshHome": "D:\\Dw phone\\wb-cloud-sync\\spike\\evidence\\dsh-home-vFEZCB",
+  "capturedAt": "2026-11-07T11:02:31.629Z",
+  "tempDshHome": "D:\\Dw phone\\wb-cloud-sync\\spike\\evidence\\dsh-home-Kio6e6",
   "nodeVersion": "22.22.2",
   "staticRules": [
     {
@@ -160,9 +160,7 @@
     ]
   },
   "real": {
-    "verdict": "SKIP",
-    "reason": "dsh CLI 不在 PATH；本机无法自动做真机加载验证",
-    "dshCliDetected": null
+    "verdict": "NOT_REQUESTED"
   },
   "verdict": "PASS"
 }

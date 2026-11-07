@@ -19,9 +19,9 @@
 | G5 | 真机加载 + 运行时事件闭环（REPORT §4.1.2） | PASS · 19 条 / seq 4→22 |
 | G6 | TC-4.10 真机卸载残留（REPORT §4.1.3） | PASS · 404 |
 | G7 | ADR-007~009 已写入 `03` | PASS · 3/3 |
-| G8 | git 全历史无 PAT / 密钥 | PASS · 0 命中 |
+| G8 | 仓库跟踪文件无 PAT / 密钥 | PASS · 0 命中 |
 
-复跑：`node scripts/gate-check.mjs --check`（自动项全过 exit 0）。
+复跑：`node scripts/gate-check.mjs --check`（自动项全过 exit 0）；CI 用 `--check --assert-fresh`（`.github/workflows/gate.yml`）。
 
 ## 二、待签项（脚本判不了，必须由人决定）
 
@@ -64,6 +64,18 @@ Get-NetTCPConnection -State Listen | Where-Object {
   (Get-Process -Id $_.OwningProcess).ProcessName -match 'DeepSeek'
 } | Select-Object LocalPort
 ```
+
+### 快照与 CI 的使用规则（决定：两者都要，语义分开）
+
+| 载体 | 角色 | 何时更新 | 能否作为准入依据 |
+|---|---|---|---|
+| CI 每次运行的 `gate-check.mjs --check` | **闸门**：永远反映当前代码 | 每次 push / PR 自动跑 | **能**，但不落盘、不留档 |
+| `spike/evidence/gate-check.json` | **审计快照**：会签时点的证明 | 证据输入变化时由人重跑并提交 | **仅在 `freshness.status = CURRENT` 时**；`STALE` 只能当历史 |
+
+- 「新鲜」看**证据输入指纹**（`host-probe.json` / `check-plugin.json` / `REPORT.md` / `PROTOCOL.md` / `dist-tarball` 的 sha256），不是 git HEAD —— 只改文档或提交信息不该让快照失效。
+- 兜底上限 **30 天**：即使证据没变，超过 30 天的快照也判 `STALE`。
+- CI 用 `--check --assert-fresh`：快照 `STALE` 直接 exit 2，强制在 PR 里重算并提交，**防止有人拿旧绿灯当今天的准入**。
+- 会签时请抄下 `capturedAt` / `git.head` / `evidenceSha256` 写进签署栏备注，事后可复核。
 
 ## 五、签署栏
 

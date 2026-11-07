@@ -54,6 +54,42 @@ try {
   secretClean = error?.status === 1
 }
 
+// 证据输入指纹：用来判断「入库快照是否还能代表当前证据」
+const evidenceSha = {
+  'host-probe.json': sha256('spike/evidence/host-probe.json'),
+  'check-plugin.json': sha256('spike/evidence/check-plugin.json'),
+  'REPORT.md': sha256('spike/REPORT.md'),
+  'PROTOCOL.md': sha256('PROTOCOL.md'),
+  'dist-tarball': sha256('dist/dsh-wb-cloud-sync-spike-0.1.0.tgz'),
+}
+
+// 新鲜度以「证据输入是否变化」为准，而不是 git HEAD：
+// 只改文档 / 提交信息不该让快照失效，但证据文件一变就必须重算。
+const SNAPSHOT = join(ROOT, 'spike/evidence/gate-check.json')
+let previous = null
+try { previous = JSON.parse(readFileSync(SNAPSHOT, 'utf8')) } catch { /* 首次运行 */ }
+
+const changedInputs = previous?.evidenceSha256
+  ? Object.keys(evidenceSha).filter((k) => previous.evidenceSha256[k] !== evidenceSha[k])
+  : Object.keys(evidenceSha)
+const ageDays = previous?.capturedAt
+  ? Math.floor((Date.now() - Date.parse(previous.capturedAt)) / 86_400_000)
+  : null
+const freshness = {
+  status: !previous ? 'FIRST_RUN' : changedInputs.length === 0 ? 'CURRENT' : 'STALE',
+  previousCapturedAt: previous?.capturedAt ?? null,
+  previousGitHead: previous?.git?.head ?? null,
+  changedInputs: previous ? changedInputs : [],
+  ageDays,
+  maxAgeDays: 30,
+}
+if (freshness.status === 'CURRENT' && ageDays !== null && ageDays > freshness.maxAgeDays) {
+  freshness.status = 'STALE'
+  freshness.reason = `快照已 ${ageDays} 天，超过 ${freshness.maxAgeDays} 天上限`
+} else if (freshness.status === 'STALE' && changedInputs.length) {
+  freshness.reason = `证据输入已变化：${changedInputs.join(', ')}`
+}
+
 const automated = [
   { id: 'G1', label: '三问离线取证 Q1/Q2/Q3 全 PASS',
     pass: ['Q1', 'Q2', 'Q3'].every((q) => hostProbe.questions?.[q]?.verdict === 'PASS') },
@@ -69,7 +105,7 @@ const automated = [
     pass: report.includes('4.1.3') },
   { id: 'G7', label: 'ADR-007~009 已写入 03',
     pass: (arch.match(/^### ADR-00[789]/gm) ?? []).length === 3 },
-  { id: 'G8', label: 'git 全历史无 PAT/密钥命中',
+  { id: 'G8', label: '仓库跟踪文件无 PAT/密钥命中',
     pass: secretClean },
 ]
 
@@ -92,13 +128,8 @@ const result = {
     worktreeClean: (git('status', '--porcelain') ?? '').length === 0,
   },
   pinnedCommit: upstreamCommit,
-  evidenceSha256: {
-    'host-probe.json': sha256('spike/evidence/host-probe.json'),
-    'check-plugin.json': sha256('spike/evidence/check-plugin.json'),
-    'REPORT.md': sha256('spike/REPORT.md'),
-    'PROTOCOL.md': sha256('PROTOCOL.md'),
-    'dist-tarball': sha256('dist/dsh-wb-cloud-sync-spike-0.1.0.tgz'),
-  },
+  freshness,
+  evidenceSha256: evidenceSha,
   automated,
   automatedPassed: automated.filter((c) => c.pass).length,
   automatedTotal: automated.length,
@@ -106,8 +137,26 @@ const result = {
   gate: automated.every((c) => c.pass) ? 'BLOCKED_BY_SIGNOFF' : 'FAIL',
 }
 
-const out = join(ROOT, 'spike/evidence/gate-check.json')
-writeFileSync(out, JSON.stringify(result, null, 2), 'utf8')
+const out = SNAPSHOT
+// --check 只校验不写盘：CI 里不应产生脏 diff；默认模式才生成会签快照
+if (!process.argv.includes('--check')) {
+  // freshness 是「相对上一份快照」的判定；新快照诞生的那一刻本身就是 CURRENT。
+  // 差异留在 supersedes 里可追溯，避免快照自述为 STALE 引起误读。
+  const snapshot = {
+    ...result,
+    freshness: {
+      ...freshness,
+      status: 'CURRENT',
+      supersedes: {
+        previousStatus: freshness.status,
+        capturedAt: freshness.previousCapturedAt,
+        gitHead: freshness.previousGitHead,
+        changedInputs: freshness.changedInputs,
+      },
+    },
+  }
+  writeFileSync(out, JSON.stringify(snapshot, null, 2), 'utf8')
+}
 
 console.log('P0 门禁自动核查 ·', result.capturedAt)
 for (const c of automated) console.log(`  ${c.id} ${(c.pass ? 'PASS' : 'FAIL').padEnd(5)} ${c.label}`)
@@ -115,6 +164,15 @@ console.log(`  自动项 ${result.automatedPassed}/${result.automatedTotal}`)
 console.log('  人工项（不由脚本判定）：')
 for (const m of manual) console.log(`    ${m.id} ${m.status.padEnd(16)} ${m.label}`)
 console.log('  门禁:', result.gate, '| git:', result.git.branch, result.git.head?.slice(0, 8), '| clean:', result.git.worktreeClean)
+console.log('  快照:', freshness.status, freshness.reason ? `(${freshness.reason})` : `(age ${ageDays ?? 0}d / max ${freshness.maxAgeDays}d)`)
 console.log('  证据:', out)
 
-if (process.argv.includes('--check')) process.exitCode = automated.every((c) => c.pass) ? 0 : 1
+if (process.argv.includes('--check')) {
+  const ok = automated.every((c) => c.pass)
+  if (process.argv.includes('--assert-fresh') && freshness.status !== 'CURRENT') {
+    console.error(`  FAIL: 快照不新鲜（${freshness.status}）→ 先运行 node scripts/gate-check.mjs 重算`)
+    process.exitCode = 2
+  } else {
+    process.exitCode = ok ? 0 : 1
+  }
+}

@@ -1,0 +1,46 @@
+# P0 契约与门禁 · CI 闸门
+#
+# 设计原则：**CI 每次重算**才是准入依据；仓库里的 gate-check.json 只是会签时点的
+# 审计快照，用 --assert-fresh 保证它没有过期（证据输入一变就 STALE）。
+#
+# 这里不跑 probe-host.mjs：它需要本机 Electron app.asar，CI 没有。
+# 该脚本的产物（host-probe.json）随仓库提交，由 gate-check 校验其存在与结论。
+
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: 契约与门禁（Node 24）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 环境自检
+        run: node -v
+
+      - name: PROTOCOL.md 与 docs/04 单向同步
+        run: node scripts/sync-protocol.mjs --check
+
+      # 顺序有讲究：先读「已入库证据」判定门禁，再跑会写盘的 check-plugin，
+      # 否则 CI 刚生成的证据会把已提交的快照判成 STALE。
+      - name: P0 门禁自动项 + 快照新鲜度
+        run: node scripts/gate-check.mjs --check --assert-fresh
+
+      - name: 插件结构 / 可逆副作用（零依赖 mock）
+        run: node spike/check-plugin.mjs
+
+      - name: 发布包可打包
+        run: npm pack --dry-run
