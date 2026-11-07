@@ -62,19 +62,28 @@ dsh --profile web --dump-config | grep wb-cloud-sync-spike
 
 **2. 状态路由返回探针结果**
 
-```bash
-# ⚠️ 本机若有全局 http_proxy，测 localhost 必须绕代理，否则会拿到代理的 404/502
-curl --noproxy '*' -s http://127.0.0.1:3080/__wbsync/spike
+桌面版端口是**动态分配**的，先查 DSH 进程实际监听端口（本机实测 `50973`，不是 3080）：
+
+```powershell
+Get-NetTCPConnection -State Listen | Where-Object {
+  (Get-Process -Id $_.OwningProcess).ProcessName -match 'DeepSeek'
+} | Select-Object LocalAddress, LocalPort
 ```
 
-`dsh web` 默认 3080；桌面版端口以实际为准。返回 `{"ok":true,"data":{...}}`，重点看：
+```bash
+# ⚠️ 有全局 http_proxy 时测 localhost 必须绕代理，否则拿到的是代理的 404/502
+PORT=50973   # 换成上面查到的端口
+curl --noproxy '*' -s http://127.0.0.1:$PORT/__wbsync/spike
+```
+
+返回 `{"ok":true,"data":{...}}`，重点看：
 
 | 字段 | 期望 | 说明 |
 |---|---|---|
 | `services.sessionPersistence.present` | `true` | Q3：持久化服务已注入 |
-| `services.sessionPersistence.methods` | 含 `list` / `open` | Q3：枚举与只读回放能力 |
+| `services.sessionPersistence.methods` | 含 `list` / `open` | Q3：枚举与只读回放；`read`/`append` 在 `open()` 返回的 handle 上，不在服务上 |
 | `services.webServer.register` | `true` | 本地具名路由可用 |
-| `eventShapes[]` | 聊一句后出现 `type/seq/data/seq` 形状 | Q1：事件订阅生效，`subjectId` 来自 `session.header.id` |
+| `eventShapes[]` | 聊一句后出现 `data,seq,time,type` 形状 | Q1：事件订阅生效，`subjectId` 来自 `session.header.id` |
 
 **3. 证据文件**
 
@@ -82,14 +91,32 @@ curl --noproxy '*' -s http://127.0.0.1:3080/__wbsync/spike
 $DSH_HOME/wbsync-spike/probe.json     # 未设 DSH_HOME 时为 ~/.dsh/wbsync-spike/probe.json
 ```
 
+> `probe.json` 是 `apply()` 时的**启动快照**，不含后续事件；实时 `eventShapes` 看第 2 步的路由（返回同一个内存对象）。
+
 **4. 卸载后无残留（TC-4.10）**
 
 ```bash
 dsh plugin --profile web remove dsh-wb-cloud-sync-spike
-curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/__wbsync/spike   # 期望 404
+curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wbsync/spike   # 期望 404
 ```
 
 所有注册都经 `ctx.effect` 返回 disposer，卸载应撤回监听与路由。
+
+### 真机验证结果（2026-11-07 18:10 · DSH Desktop 0.2.2-rc.1 / Windows）
+
+装法：**方式 B · Git 仓库直装**，`pnpm-lock.yaml` pinned 到 `551778e`。**未触发 pnpm `allowBuilds` 授权**——本包没有 install/postinstall 脚本，说明 06 §4 / 10 §4 的担心只针对带构建脚本的 git 依赖。
+
+| 检查 | 实测 |
+|---|---|
+| `~/.dsh/wbsync-spike/probe.json` | 存在，648 B，`errors: []`，18:10:44 生成 |
+| `sessionPersistence` | `present: true`，方法 `list / open / create / flush` |
+| `webServer` | `present: true`、`register: true`，`routeRegistered: exact:/__wbsync/spike` |
+| 状态路由 | `127.0.0.1:50973/__wbsync/spike` → **HTTP 200** + 完整 probe JSON |
+| DSH 进程 Node | **24.21.0**（≥ 24.9）；命令行 Node 仍 22.22.2、pnpm 未装、`dsh` CLI 不在 PATH |
+| 端口辨析 | 3080 / 3081 / 3000 无监听；3082 → 502；9230 → 404；**50973 才是 webServer** |
+
+**已验证**：插件进入 Loader 树、两个依赖服务注入成功、注册经 `ctx.effect`、具名路由可用。
+**仍待验证**：① 在 DSH 里发一句话触发 `session/event`，确认回调首参与 `seq` 形状（看路由的 `eventShapes[]`）；② 卸载后路由 404。
 
 ---
 

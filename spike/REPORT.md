@@ -68,7 +68,26 @@
 
 - 静态铁律：R1–R7 全 **PASS**（具名导出、`inject`、`ctx.effect`、disposer、禁 `open(...,'write')`、禁 `append`、不落事件正文）；R8「Config 用 `Schema.object`」**WAIVED** —— 探针为三平台零依赖复跑故意不引 schemastery，**P1 产品插件不得豁免**。
 - 动态：D1–D8 全 **PASS** —— `apply()` 不抛错、`inject` 含 `webServer`+`sessionPersistence`、订阅 `session/event`、注册 `exact:/__wbsync/spike`、模拟事件只留结构、`disposer` 全执行后残留监听 0 / 路由 0（TC-4.10 离线等价）、证据落盘。
-- **真机模式 SKIP**：`dsh` CLI 不在 PATH。脚本只输出待人工执行的命令，**不自动装包、不改用户 profile、不重启 DSH**。
+- **离线真机模式 SKIP**：`dsh` CLI 不在 PATH，`--real` 只输出待人工执行的命令。
+
+### 4.1 真实 DSH 桌面版验证（2026-11-07 18:10 · Windows / DSH Desktop 0.2.2-rc.1）
+
+用户按根 README **方式 B · Git 仓库直装**：`~/.dsh/profiles/desktop/package.json` 的 bundles 已含 `dsh-wb-cloud-sync-spike`，`pnpm-lock.yaml` pinned 到 `551778e`。**未触发 pnpm `allowBuilds` 授权**（本包无 install/postinstall 脚本），说明 06 §4 / 10 §4 的担心只针对带构建脚本的 git 依赖。
+
+| 检查 | 实测 |
+|---|---|
+| `~/.dsh/wbsync-spike/probe.json` | 存在，648 B，18:10:44 生成，`errors: []` |
+| `services.sessionPersistence` | `present: true`，方法 `list / open / create / flush`（`read`/`append` 在 `open()` 返回的 handle 上） |
+| `services.webServer` | `present: true`、`register: true`、`routeRegistered: exact:/__wbsync/spike` |
+| `ctx.effect` / `ctx.on` | 均 `true` |
+| 状态路由 | `127.0.0.1:50973/__wbsync/spike` → **HTTP 200** + 完整 probe JSON |
+| DSH 进程 Node | **24.21.0**（≥ 24.9）；命令行 Node 22.22.2 / pnpm 未装 / `dsh` CLI 不在 PATH |
+| 端口辨析 | 3080 / 3081 / 3000 无监听；3082 → 502；9230 → 404；**50973 才是 webServer** |
+
+→ **插件已进入 Loader 树、两个依赖服务注入成功、`ctx.effect` 注册生效、具名路由可用**，Q2/Q3 的运行时前提成立。
+
+**未覆盖**：`eventShapes[]` 仍为空（需发一句话触发 `session/event`）；卸载后 404 未验。
+> `probe.json` 是 `apply()` 的启动快照；实时 `eventShapes` 由状态路由返回同一个内存对象，不回写文件。
 
 ---
 
@@ -76,12 +95,12 @@
 
 | 门禁项 | 判定 | 说明 |
 |---|---|---|
-| 文档会签完成 | **NOT MET** | `01` §9 会签表四方均「待签」；本轮已产出 v1.1 修订稿 + ADR-007~009（「提议中」），待会签 |
-| W1 Spike 通过 | **PARTIAL** | 三问离线取证 **PASS**；真机加载随可安装 bundle 发布（见根 README），待在 DSH 里执行并取 `probe.json`；本机 `dsh` CLI 缺失 |
+| 文档会签完成 | **NOT MET** | `01` §9 会签表四方均「待签」；v1.1 修订稿 + ADR-007~009（「提议中」）待会签 |
+| W1 Spike 通过 | **PARTIAL（加载已 PASS）** | 三问离线取证 PASS + **真机加载 PASS**（§4.1）；仅剩「触发一轮事件确认回调首参与 seq」「卸载后 404」 |
 | pinned commit 锁定 | **MET** | `upstream_commit=66491b05…`（tag `dsh-v0.2.2-rc.1`），tag / commit / package.json 三重交叉验证；另保留 asar SHA256 作二进制指纹 |
 | 协议冻结 | **待会签** | 04 已按 D-01~D-07 修订为 `wbsync/1 r1`，`PROTOCOL.md` 单向同步 + CHANGELOG 齐备；ADR-007~009 仍为「提议中」 |
 
-> **结论：仍不得进入 P1 编码**，但阻塞点已从「三问没答案 / 文档与实测不符 / commit 没锁定」收敛为两项：**真机加载验证**与**四方会签**。按 05 W1 与 01 §9，这两项完成前不得开工。
+> **结论：仍不得进入 P1 编码**，阻塞点已收敛为：**一轮真机事件验证 + 卸载残留**、**四方会签**。按 05 W1 与 01 §9，完成前不得开工。
 
 ---
 
@@ -102,13 +121,13 @@
 
 ## 7. 下一步（按优先级）
 
-**本轮已完成**：① 按 D-01~D-07 修订 10 份文档、新增 ADR-007~009；② 统一 01/02 的 Spike 三问口径；③ 上游 commit SHA 锁定与交叉验证；④ 发布可安装 bundle 与 `PROTOCOL.md` / `CHANGELOG.md` 同步链。
+**已完成**：① 按 D-01~D-07 修订 10 份文档、新增 ADR-007~009；② 统一 01/02 的 Spike 三问口径；③ 上游 commit SHA 锁定；④ 发布可安装 bundle 与 `PROTOCOL.md` / `CHANGELOG.md` 同步链；⑤ **Git 仓库直装 + 真机加载验证 PASS**（§4.1）。
 
 剩余：
 
-1. **真机验证（最高优先）**：在 DSH 里安装 `dist/*.tgz`，确认 `--dump-config` 出现插件、`/__wbsync/spike` 返回 200、取回 `probe.json`；卸载后路由 404。这将把 W1 Spike 从 PARTIAL 变成 PASS。
+1. **补完最后两项真机动作**：在 DSH 里发一句话 → 查 `127.0.0.1:50973/__wbsync/spike` 的 `eventShapes[]`，确认首参是 session 对象、`seq` 连续；然后卸载插件确认路由 404。完成后 W1 Spike 可判 PASS。
 2. **ADR-007~009 会签 + 四方文档会签**（01 §9）：协议字段变更需 ARC 会签，安全项一票否决。
-3. **补环境并接 CI**：Node ≥ 24.9 + pnpm 11，`dsh` CLI 加 PATH；CI 接入 `sync-protocol.mjs --check`、`check-plugin.mjs`、pinned commit 校验。
+3. **补构建链环境并接 CI**：命令行 Node ≥ 24.9 + pnpm 11、`dsh` CLI 加 PATH（注意 DSH 进程内已是 24.21.0，两者不同）；CI 接入 `sync-protocol.mjs --check`、`check-plugin.mjs`、pinned commit 校验。
 4. **解决上表 #2 / #3 / #4**：配对密钥与账号绑定、配对状态权威归属、白名单端点覆盖。
 5. 之后才按 05 W3 进入 P1 编码。
 
@@ -116,7 +135,8 @@
 
 ## 8. 边界声明（本报告**没有**证明的事）
 
-- 未在真实 DSH 进程里安装并加载探针；`apply()` 的 PASS 来自 mock Context。
+- **已在真实 DSH 桌面版加载探针**（§4.1），但只验证到「依赖注入 + 路由可用」，未触发一轮真实会话事件；`apply()` 的 8 项动态断言仍来自 mock Context。
+- 未验证卸载后路由 404（TC-4.10 的真机部分），也未在真机上验证 `session/event` 回调的首参类型与 `seq` 连续性。
 - 未验证 `prompt()` 在「执行中投递 → 进队列 → 按序处理」的完整运行时行为（FR-4.7 / TC-4.3）。
 - 未验证流式 `assistant/chunk` 是否在内存中产生但不落盘（D-01 只证明日志里没有）。
 - 未验证 `SessionHeader.parentSession` / `origin` 在其他会话中出现（D-05 单样本）。

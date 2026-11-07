@@ -72,7 +72,8 @@ export function apply(ctx, config) {
             seq: typeof event?.seq === 'number' ? event.seq : null,
           })
           if (probe.eventShapes.length > 32) probe.eventShapes.length = 32
-          // 证据随事件增量刷新，但节流由宿主事件频率决定，不做定时器（避免残留）
+          // probe.json 是 apply() 时的快照，不回写文件（避免热路径 IO 与残留定时器）。
+          // 实时 eventShapes 由 /__wbsync/spike 路由返回同一个内存对象。
         })
         if (typeof off === 'function') disposers.push(off)
       }
