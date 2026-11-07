@@ -101,7 +101,13 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/__wbs
 ├─ cordis.patch.yml             # - insert 形式的 bundle patch
 ├─ index.js                     # 探针插件入口（纯 ESM，无构建、无依赖）
 ├─ dist/*.tgz                   # 预打好的可安装 tarball
-├─ pinned-commit.txt            # DSH 锁定基线（当前 upstream_commit=UNRESOLVED）
+├─ PROTOCOL.md                  # 04 的发布副本（sync-protocol.mjs 单向生成）
+├─ CHANGELOG.md                 # 契约变更记录（wbsync/1 r1）
+├─ pinned-commit.txt            # DSH 锁定基线 66491b0…（dsh-v0.2.2-rc.1）
+├─ docs/                        # 设计冻结包 v1.1（11 份，含 ADR-007~009）
+├─ scripts/
+│  ├─ sync-protocol.mjs         # ADR-009：生成 PROTOCOL.md + --check CI 校验
+│  └─ apply-spike-revisions.mjs # v1.0→v1.1 文档修订（带断言与原文备份）
 ├─ spike/
 │  ├─ REPORT.md                 # W1 Spike 报告：三问判定 + 7 处文档偏差 + P0 门禁
 │  ├─ README.md                 # 取证脚本运行说明
@@ -123,7 +129,9 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/__wbs
 | Q2 不经写句柄提交用户消息 | PASS | 宿主 `dsh-api-session-controller.prompt(request)` + `requestId` 原生幂等 + `SessionAlreadyOwnedError` 单写者 |
 | Q3 枚举与只读回放 | PASS | `list()` / `open(id,access)` / `persistContiguous`；`sinceSeq=400` 补齐 266/266 |
 
-**P0 门禁整体仍未过**：真机加载待本仓库验证、`upstream_commit=UNRESOLVED`、文档会签待签、04 协议需按 D-01/02/07 回填。详见报告。
+**P0 门禁**：三问离线 PASS、上游 commit 已锁定（`66491b0…`）、`04` 已按 D-01~D-07 修订为 `wbsync/1 r1`；**仍待真机加载验证 + 四方会签**（ADR-007~009 均为「提议中」），完成前不得进入 P1 编码。详见 `spike/REPORT.md` §5。
+
+`docs/` 是设计冻结包 v1.1 的发布副本，唯一契约源是 `docs/04`；根 `PROTOCOL.md` 由脚本单向生成，字段变更须在同一 PR 同时改 `04` + `PROTOCOL.md` + `CHANGELOG.md`（06 §9 / ADR-009）。
 
 ---
 

@@ -1,7 +1,7 @@
 {
   "schema": "wbsync-spike/1",
   "env": {
-    "capturedAt": "2026-11-07T08:52:23.423Z",
+    "capturedAt": "2026-11-07T09:20:32.117Z",
     "platform": "win32",
     "arch": "x64",
     "nodeVersion": "22.22.2",
@@ -430,8 +430,11 @@
     "blockers": [
       "ENV: Node < 24.9",
       "ENV: pnpm 未安装",
-      "ENV: dsh CLI 不在 PATH，真机加载验证走离线 mock",
-      "PIN: 宿主 npm 包无 gitHead，pinned-commit.txt 暂以构建指纹代替"
+      "ENV: dsh CLI 不在 PATH，真机加载验证走离线 mock"
+    ],
+    "notes": [
+      "PIN: 上游 commit 66491b05… 已由 tag dsh-v0.2.2-rc.1 解析并交叉验证，见 pinned-commit.txt",
+      "INFO: npm 包元数据不带 gitHead，SHA 来源为上游 tag 而非 npm"
     ]
   },
   "redacted": "宿主源码片段已移除；在本机运行 node probe-host.mjs --full 可生成完整证据（不入库）"

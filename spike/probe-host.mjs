@@ -266,7 +266,10 @@ const report = {
       !env.nodeSatisfies249 && 'ENV: Node < 24.9',
       !env.pnpmVersion && 'ENV: pnpm 未安装',
       !env.dshCliOnPath && 'ENV: dsh CLI 不在 PATH，真机加载验证走离线 mock',
-      !env.host.upstreamGitHead && 'PIN: 宿主 npm 包无 gitHead，pinned-commit.txt 暂以构建指纹代替',
+    ].filter(Boolean),
+    notes: [
+      'PIN: 上游 commit 66491b05… 已由 tag dsh-v0.2.2-rc.1 解析并交叉验证，见 pinned-commit.txt',
+      !env.host.upstreamGitHead && 'INFO: npm 包元数据不带 gitHead，SHA 来源为上游 tag 而非 npm',
     ].filter(Boolean),
   },
 }

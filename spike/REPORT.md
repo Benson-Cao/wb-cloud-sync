@@ -10,7 +10,7 @@
 ## 0. 一句话结论
 
 **「手机发的那句话能不能交给宿主 owner」——能，而且宿主已经把幂等和单写者都做好了。**
-三问离线取证全 PASS；但 **P0 门禁整体仍未通过**，不得进入 P1 编码（详见 §5）。
+三问离线取证全 PASS；据 D-01~D-07 已完成设计冻结包 v1.1 修订（10 份文档 / 34 处 + ADR-007~009）、上游 commit 锁定、可安装 bundle 发布。**P0 门禁仍差真机加载验证与四方会签**，完成前不得进入 P1 编码（详见 §5、§7）。
 
 ---
 
@@ -76,35 +76,40 @@
 
 | 门禁项 | 判定 | 说明 |
 |---|---|---|
-| 文档会签完成 | **NOT MET** | `01` §9 会签表 PM / ARC / 安全 / QA 四方均「待签」 |
-| W1 Spike 通过 | **PARTIAL** | 三问离线取证 **PASS**，但 09 R-02 要求的「可运行证据」含真机加载；本机 `dsh` CLI 缺失，真机部分 SKIP |
-| pinned commit 锁定 | **NOT MET** | `pinned-commit.txt` 中 `upstream_commit=UNRESOLVED`；只有发行版本 + asar SHA256，CI 无法执行 06 §8 的 checkout 校验 |
-| 协议冻结 | **NOT MET** | 04 自标「冻结」，但 D-01 / D-02 / D-07 三处契约描述与实测不符，冻结前必须回填 |
+| 文档会签完成 | **NOT MET** | `01` §9 会签表四方均「待签」；本轮已产出 v1.1 修订稿 + ADR-007~009（「提议中」），待会签 |
+| W1 Spike 通过 | **PARTIAL** | 三问离线取证 **PASS**；真机加载随可安装 bundle 发布（见根 README），待在 DSH 里执行并取 `probe.json`；本机 `dsh` CLI 缺失 |
+| pinned commit 锁定 | **MET** | `upstream_commit=66491b05…`（tag `dsh-v0.2.2-rc.1`），tag / commit / package.json 三重交叉验证；另保留 asar SHA256 作二进制指纹 |
+| 协议冻结 | **待会签** | 04 已按 D-01~D-07 修订为 `wbsync/1 r1`，`PROTOCOL.md` 单向同步 + CHANGELOG 齐备；ADR-007~009 仍为「提议中」 |
 
-> **结论：按 05 W1「Spike 未通过不得进入编码」与 01 §9「P0 唯一硬产出是设计冻结」，当前不得进入 P1 编码。**
-> 三问本身已排除 R-02 这个最大红色风险，可以据 D-01~D-07 直接改 04 / 06 并会签，无需再等真机。
+> **结论：仍不得进入 P1 编码**，但阻塞点已从「三问没答案 / 文档与实测不符 / commit 没锁定」收敛为两项：**真机加载验证**与**四方会签**。按 05 W1 与 01 §9，这两项完成前不得开工。
 
 ---
 
 ## 6. 与上一轮「冻结前 6 处」的对应关系
 
-| 上轮编号 | 本轮进展 |
+| 上轮编号 | 进展 |
 |---|---|
-| #1 Spike 门禁口径不一致 | **已证实**：01 A1 / 02 §7 漏了「宿主提交入口」，05 W1 / 09 R-02 才写；本次按后者取证才问出 Q2。建议本轮把 01 A1 / 02 §7 补齐 |
-| #2 `pairSecret` 未定义 | 未触及（属配对协议，非 Spike 范围），仍需 ARC 补 |
-| #3 配对状态三处归属 | 未触及 |
-| #4 白名单 vs FR-6/FR-7 | 未触及 |
-| #5 幂等表 / RouteLease / Cursor | **已证实重复建设**（D-04），且 Host→CP 查询端点依然缺失 |
-| #6 PROTOCOL.md 唯一性 | 未触及；另新增 D-07 说明 04 §3 本身需改 |
+| #1 Spike 门禁口径不一致 | **已修复**：01 A1 / 02 §7 补齐三问口径，与 05 W1 / 09 R-02 统一 |
+| #2 `pairSecret` 未定义 | **仍未解决**（属配对协议，非 Spike 范围）：`pairSecret` 的生成 / 分发与 OAuth 主体绑定需 ARC 补 |
+| #3 配对状态三处归属 | **仍未解决**（CP / Relay / Host 本地三处），需定权威表与时序 |
+| #4 白名单 vs FR-6/FR-7 | **仍未解决**：`allowedEndpoints` 只有 `session/*`、`$events/*`，附件 / 产物 / 定时任务端点无归属 |
+| #5 幂等表 / RouteLease / Cursor | **已修复（ADR-008 提议中）**：Host 侧去重归宿主 `requestId`，CP 侧 `Idempotency` 降级为路由审计；Cursor 双真源仍待定 |
+| #6 PROTOCOL.md 唯一性 | **已修复（ADR-009 提议中）**：根 `PROTOCOL.md` 为 04 的单向同步发布副本，`sync-protocol.mjs --check` 供 CI 校验 |
+
+> 另新增 D-07（`surfaceOp` / `sourceEventSeqs` 真实语义）已写入 04 §3 与 ADR-007。
 
 ---
 
 ## 7. 下一步（按优先级）
 
-1. **回填 04 / 06**：按 D-01、D-02、D-03、D-07 改事件契约与最小骨架；按 D-04 重评 `Idempotency` / `RouteLease` 归属 → 走 ADR 会签（05 规则：协议字段变更必须 ARC 会签）。
-2. **补 `01` A1 与 `02` §7**：把「宿主提交入口是否存在」写进 Spike 清单，三问口径统一。
-3. **取上游 commit SHA**：从 `deepseek-ai/deepseek-harness` 对应 `0.2.2-rc.1` 的 tag/commit 回填 `pinned-commit.txt`；CI 加 checkout 校验。
-4. **补环境**：Node ≥ 24.9 + pnpm 11（Corepack），并把 `dsh` CLI 加进 PATH 后跑 `node check-plugin.mjs --real` 的真机命令。
+**本轮已完成**：① 按 D-01~D-07 修订 10 份文档、新增 ADR-007~009；② 统一 01/02 的 Spike 三问口径；③ 上游 commit SHA 锁定与交叉验证；④ 发布可安装 bundle 与 `PROTOCOL.md` / `CHANGELOG.md` 同步链。
+
+剩余：
+
+1. **真机验证（最高优先）**：在 DSH 里安装 `dist/*.tgz`，确认 `--dump-config` 出现插件、`/__wbsync/spike` 返回 200、取回 `probe.json`；卸载后路由 404。这将把 W1 Spike 从 PARTIAL 变成 PASS。
+2. **ADR-007~009 会签 + 四方文档会签**（01 §9）：协议字段变更需 ARC 会签，安全项一票否决。
+3. **补环境并接 CI**：Node ≥ 24.9 + pnpm 11，`dsh` CLI 加 PATH；CI 接入 `sync-protocol.mjs --check`、`check-plugin.mjs`、pinned commit 校验。
+4. **解决上表 #2 / #3 / #4**：配对密钥与账号绑定、配对状态权威归属、白名单端点覆盖。
 5. 之后才按 05 W3 进入 P1 编码。
 
 ---

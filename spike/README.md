@@ -26,7 +26,7 @@ node check-plugin.mjs --real   # 额外输出真机验证建议命令（不自�
 
 ```
 wb-cloud-sync/
-├─ pinned-commit.txt              # DSH 锁定基线（当前 upstream_commit=UNRESOLVED）
+├─ pinned-commit.txt              # DSH 锁定基线 66491b0…（dsh-v0.2.2-rc.1）
 ├─ .gitignore
 └─ spike/
    ├─ README.md                   # 本文
