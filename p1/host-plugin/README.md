@@ -16,7 +16,7 @@ P0 Spike Q2 已取证：手机投递必须走宿主 `dsh-api-session-controller.
 |---|---|---|---|
 | `submitPrompt` | `{sessionId, text, clientMsgId}` | `{ok:true, value}` / `{ok:false, code, message}` | 回 `WRITER_UNAVAILABLE`（409） |
 | `cancelTurn` | `{sessionId}` | 同上 | 回 `WRITER_UNAVAILABLE`（409） |
-| `replay` | `{sessionId, sinceSeq}` | 同上（`value.events`） | 回 `NOT_AVAILABLE`（409） |
+| `replay` | `{sessionId, sinceSeq}` | 同上（`value.events` 为连续前缀） | 绑 `sessionPersistence.open(id,'read')`；拿不到句柄回 `NOT_AVAILABLE`（501） |
 
 未注入时**明确拒绝**并说明原因，不静默降级、不自行追加日志。这条是给正式接入留的口子，也保证骨架可以离线跑单测。
 
@@ -74,15 +74,42 @@ Relay → Host：
 
 `relayUrl` 配成 **http(s) base**（配对代理要用 `fetch`），WS 地址由 `toWsUrl()` 派生（`http→ws`、`https→wss`）。这样只配一处，不会出现 HTTP 用域名、WS 用 IP 的错配。
 
-## 六、已知边界（W3 剩余项）
+## 六、历史补齐（`src/replay.js`）
 
-1. **重启后历史补齐未接**：`replay` 仍是占位。正解是 Host 只读 `sessionPersistence.open(id,'read')` 回放连续前缀 → 断线窗口内的事件从这里补，不靠 Relay 缓冲（Relay 缓冲在内存、进程重启即丢）。
-2. **会话索引未上报**：`host/sessions` 帧还没发，手机的会话列表暂时无源。
-3. **`deviceId` / `hostToken` 未落地**：当前由调用方配置，没有本机持久化与配对双绑。
-4. **附件上行未做**：`caps: ['attachments', …]` 只是声明。
-5. **心跳只做存活**：`host/heartbeat` 每 15s 一次，Relay 回 ack 但不参与 RTT 统计与时钟对齐。
+Relay 的事件缓冲在内存里，进程一重启就空；手机断线重连要补的那段历史**只能回 Host 读**，因为 `~/.dsh` 的 append-only 日志是唯一真源。
 
-## 七、测试（13 个用例，`node --test`）
+宿主 API 是从 `dsh-session-persistence-jsonl` 的实现里取证来的，不是猜的：
+
+| 调用 | 返回 | 说明 |
+|---|---|---|
+| `sessionPersistence.open(id, 'read')` | handle | **只读句柄**，不含写权限 |
+| `handle.read(offset, length)` | `{ eventState, events }` | `offset` 是**事件下标**，不是 `seq` |
+| `handle.close()` | — | 必须释放，否则一直占着 tracker |
+
+语义（ADR-004）：
+
+- 只返回 **`sinceSeq + 1` 起的连续前缀**，遇缺口立刻停，绝不返回撕裂尾部；
+- `seq <= sinceSeq` 的重复帧**幂等丢弃**，手机重试不会拿到重复事件；
+- 缺口显式报 `complete:false` + `expectedSeq`，由手机决定重试还是报 `session/gap`；
+- 单页最多 `pageSize`（默认 500，上限 5000）条，多读一条只为判断 `hasMore`，不发给手机；
+- `offset` 用 `sinceSeq + 1` 当下标是**快路径**（P0 实测同会话内 `seq` 连续且等于下标）；一旦首条事件的 `seq` 对不上，退化为从 0 读一次再过滤——有界兜底，不是常态路径。
+
+响应示例：
+
+```json
+{"ok":true,"data":{"sessionId":"session-9","events":[…],"count":5,"fromSeq":4,"toSeq":8,
+ "complete":false,"expectedSeq":9,"hasMore":true,"eventState":"prepared"}}
+```
+
+## 七、已知边界（W3 剩余项）
+
+1. **会话索引未上报**：`host/sessions` 帧还没发，手机的会话列表暂时无源。
+2. **`deviceId` / `hostToken` 未落地**：当前由调用方配置，没有本机持久化与配对双绑。
+3. **附件上行未做**：`caps: ['attachments', …]` 只是声明。
+4. **心跳只做存活**：`host/heartbeat` 每 15s 一次，Relay 回 ack 但不参与 RTT 统计与时钟对齐。
+5. **丢弃窗口靠 follow 兜底，但没人自动触发**：`dropped` 只计数，重连后主动补拉要等手机侧（PWA）发起。
+
+## 八、测试（30 个用例，`node --test`）
 
 ```bash
 node --test p1/host-plugin/test/*.test.mjs
@@ -95,18 +122,21 @@ node --test p1/host-plugin/test/*.test.mjs
 | 注册 | 注册帧字段（`deviceId`/`caps`/`hostToken`）、`host/registered` 前不算连接 |
 | 上行 | 事件体原样、`sessionId` 取 `session.header.id`、`seq` 不乱序、计数与 `lastSeq`、缺 id 不计数不发帧 |
 | 下行 | prompt/cancel/follow 分派到各自适配器并回 `http/response`；未注入适配器 409 `WRITER_UNAVAILABLE`；白名单外 403；异常 500 且连接不崩 |
+| 历史补齐（15 个） | 连续前缀、缺口截断 + `expectedSeq`、重复帧幂等丢弃、分页 `hasMore` 翻页、已到末尾不空转、下标与 `seq` 不等时回退、非法 `sinceSeq` 按 -1、会话不可读 / `read` 抛错仍释放句柄、参数夹取 |
+| 补齐接线 | `session/follow` 走 `open(id,'read')`（断言 `access === 'read'`）、句柄用后即释放、无句柄时 501 `NOT_AVAILABLE` 且 `replayReady:false` |
 | 断线与卸载 | 退避重连并重新注册；卸载后路由注销、监听移除、不再上行、**不在背后重连** |
 | 端到端（真 Relay） | 配对 → Host WS 注册 → 手机 HTTP 投递 → 适配器 → 响应回程 → 卸载后 Relay 判离线 |
 
-宿主侧用两个替身：`createMockCtx()`（只实现三个能力 + 记录装载/拆除）和 `startFakeRelay()`（复用手写的 `upgradeToWebSocket`，可逐帧观察并可主动下发）。端到端用例用**真 `createRelay()`**，跑真实配对与鉴权，不用 mock 绕过。
+宿主侧用两个替身：`createMockCtx()`（只实现三个能力 + 记录装载/拆除）和 `startFakeRelay()`（复用手写的 `upgradeToWebSocket`，可逐帧观察并可主动下发）；回放用假句柄（`read` / `close`）。端到端用例用**真 `createRelay()`**，跑真实配对与鉴权，不用 mock 绕过。
 
-## 八、下一步
+## 九、下一步
 
-1. 接 `sessionPersistence` 只读回放，落地 `replay` 适配器（连续前缀，缺口报 `session/gap`）。
-2. 启动时上报会话索引（`host/sessions`）。
-3. `deviceId` 派生 + 本机持久化 + 与配对令牌双绑。
+1. 启动时上报会话索引（`host/sessions`）。
+2. `deviceId` 派生 + 本机持久化 + 与配对令牌双绑。
+3. 手机侧（PWA）在重连后主动发 `session/follow`，把 `dropped` 窗口补回来。
 4. 正式包换标识，接入 `dsh.bundle` 分发给真机验证。
 
 ---
 
-零依赖：`src/index.js` 没有任何 `import`（WS 用 Node 内置全局 `WebSocket`），可直接 `node --test`。
+零依赖：`src/` 只有 `index.js` 与 `replay.js` 两个模块、互相 import，无第三方包（WS 用 Node 内置全局 `WebSocket`），可直接 `node --test`。
+

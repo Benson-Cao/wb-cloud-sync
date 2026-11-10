@@ -422,6 +422,83 @@ test('卸载即撤回：路由注销、监听移除、不再上行也不再重�
   }
 })
 
+/* ------------------------------------------------- 历史补齐（只读句柄） */
+
+const fakePersistence = (total) => {
+  const opened = []
+  const closes = { n: 0 }
+  return {
+    opened,
+    closes,
+    service: {
+      async open(id, access) {
+        opened.push({ id, access })
+        const events = Array.from({ length: total }, (_, i) => ({ seq: i, type: 'message/delta' }))
+        return {
+          read: async (offset, length) => ({ eventState: 'prepared', events: events.slice(offset, offset + length) }),
+          close: async () => { closes.n++ },
+        }
+      },
+    },
+  }
+}
+
+test('session/follow 绑宿主 sessionPersistence 的只读句柄，真正补齐历史', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  const persistence = fakePersistence(5)
+  ctx.sessionPersistence = persistence.service
+  try {
+    const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true })
+    await waitFor(() => plugin.state.connected, '已连接')
+
+    relay.send({
+      t: 'http/request', reqId: 'r-7', method: 'POST', endpoint: 'session/follow',
+      body: { sessionId: 'session-1', sinceSeq: 1 },
+    })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '回响应')
+
+    const resp = framesOf(relay, 'http/response')[0]
+    assert.equal(resp.status, 200)
+    assert.deepEqual(resp.body.data.events.map((e) => e.seq), [2, 3, 4])
+    assert.equal(resp.body.data.complete, true)
+    // 句柄是 open(id, 'read')：绝不自开写句柄（ADR-008）
+    assert.deepEqual(persistence.opened, [{ id: 'session-1', access: 'read' }])
+    assert.equal(persistence.closes.n, 1, '句柄用后即释放')
+
+    const status = await callRoute(ctx, '/__wbsync/status')
+    assert.equal(status.json.data.replayReady, true)
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('没有只读句柄时如实回 501 NOT_AVAILABLE，不假装补齐成功', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()      // 故意不给 sessionPersistence
+  try {
+    const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true })
+    await waitFor(() => plugin.state.connected, '已连接')
+
+    relay.send({
+      t: 'http/request', reqId: 'r-8', method: 'POST', endpoint: 'session/follow',
+      body: { sessionId: 'session-1', sinceSeq: 0 },
+    })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '回响应')
+
+    const resp = framesOf(relay, 'http/response')[0]
+    assert.equal(resp.status, 501)
+    assert.equal(resp.body.error.code, 'NOT_AVAILABLE')
+
+    const status = await callRoute(ctx, '/__wbsync/status')
+    assert.equal(status.json.data.replayReady, false)
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
 /* ------------------------------------------------------- 真 Relay 端到端 */
 
 const hmac = (secret, msg) => createHmac('sha256', secret).update(msg).digest('hex')

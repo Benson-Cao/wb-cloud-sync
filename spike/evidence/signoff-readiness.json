@@ -1,16 +1,16 @@
 {
   "schema": "wbsync-signoff-readiness/3",
-  "capturedAt": "2026-11-10T02:01:07.308Z",
+  "capturedAt": "2026-11-10T02:12:20.897Z",
   "verdict": "DEV_PROCEED_WAIVED",
   "note": "SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；P1 前置四项须由 ARC / 安全 Owner 裁定。DEV_PROCEED_WAIVED 只表示发起人豁免了开发期会签，设计冻结未完成、GA 前必须补签。脚本不代签、不代裁定，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境",
   "engineering": {
-    "currentHead": "d68009afce6c41c32451c4274d5dbdb585d707db",
+    "currentHead": "807da0732f974d3d9110232650e87e7f05a02025",
     "worktreeClean": false,
     "automated": "9/9",
     "automatedOk": true,
     "snapshotStatus": "CURRENT",
-    "snapshotCapturedAt": "2026-11-10T02:01:06.680Z",
-    "snapshotGitHead": "d68009afce6c41c32451c4274d5dbdb585d707db",
+    "snapshotCapturedAt": "2026-11-10T02:08:03.381Z",
+    "snapshotGitHead": "c8bedbdc581013813c189eb117a8f13bf4cdcc73",
     "snapshotOk": true,
     "envVerdict": "READY",
     "envPassed": "5/5",
@@ -111,5 +111,5 @@
     "proposalDocument": "P1-PREREQUISITES.md",
     "note": "未经会签；当前按推荐方案作默认实现口径（SIGNOFF-WAIVER.md §5），可回滚"
   },
-  "nextStep": "继续 W3 开发（重启后历史补齐 / CP 分离 / Host 插件 / PWA）；GA 前按 SIGN-OFF-PROCEDURE.md 补签，P3 W10 出网审计照旧"
+  "nextStep": "继续 W3 开发（会话索引上报 / CP 分离 / PWA / 队列）；GA 前按 SIGN-OFF-PROCEDURE.md 补签，P3 W10 出网审计照旧"
 }

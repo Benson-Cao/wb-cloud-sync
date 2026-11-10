@@ -128,7 +128,7 @@ const result = {
   nextStep: verdict === 'SIGNED_OFF'
     ? '先裁定 P1 开工前置四项并回写契约，再按 05 W3 进入编码'
     : verdict === 'DEV_PROCEED_WAIVED'
-      ? '继续 W3 开发（重启后历史补齐 / CP 分离 / Host 插件 / PWA）；GA 前按 SIGN-OFF-PROCEDURE.md 补签，P3 W10 出网审计照旧'
+      ? '继续 W3 开发（会话索引上报 / CP 分离 / PWA / 队列）；GA 前按 SIGN-OFF-PROCEDURE.md 补签，P3 W10 出网审计照旧'
       : verdict === 'READY_FOR_SIGNOFF'
         ? '一次会签：先看 SECURITY-REVIEW.md 五项并签 ADR-007~010，再裁定 P1-PREREQUISITES.md 四项；签完按 SIGN-OFF.md §七 收尾'
         : '先修复未达标的自动项 / 快照 / 构建链 / 会签材料',

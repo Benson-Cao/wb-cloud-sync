@@ -4,6 +4,20 @@
 
 ---
 
+## [P1 W3 续 4] · 2026-11-10 10:1x · 非协议变更
+
+- **重启后历史补齐落地**（W3 原本最大的一块）：新增 `p1/host-plugin/src/replay.js`。Relay 的缓冲在内存里、进程重启即空，所以补历史必须回 Host 读 `~/.dsh` 的 append-only 日志——`replay` 适配器从占位变成真实现。
+- **宿主 API 是取证的，不是猜的**：从 `dsh-session-persistence-jsonl` 的实现读到 `open(id, access)` 返回的句柄只有 `read(offset, length)` / `append` / `flush` / `close`，`read` 返回 `{ eventState, events }`，**`offset` 是事件下标不是 `seq`**。据此把快路径定为「按 `sinceSeq + 1` 当下标读」，并用「首条事件 `seq` 对不上就回退到 0 重读」做有界兜底（P0 实测同会话内 `seq` 连续且等于下标，所以是兜底而非常态）。
+- **只读铁律不变**：`openSession` 一律 `open(id,'read')`，测试断言 `access === 'read'`；不 `append`、不 `flush`，句柄在 `finally` 里 `close()`（漏关会一直占宿主 tracker）。
+- 补齐语义按 ADR-004：只返回 `sinceSeq + 1` 起的**连续前缀**、遇缺口立刻停并报 `expectedSeq`；`seq <= sinceSeq` 幂等丢弃；单页 500 条（上限 5000），**多读一条只为判断 `hasMore`、不发给手机**；参数 0/非数字回落 500、负数夹到 1。
+- 错误码分层：会话不可读 → **404 `SESSION_UNREADABLE`**，没有只读句柄 → **501 `NOT_AVAILABLE`**（不假装补齐成功），其余仍是 409。`/__wbsync/status` 增加 `replayReady`。
+- 测试 36 → **53**（`host-plugin` 13 → 30）：新增 `test/replay.test.mjs` 15 个（连续前缀、缺口截断、重复帧幂等、分页翻页、末尾不空转、下标错位回退、非法 `sinceSeq`、`read` 抛错仍释放句柄、参数夹取），以及 2 个接线用例（`session/follow` 真走只读句柄并断言 `access`、无句柄时 501 且 `replayReady:false`）。
+- **写测试时抓到自己两个错**：① 分页第一次实现把「多读的探测条」也塞进了返回数组，`count` 会变成 `pageSize+1`；② 分页夹取把 `0` 当「没配」回落 500、负数却夹到 1，两处语义不一致——现在都用「0/非数字 = 缺省、负数 = 下限」写清并断言。
+
+**边界未变**：`host/sessions` 会话索引未上报；`deviceId` / `hostToken` 未持久化与配对双绑；附件上行未做；**手机侧（PWA）尚未在重连后主动发 `session/follow`**，所以 `dropped` 窗口目前只是计数、没人自动补。
+
+---
+
 ## [P1 W3 续 3] · 2026-11-10 10:0x · 非协议变更
 
 - **Host 侧插件骨架落地**：新增 `p1/host-plugin/`（`wbsync-host-dev`，`private: true`）——`apply(ctx, config)` 做五件事：主动外连 Relay 并发 `host/register`、订阅宿主 `session/event` 原样上行、把下行 `http/request` 分派给三个适配器并回 `http/response`、注册本地路由 `/__wbsync/status` 与 `/__wbsync/pair`、所有注册与定时器挂 `ctx.effect`（卸载即撤回）。

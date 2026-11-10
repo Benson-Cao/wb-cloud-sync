@@ -17,8 +17,10 @@
  * 适配器注入（正式版从 ctx 取，骨架期由调用方给）：
  *   submitPrompt({sessionId, text, clientMsgId}) -> {ok, value?, code?, message?}
  *   cancelTurn({sessionId})                     -> 同上
- *   replay({sessionId, sinceSeq})               -> 同上（历史补齐，下一步）
+ *   replay({sessionId, sinceSeq})               -> 同上（历史补齐，见 src/replay.js）
  */
+import { createReplayAdapter } from './replay.js'
+
 export const name = 'wbsync-host-dev'
 export const inject = ['webServer', 'sessionPersistence']
 
@@ -47,8 +49,17 @@ const okBody = (data) => ({ ok: true, data, protocol: PROTOCOL })
 const errBody = (code, message, retryable = false) =>
   ({ ok: false, error: { code, message, retryable }, protocol: PROTOCOL })
 
+/** 适配器失败码 → HTTP 状态：不可读是 404，能力缺失是 501，其余按冲突处理。 */
+const STATUS_BY_CODE = {
+  SESSION_UNREADABLE: 404,
+  NOT_AVAILABLE: 501,
+  WRITER_UNAVAILABLE: 409,
+}
 const unwrap = (r, fallback = {}) => (r?.ok === false
-  ? { status: 409, body: errBody(r.code ?? 'SESSION_BUSY', r.message ?? '适配器拒绝', false) }
+  ? {
+    status: STATUS_BY_CODE[r.code] ?? 409,
+    body: errBody(r.code ?? 'SESSION_BUSY', r.message ?? '适配器拒绝', false),
+  }
   : { status: 200, body: okBody(r?.value ?? fallback) })
 
 export function apply(ctx, config = {}) {
@@ -67,6 +78,17 @@ export function apply(ctx, config = {}) {
     heartbeatTimer: null,
   }
 
+  /**
+   * 回放句柄来源：优先用调用方注入的 `openSession`（便于测试与接管），否则绑宿主的
+   * `sessionPersistence.open(id,'read')`——**只读句柄**，绝不请求写权限。
+   * 拿不到就没有回放能力，明确回 `NOT_AVAILABLE`，不假装补齐成功。
+   */
+  const openSession = typeof cfg.openSession === 'function'
+    ? cfg.openSession
+    : (ctx.sessionPersistence?.open
+      ? (id) => ctx.sessionPersistence.open(id, 'read')
+      : null)
+
   const adapters = {
     submitPrompt: cfg.submitPrompt ?? (async () => ({
       ok: false, code: 'WRITER_UNAVAILABLE',
@@ -75,9 +97,12 @@ export function apply(ctx, config = {}) {
     cancelTurn: cfg.cancelTurn ?? (async () => ({
       ok: false, code: 'WRITER_UNAVAILABLE', message: '未注入 cancelTurn 适配器',
     })),
-    replay: cfg.replay ?? (async () => ({
-      ok: false, code: 'NOT_AVAILABLE', message: '历史补齐未接入（W3 下一步）',
-    })),
+    replay: cfg.replay ?? (openSession
+      ? createReplayAdapter({ openSession, pageSize: cfg.replayPageSize })
+      : async () => ({
+        ok: false, code: 'NOT_AVAILABLE',
+        message: '没有可用的只读句柄（未注入 sessionPersistence / openSession）',
+      })),
   }
 
   const send = (frame) => {
@@ -197,6 +222,7 @@ export function apply(ctx, config = {}) {
           dropped: state.dropped,
           downlinks: state.downlinks,
           reconnects: state.reconnects,
+          replayReady: Boolean(openSession),
           lastSeq: Object.fromEntries(state.lastSeq),
           protocol: PROTOCOL,
         }))

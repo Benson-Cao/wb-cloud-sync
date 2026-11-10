@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T02:08:03.381Z",
+  "capturedAt": "2026-11-10T02:12:24.178Z",
   "git": {
-    "head": "c8bedbdc581013813c189eb117a8f13bf4cdcc73",
+    "head": "807da0732f974d3d9110232650e87e7f05a02025",
     "branch": "main",
     "worktreeClean": false
   },
@@ -10,7 +10,8 @@
   "freshness": {
     "status": "CURRENT",
     "dataChanged": [
-      "check-plugin.json"
+      "check-plugin.json",
+      "signoff-check.mjs"
     ],
     "signoffChanged": [
       "SIGN-OFF.md"
@@ -22,17 +23,18 @@
     "notes": [
       "发布物已重建（仅记录，不影响判定）：dist-tarball"
     ],
-    "previousCapturedAt": "2026-11-10T02:01:06.680Z",
-    "previousGitHead": "d68009afce6c41c32451c4274d5dbdb585d707db",
+    "previousCapturedAt": "2026-11-10T02:08:03.381Z",
+    "previousGitHead": "c8bedbdc581013813c189eb117a8f13bf4cdcc73",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：运行代码/证据：check-plugin.json；会签材料：SIGN-OFF.md",
-      "capturedAt": "2026-11-10T02:01:06.680Z",
-      "gitHead": "d68009afce6c41c32451c4274d5dbdb585d707db",
+      "previousReason": "已变化（阻断）：运行代码/证据：check-plugin.json, signoff-check.mjs；会签材料：SIGN-OFF.md",
+      "capturedAt": "2026-11-10T02:08:03.381Z",
+      "gitHead": "c8bedbdc581013813c189eb117a8f13bf4cdcc73",
       "dataChanged": [
-        "check-plugin.json"
+        "check-plugin.json",
+        "signoff-check.mjs"
       ],
       "signoffChanged": [
         "SIGN-OFF.md"
@@ -49,15 +51,15 @@
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
       "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
-      "check-plugin.json": "643a44eb0234631ba265ea0a311c9b40716b2c98c73e44673df24cdbd18f8ee3",
+      "check-plugin.json": "7d4d27fed4b41df13aae17bd4be24f89e8b6a55485a7373f2f92c752074a618d",
       "gate-check.mjs": "fd0f14dbaa0f927801aa0191398e0f0cdef3baa669b13715f4375568cf7d5da1",
       "check-env.mjs": "d26c26749008404f631c64be52d908e5c0a60074235218327ff6eeb8c270e5b3",
-      "signoff-check.mjs": "48e33a109421e4ed7b74bd8a5955ee2a9628fa616070ec17089a8d5aa519a1e8",
+      "signoff-check.mjs": "3c7ba5fe1c73db86a1faefc3461427fa3cd143453359fc9da317d50544247797",
       "sync-protocol.mjs": "b2f251a6bea2f7313e27c828914615ee33aa8bffafcc61116d3f1b46bca8631e"
     },
     "signoff": {
       "SECURITY-REVIEW.md": "654740fe43c975e8a6fe2ee4dd2205b14e79c0641fa4874947fc0ce6acd529c0",
-      "SIGN-OFF.md": "404972ca5307c61f2c5a266265bc04c485283f66d4499bf911977201ffaff66a",
+      "SIGN-OFF.md": "d9535ba35b7c76f26d428a1119bdac392c66cc92d4f4cdd55d3ee5d171ef9af1",
       "SIGN-OFF-PROCEDURE.md": "017b4b3f4a55dc1e36b0740958633414aa8b869c30b6e41d34b8966adde3710e",
       "SIGNOFF-WAIVER.md": "7275b24cdd0ac36a0e1aa5504419b2f619dbb78cf6d4ec6b945027511efb6036",
       "01-charter.md": "cfe7a784aceb3a1bd70aaa3ded39414ab1b9f7de44d396da9d29cc840c93b14d",
@@ -65,7 +67,7 @@
       "WORKBUDDY-REFERENCE.md": "e286a4af7afe2aab6f9462bfec7d0baf25ff4c892b21245624963490be49cdcc"
     },
     "artifact": {
-      "dist-tarball": "f747c70fe35d0b6848bae30de88f92a365b63953192f6708e700953c439b1464"
+      "dist-tarball": "2d86dff1eba36ff11208177269e516d3d85edbfbe625521f00e5df2bda679b30"
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
@@ -73,7 +75,7 @@
     }
   },
   "secretScan": {
-    "filesScanned": 67,
+    "filesScanned": 69,
     "patterns": [
       "github-classic",
       "github-fine-grained",
