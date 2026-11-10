@@ -78,10 +78,11 @@ node --test p1/pwa/test/*.test.mjs       # 或 pnpm --dir p1/pwa test
 - **`deviceId` 单机期 = Host 设备 ID**：令牌按 Host 的 `deviceId` 登记（单活跃令牌，一台 Host 一部手机），多手机 / 多设备选择器属后续。
 - **`POST /api/sessions` 已接**：新建会话链路（含 Host 适配器 409 透传与离线置灰）；0.1.5 真机已验证新建会话与第一句话投递均可用（会话日志含 `user/message` 与 `turn/end`）。
 - **取消轮次已接**：事件流面板「取消当前轮次」按钮 → `client.cancelTurn()` → `POST /d/<deviceId>/session/cancel` → 宿主 `sessionController.cancel({sessionId})`；只中断当前轮次、保留待处理收件箱。依赖当前选中的会话（`activeSession`），未选中时不产生请求。
+- **队列 UI 未做，宿主缺读接口**：asar 里只有 `updateQueue`（写：remove / steer / reorder），没有 `session/inbox` / `queue/list` / `session/pending` 任何读取端点，手机端拿不到待处理项列表。用 `agent/inbox/spliced` 本地重建镜像理论可行，但那是**增量差分**（`start` / `removedCount` / `inserted`），丢一帧即与宿主漂移，属不可信 UI，故不做。
 - **`PATCH /api/sessions/:id`（置顶）未接**：手机端本就 403（协议 §4），属 PC 侧功能。
 - **附件上行未做**：`attachments/*` 是 P2 端点（WAIVER §5 默认口径）。
 - **sw.js 不缓存业务响应**：离线看到旧会话流比空页面更容易误判，数据永远网络优先。
-- **壳更新要刷两次**：SW 缓存名随清单变更递增（`wbsync-shell-v8`，因事件流折叠、订阅状态修复、`say()` 反馈可见性等壳改动递增）；旧 SW 接管期间第一次刷新仍返回旧壳，后台装好新 SW 并清掉旧缓存后，第二次刷新才拿到新壳。真机联调期如卡住，用无痕窗口或清除站点数据可一步跳过。壳 HTML 已改网络优先，新增模块不会再被旧缓存拖住；`static.test.mjs` S6 会校验清单覆盖页面与 src 模块的传递 import，防止漏缓存。
+- **壳更新要刷两次**：SW 缓存名随清单变更递增（`wbsync-shell-v9`，因事件流折叠、忘掉这台电脑、订阅状态修复、`say()` 反馈可见性等壳改动递增）；旧 SW 接管期间第一次刷新仍返回旧壳，后台装好新 SW 并清掉旧缓存后，第二次刷新才拿到新壳。真机联调期如卡住，用无痕窗口或清除站点数据可一步跳过。壳 HTML 已改网络优先，新增模块不会再被旧缓存拖住；`static.test.mjs` S6 会校验清单覆盖页面与 src 模块的传递 import，防止漏缓存。
 - **附件上行（`attachments/*`）未实现，列为 P2 独立工作项**：需协议 `wbsync/1 r3` 定义端点与 receipt 语义、`ALLOWED_ENDPOINTS` 加入 `attachments/*`、CP 增加 receipt 存储（大小上限 / TTL / 吊销即失效）、Host 侧取证并接 `ctx.fileUploads.registerAgentResolver` 把文件交给 Agent、PWA 增加文件选择并把 `{type:'file',receiptId}` 放进 `session/prompt` 的 content。关键是 ADR-010 信任边界：文件内容是否允许经 Relay 中转、是否计入「零正文落盘」口径，需单独裁定。当前 `session/prompt` schema 已支持 file content，但链路两端都未接，本轮不动。
 
 ## 测试（29 用例，真实 Relay 端到端）

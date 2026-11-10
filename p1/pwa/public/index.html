@@ -66,6 +66,7 @@
     <input id="pairCode" placeholder="6 位配对码" maxlength="6" inputmode="numeric"
            style="max-width:110px" autocomplete="one-time-code" />
     <button id="save">配对</button>
+    <button id="forget" title="清除本机保存的令牌与设备 ID，清除后需重新配对">忘掉这台电脑</button>
   </div>
   <div id="newbar" hidden>
     <input id="newText" placeholder="第一句话（可选，空=建空会话）" />
@@ -226,6 +227,22 @@
     }
 
     $('save').addEventListener('click', () => { void connect() })
+    // 忘掉这台电脑：清掉本机令牌与设备 ID，回到未配对状态（此前只能靠清浏览器数据）
+    $('forget').addEventListener('click', () => {
+      if (!window.confirm('清除本机保存的令牌与设备 ID？清除后需要重新配对。')) return
+      client?.stop()
+      client = null
+      for (const k of ['wbsync.token', 'wbsync.deviceId', 'wbsync.base']) localStorage.removeItem(k)
+      activeSession = null
+      fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
+      $('events').innerHTML = ''
+      $('stream').hidden = true
+      $('newbar').hidden = true
+      $('pairCode').value = ''
+      $('pairCode').placeholder = '6 位配对码'
+      $('conn').textContent = '未连接'
+      say('已忘掉这台电脑，请重新配对')
+    })
     $('refresh').addEventListener('click', () => client?.refreshSessions().catch((e) => say(`刷新失败：${e.message}`, true)))
     $('create').addEventListener('click', async () => {
       if (!client) return

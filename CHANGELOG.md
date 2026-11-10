@@ -4,6 +4,14 @@
 
 ---
 
+## [P1 W5] · 2026-11-10 22:0x · 手机端「忘掉这台电脑」+ 队列缺口结论
+
+- **设置页补最小可用项**：`#setup` 增「忘掉这台电脑」按钮——停客户端、清 `wbsync.token` / `wbsync.deviceId` / `wbsync.base`、清空事件流与折叠状态、回到未配对态。此前用户只能靠清浏览器数据，等于把凭据管理推给用户。SW 升 `wbsync-shell-v9`；S6 增两条断言（入口存在 + 确实清键）。
+- **队列 UI 判定为当前不可做（有取证依据）**：asar 里只有 `updateQueue`（写：remove / steer / reorder），**没有** `session/inbox` / `queue/list` / `session/queue` / `session/pending` 任何读接口。手机端拿不到待处理项列表，就无法渲染队列。理论上可靠 `agent/inbox/spliced` 事件在本地重建镜像，但该事件是**增量差分**（`start` / `removedCount` / `inserted`），丢一帧就与宿主状态漂移，做出来是不可信的 UI。等宿主暴露读接口再接。
+- 测试仍 170（新增断言计入 S6）；**无 bundle 变更**（仅 PWA 静态资源 + 测试），不用重装 tgz、不用重启 Relay；手机刷新两次拿 SW `v9`。
+
+---
+
 ## [P3 W10] · 2026-11-10 21:5x · 出网审计补齐运行时半边
 
 - `scripts/egress-audit.mjs` 增 `--runtime`：用 PowerShell `Get-NetTCPConnection` 采集 **Relay 进程**（监听 8787）的全部非 Listen 连接，按同一套分类判定，存在 `external` 即 exit 1。

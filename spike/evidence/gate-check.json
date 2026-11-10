@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T13:54:12.620Z",
+  "capturedAt": "2026-11-10T14:02:25.785Z",
   "git": {
-    "head": "f111621529c37afce8444570c8db3de522fb81ae",
+    "head": "5833cbc5cf99959ce62ce594479b2ec2d9b898fe",
     "branch": "main",
     "worktreeClean": false
   },
@@ -10,25 +10,20 @@
   "freshness": {
     "status": "CURRENT",
     "dataChanged": [],
-    "signoffChanged": [
-      "SIGN-OFF.md"
-    ],
+    "signoffChanged": [],
     "artifactChanged": [],
     "narrativeChanged": [],
     "notes": [],
-    "previousCapturedAt": "2026-11-10T13:35:03.191Z",
-    "previousGitHead": "cd4ffee3db1528b56bff645effa9262748499532",
+    "previousCapturedAt": "2026-11-10T13:54:12.620Z",
+    "previousGitHead": "f111621529c37afce8444570c8db3de522fb81ae",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：会签材料：SIGN-OFF.md",
-      "capturedAt": "2026-11-10T13:35:03.191Z",
-      "gitHead": "cd4ffee3db1528b56bff645effa9262748499532",
+      "previousStatus": "CURRENT",
+      "capturedAt": "2026-11-10T13:54:12.620Z",
+      "gitHead": "f111621529c37afce8444570c8db3de522fb81ae",
       "dataChanged": [],
-      "signoffChanged": [
-        "SIGN-OFF.md"
-      ],
+      "signoffChanged": [],
       "artifactChanged": [],
       "narrativeChanged": []
     }
