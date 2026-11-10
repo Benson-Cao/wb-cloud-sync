@@ -362,6 +362,14 @@ function createHostAdapters(ctx, options = {}) {
   }
 
   return {
+    /** 给 /__wbsync/status 做真机自检：区分「服务没探测到」与「调用失败」。 */
+    capabilities: () => ({
+      controller: Boolean(controller),
+      create: typeof controller?.create === 'function',
+      prompt: typeof controller?.prompt === 'function',
+      cancel: false,   // 未取证，保持 409
+    }),
+
     /** 手机向已有会话发一句话：clientMsgId → requestId（宿主原生幂等）。 */
     submitPrompt: async ({ sessionId, text, clientMsgId }) => {
       if (!sessionId || typeof text !== 'string') {
@@ -708,6 +716,7 @@ function __apply(ctx, config = {}) {
           indexSentAt: state.indexSentAt,
           indexError: state.indexError,
           lastSeq: Object.fromEntries(state.lastSeq),
+          writer: hostAdapters.capabilities?.() ?? { injected: true },
           protocol: PROTOCOL,
         }))
       },

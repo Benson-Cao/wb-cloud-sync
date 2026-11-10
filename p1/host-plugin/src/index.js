@@ -297,6 +297,7 @@ export function apply(ctx, config = {}) {
           indexSentAt: state.indexSentAt,
           indexError: state.indexError,
           lastSeq: Object.fromEntries(state.lastSeq),
+          writer: hostAdapters.capabilities?.() ?? { injected: true },
           protocol: PROTOCOL,
         }))
       },

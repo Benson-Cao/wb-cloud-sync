@@ -19,7 +19,7 @@ P0 Spike Q2 已取证：手机投递必须走宿主 `dsh-api-session-controller.
 | `createSession` | `{text, cwd, clientId}` | 同上（`value.sessionId` 必备，可附 `value.index` 行） | **接宿主 `sessionController.create`**：返回 `sessionId`；`text` 非空再调 `prompt` 送第一句话 |
 | `replay` | `{sessionId, sinceSeq}` | 同上（`value.events` 为连续前缀） | 绑 `sessionPersistence.open(id,'read')`；拿不到句柄回 `NOT_AVAILABLE`（501） |
 
-`src/host-adapters.js` 负责软探测 `sessionController`（`ctx[name]` / `ctx.get(name)`，**不写进 `inject`**——cordis 缺服务会让整个插件 pending，连上行和状态路由都注册不上）。服务缺失时适配器如实回 `WRITER_UNAVAILABLE`（409），不静默降级、不自行追加日志；测试可用 `cfg.hostAdapters` 或单个适配器覆盖。
+`src/host-adapters.js` 负责软探测 `sessionController`（`ctx[name]` / `ctx.get(name)`，**不写进 `inject`**——cordis 缺服务会让整个插件 pending，连上行和状态路由都注册不上）。服务缺失时适配器如实回 `WRITER_UNAVAILABLE`（409），不静默降级、不自行追加日志；测试可用 `cfg.hostAdapters` 或单个适配器覆盖。`/__wbsync/status` 的 `writer: {controller, create, prompt, cancel}` 用于真机自检——装包后先看它，就能区分「服务没探测到」与「调用失败」。
 
 **部分成功语义**：`create` 已建出会话但第一句话 `prompt` 失败时，会话已经客观存在，适配器返回**成功**并附 `prompted:false / promptError`——否则手机会以为没建、重复点「新建」造出第二个会话。
 

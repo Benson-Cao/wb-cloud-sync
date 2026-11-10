@@ -71,8 +71,10 @@ test('HA5 服务软探测：直接属性 / ctx.get / 缺失 → 409', async () =
   const viaGet = createHostAdapters({ get: (n) => (n === 'sessionController'
     ? { create: async () => ({ sessionId: 'session-via-get' }) } : undefined) })
   assert.equal((await viaGet.createSession({})).value.sessionId, 'session-via-get')
+  assert.deepEqual(viaGet.capabilities(), { controller: true, create: true, prompt: false, cancel: false })
 
   const missing = createHostAdapters({})
+  assert.deepEqual(missing.capabilities(), { controller: false, create: false, prompt: false, cancel: false })
   const r = await missing.createSession({})
   assert.equal(r.ok, false)
   assert.equal(r.code, 'WRITER_UNAVAILABLE')
