@@ -147,12 +147,14 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 ├─ pinned-commit.txt            # DSH 锁定基线 66491b0…（dsh-v0.2.2-rc.1）
 ├─ docs/                        # 设计冻结包（11 份，含 ADR-007~010）
 ├─ scripts/
-│  ├─ gate-check.mjs            # P0 门禁自动核查（--check 供 CI，输出证据快照）
+│  ├─ gate-check.mjs            # P0 门禁 v4（含 signoff 指纹组 + 多形态密钥扫描）
 │  ├─ check-env.mjs             # M6b 构建链自检（含隔离工具链探测）
 │  ├─ lib/tar.mjs               # 零依赖 tar 解析（G9 解包比对）
 │  ├─ sync-protocol.mjs         # ADR-009：生成 PROTOCOL.md + --check CI 校验
 │  ├─ apply-workbuddy-revisions.mjs # r2 对标复核修订（带断言与备份）
 │  ├─ apply-r2-followups.mjs    # r2 遗留口径与 M6b 结论收口（带断言）
+│  ├─ apply-p1-prereq-updates.mjs # P1 前置提案状态回填（带断言）
+│  ├─ apply-gate-hardening.mjs  # 门禁 v4 文档同步（带断言）
 │  ├─ toolchain-env.sh          # source 后前置隔离 Node 24 / pnpm 11
 │  ├─ signoff-check.mjs         # 会签就绪终检（一条命令出签字清单）
 │  ├─ apply-spike-revisions.mjs # v1.0→v1.1 文档修订（带断言与原文备份）

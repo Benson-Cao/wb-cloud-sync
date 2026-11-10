@@ -1,8 +1,8 @@
 {
-  "schema": "wbsync-gate-check/3",
-  "capturedAt": "2026-11-10T01:06:03.947Z",
+  "schema": "wbsync-gate-check/4",
+  "capturedAt": "2026-11-10T01:12:54.727Z",
   "git": {
-    "head": "8153316c848ec75b2abfe52c718abc724db1d352",
+    "head": "40b7c99d26abddde9648c784131fa0f2a6b3f5bf",
     "branch": "main",
     "worktreeClean": false
   },
@@ -10,33 +10,28 @@
   "freshness": {
     "status": "CURRENT",
     "dataChanged": [],
+    "signoffChanged": [],
     "artifactChanged": [
       "dist-tarball"
     ],
-    "narrativeChanged": [
-      "REPORT.md",
-      "PROTOCOL.md"
-    ],
+    "narrativeChanged": [],
     "notes": [
       "发布物已重建（仅记录，不影响判定）：dist-tarball"
     ],
-    "previousCapturedAt": "2026-11-10T00:57:44.029Z",
-    "previousGitHead": "d4f02cba8384cbca96bf676134a33c6520510c84",
+    "previousCapturedAt": "2026-11-10T01:12:09.800Z",
+    "previousGitHead": "40b7c99d26abddde9648c784131fa0f2a6b3f5bf",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "DRIFTED",
-      "previousReason": "描述文字变化（不阻断）：REPORT.md, PROTOCOL.md",
-      "capturedAt": "2026-11-10T00:57:44.029Z",
-      "gitHead": "d4f02cba8384cbca96bf676134a33c6520510c84",
+      "previousStatus": "CURRENT",
+      "capturedAt": "2026-11-10T01:12:09.800Z",
+      "gitHead": "40b7c99d26abddde9648c784131fa0f2a6b3f5bf",
       "dataChanged": [],
+      "signoffChanged": [],
       "artifactChanged": [
         "dist-tarball"
       ],
-      "narrativeChanged": [
-        "REPORT.md",
-        "PROTOCOL.md"
-      ]
+      "narrativeChanged": []
     }
   },
   "fingerprints": {
@@ -47,13 +42,30 @@
       "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
       "check-plugin.json": "dd51f55c91dd8367a8d7db588e192e9e06f54d232594a676997c504866c12f75"
     },
+    "signoff": {
+      "SECURITY-REVIEW.md": "654740fe43c975e8a6fe2ee4dd2205b14e79c0641fa4874947fc0ce6acd529c0",
+      "SIGN-OFF.md": "ca1827288de7af3d1dd6791d38694dbb96a21e7b946caf54578dc5ffde365147",
+      "01-charter.md": "cfe7a784aceb3a1bd70aaa3ded39414ab1b9f7de44d396da9d29cc840c93b14d",
+      "P1-PREREQUISITES.md": "5d05eba21653bf104488ab8a58d02da61ebc3757d3946dff1c4871022ae2fda6",
+      "WORKBUDDY-REFERENCE.md": "e286a4af7afe2aab6f9462bfec7d0baf25ff4c892b21245624963490be49cdcc"
+    },
     "artifact": {
-      "dist-tarball": "ba85bf5cf555ee44a7f9644e0187594e4a4b04dcaecda66f6b98a4332cc4920d"
+      "dist-tarball": "45e48dc4f63a21f3c564aec9ee7ab21c0c0782e91052f0abc16ee6952daab63f"
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
       "PROTOCOL.md": "9bd79939c4043f4a1a0e95e4aaeb92c93aeb2e3aa6a43a0a6bf43d1a35abdc9d"
     }
+  },
+  "secretScan": {
+    "filesScanned": 49,
+    "patterns": [
+      "github-classic",
+      "github-fine-grained",
+      "sk-prefixed",
+      "private-key"
+    ],
+    "hits": []
   },
   "tarballFiles": [
     {
@@ -120,7 +132,7 @@
     },
     {
       "id": "G8",
-      "label": "仓库跟踪文件无 PAT/密钥命中",
+      "label": "工作区（含未跟踪）无多形态密钥命中",
       "pass": true
     },
     {
@@ -165,13 +177,13 @@
     {
       "id": "M6a",
       "label": "CI 闸门接入（GitHub Actions · gate.yml）",
-      "status": "MET · run 42366496926",
+      "status": "MET · 持续绿灯",
       "owner": "HE-A + BE-RL"
     },
     {
       "id": "M6b",
       "label": "本地构建链 Node ≥24.9 + pnpm 11（见 scripts/check-env.mjs）",
-      "status": "NOT MET · 2/5",
+      "status": "MET · 5/5 READY",
       "owner": "HE-A + BE-RL"
     },
     {

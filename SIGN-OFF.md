@@ -49,7 +49,7 @@
 | G5 | 真机加载 + 运行时事件闭环（REPORT §4.1.2） | PASS · 19 条 / seq 4→22 |
 | G6 | TC-4.10 真机卸载残留（REPORT §4.1.3） | PASS · 404 |
 | G7 | ADR-007~010 已写入 `03` | PASS · 4/4 |
-| G8 | 仓库跟踪文件无 PAT / 密钥 | PASS · 0 命中 |
+| G8 | 工作区（含未跟踪文件）多形态密钥扫描 | PASS · 0 命中 / 4 类形态 |
 | G9 | 发布包内容与仓库源码逐文件一致（解包比对） | PASS · 5/5 文件 |
 
 复跑：`node scripts/gate-check.mjs --check`（自动项全过 exit 0）；CI 用 `--check --assert-fresh`（`.github/workflows/gate.yml`）。
@@ -120,20 +120,23 @@ Get-NetTCPConnection -State Listen | Where-Object {
 | CI 每次运行的 `gate-check.mjs --check` | **闸门**：永远反映当前代码 | 每次 push / PR 自动跑 | **能**，但不落盘、不留档 |
 | `spike/evidence/gate-check.json` | **审计快照**：会签时点的证明 | 证据数据变化时由人重跑并提交 | **`CURRENT` 或 `DRIFTED` 可用**；`STALE` 只能当历史 |
 
-**指纹分三组**（不按 git HEAD 判，只改提交信息不该让快照失效）：
+**指纹分四组**（不按 git HEAD 判，只改提交信息不该让快照失效）：
 
 | 组 | 文件 | 变了意味着 | 判定 |
 |---|---|---|---|
 | **data（事实）** | `index.js`、`cordis.patch.yml`、`package.json`、`host-probe.json`、`check-plugin.json` | 运行代码或实测证据已变 | **`STALE`** → CI exit 2，必须重算 |
+| **signoff（会签材料）** | `SECURITY-REVIEW.md`、`SIGN-OFF.md`、`docs/01` 会签表、`P1-PREREQUISITES.md`、`WORKBUDDY-REFERENCE.md` | **签字人实际要读的材料被改** | **`STALE`** → CI exit 2，必须重算 |
 | **artifact（发布物）** | `dist/*.tgz` | 重新打包了 | **仅记录 + NOTE，不影响判定** |
 | **narrative（说法）** | `REPORT.md`、`PROTOCOL.md` | 措辞 / 描述更新 | **`DRIFTED`**，放行 + NOTE |
 
+- **为什么加 signoff 组**（2026-11-10 门禁可靠性审计）：原先会签材料不在任何指纹组里，若有人把 `SECURITY-REVIEW.md` 第 5 项从「须书面接受」改成「已通过」，快照仍 `CURRENT`、CI 仍绿灯，签字人会签在被改过的材料上。会签材料变化按 **`STALE`** 阻断处理，比 `DRIFTED` 更严。
 - **为什么 artifact 不参与判定**：`npm pack` **不可复现**——同样内容两次打包 sha 不同（gzip 头带时间戳）。实测：只给 README 加一个空行再 repack，tgz sha 从 `6904a9e2…` 变成 `b8549748…`；恢复 README 再 repack 仍是新 sha。若纳入判定，每次打包都会误报。
-- 三档：`CURRENT`（data 与 narrative 一致）／`DRIFTED`（仅描述漂移，不阻断）／`STALE`（data 变 / 旧格式快照 / 超期）。
+- 三档：`CURRENT`（四组一致）／`DRIFTED`（仅描述漂移，不阻断）／`STALE`（data 或 signoff 变 / 旧格式快照 / 超期）。缺 `signoff` 组的 v3 快照按旧格式判 `STALE`，不静默放行。
 - 兜底上限 **30 天**：即使数据没变，超过 30 天的快照也判 `STALE`。
-- 一句话：**改错别字不拦人，重新打包不误报，运行代码或实测证据一变就拦死。**
+- 一句话：**改错别字不拦人，重新打包不误报，运行代码、实测证据或会签材料一变就拦死。**
 - ✅ 「发布物与源码是否一致」由 **G9 解包比对**覆盖：不比 tgz 本身（不可复现），而是解包后逐文件比 sha256，5/5 一致才 PASS。实测：改 `index.js` 但不 repack → G9 FAIL、自动项 8/9、exit 1。因此**保留 `dist/*.tgz` 在仓库、继续走 GitHub 分发**是安全的。
-- 会签时请抄下 `capturedAt` / `git.head` / `fingerprints.data` 摘要写进签署栏备注，事后可复核。
+- **G8 加固**：由「只扫已跟踪文件的 `ghp_`」改为遍历工作区（含未跟踪文件）+ 4 类形态（GitHub classic / 细粒度 PAT / `sk-` 型 / 私钥头）；命中只记录路径、行号与形态，不把匹配内容写进证据。
+- 会签时请抄下 `capturedAt` / `git.head` / `fingerprints.data` / `fingerprints.signoff` 摘要写进签署栏备注，事后可复核。
 
 ## 五、签署栏
 

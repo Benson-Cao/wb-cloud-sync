@@ -6,13 +6,20 @@
  *
  *   node scripts/gate-check.mjs            # 打印 + 写证据
  *   node scripts/gate-check.mjs --check    # CI 模式：自动项全过才 exit 0
+ *   node scripts/gate-check.mjs --check --assert-fresh   # 额外要求快照不过期
  *
  * 输出：spike/evidence/gate-check.json（入库，作为会签时点的机器可读快照）
+ *
+ * 2026-11-10 v4 加固：
+ *   - 新增 signoff 指纹组：会签材料（安全一页纸 / 会签包 / 01 会签表 /
+ *     P1 前置提案 / 对标复核）一变即 STALE，防止「材料被改而快照仍 CURRENT」。
+ *   - G8 改为遍历工作区（含未跟踪文件）+ 多形态密钥正则，不再只扫 ghp_ 与已跟踪文件。
+ *   - manual 的 M6a / M6b 状态与 SIGN-OFF.md 对齐。
  */
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { listTarEntries } from './lib/tar.mjs'
 
@@ -31,12 +38,62 @@ const git = (...args) => {
 }
 const json = (p) => { try { return JSON.parse(read(p) ?? '{}') } catch { return {} } }
 
+// ── 密钥扫描：遍历工作区，含未跟踪文件 ────────────────────────────────
+// git grep 只能扫已跟踪文件，且原先只认 ghp_ 一种形态。会签前新建的临时
+// 文件、细粒度 PAT、gho_/ghu_/ghs_/ghr_、sk- 型密钥、私钥头都会漏。
+const SECRET_PATTERNS = [
+  { id: 'github-classic', re: /gh[pousr]_[A-Za-z0-9]{20,}/ },
+  { id: 'github-fine-grained', re: /github_pat_[A-Za-z0-9_]{20,}/ },
+  { id: 'sk-prefixed', re: /\bsk-[A-Za-z0-9]{20,}\b/ },
+  { id: 'private-key', re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/ },
+]
+const SKIP_DIRS = new Set([
+  '.git', 'node_modules', 'dist',
+  '.revisions-backup', '.revisions-backup-realdevice', '.revisions-backup-workbuddy',
+])
+const TEXT_EXT = /\.(md|markdown|json|js|mjs|cjs|ts|tsx|yml|yaml|txt|sh|toml|cfg|ini|env|html|css|svg|py)$/i
+
+const scanSecrets = () => {
+  const hits = []
+  let filesScanned = 0
+  const walk = (dir) => {
+    let entries
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      const full = join(dir, e.name)
+      if (e.isDirectory()) {
+        if (SKIP_DIRS.has(e.name) || /^dsh-home-/.test(e.name)) continue
+        walk(full)
+      } else if (e.isFile()) {
+        if (!TEXT_EXT.test(e.name)) continue
+        let size
+        try { size = statSync(full).size } catch { continue }
+        if (size > 2_000_000) continue
+        let text
+        try { text = readFileSync(full, 'utf8') } catch { continue }
+        if (text.includes('\0')) continue
+        filesScanned++
+        const lines = text.split('\n')
+        for (let i = 0; i < lines.length; i++) {
+          for (const p of SECRET_PATTERNS) {
+            // 只记录位置与形态，绝不把匹配内容写进证据
+            if (p.re.test(lines[i])) hits.push({ file: relative(ROOT, full).replace(/\\/g, '/'), line: i + 1, pattern: p.id })
+          }
+        }
+      }
+    }
+  }
+  walk(ROOT)
+  return { filesScanned, patterns: SECRET_PATTERNS.map((p) => p.id), hits, clean: hits.length === 0 }
+}
+
 const pin = read('pinned-commit.txt') ?? ''
 const upstreamCommit = /^upstream_commit=(.+)$/m.exec(pin)?.[1]?.trim() ?? null
 const hostProbe = json('spike/evidence/host-probe.json')
 const checkPlugin = json('spike/evidence/check-plugin.json')
 const report = read('spike/REPORT.md') ?? ''
 const arch = read('docs/03_系统架构设计.md') ?? ''
+const secretScan = scanSecrets()
 
 let protocolSync = false
 try {
@@ -45,20 +102,12 @@ try {
   protocolSync = true
 } catch { /* 不一致即 FAIL */ }
 
-let secretClean = false
-try {
-  execFileSync('git', ['grep', '-n', '-I', '-E', 'ghp_[A-Za-z0-9]{20,}'],
-    { cwd: ROOT, stdio: 'pipe', timeout: 15000 })
-  // grep 命中时 exit 0 → 有泄漏
-} catch (error) {
-  // exit 1 = 无命中；其它错误保守判失败
-  secretClean = error?.status === 1
-}
-
-// 指纹分两组：**证据数据**（事实）与**描述文字**（说法）。
-// 事实一变必须重算快照；只是措辞变了不该拦 PR。
+// 指纹分四组：
+//   data     运行代码 + 实测证据（事实）→ 变了 STALE
+//   signoff  会签材料（签字人实际要读的东西）→ 变了 STALE
+//   narrative 描述文字（说法）→ 变了 DRIFTED，不阻断
+//   artifact 发布物 → 仅记录，不参与判定（npm pack 不可复现）
 const fingerprints = {
-  // 运行代码 + 实测证据：这一组是「事实」，变了必须重算快照
   data: {
     'index.js': sha256('index.js'),
     'cordis.patch.yml': sha256('cordis.patch.yml'),
@@ -66,12 +115,16 @@ const fingerprints = {
     'host-probe.json': sha256('spike/evidence/host-probe.json'),
     'check-plugin.json': sha256('spike/evidence/check-plugin.json'),
   },
-  // 发布物：tgz 里含 README，重建（哪怕只改了文档）不代表事实变了，
-  // 所以只提示核对，不阻断。
+  signoff: {
+    'SECURITY-REVIEW.md': sha256('SECURITY-REVIEW.md'),
+    'SIGN-OFF.md': sha256('SIGN-OFF.md'),
+    '01-charter.md': sha256('docs/01_项目章程.md'),
+    'P1-PREREQUISITES.md': sha256('P1-PREREQUISITES.md'),
+    'WORKBUDDY-REFERENCE.md': sha256('WORKBUDDY-REFERENCE.md'),
+  },
   artifact: {
     'dist-tarball': sha256('dist/dsh-wb-cloud-sync-spike-0.1.0.tgz'),
   },
-  // 说法：描述文字
   narrative: {
     'REPORT.md': sha256('spike/REPORT.md'),
     'PROTOCOL.md': sha256('PROTOCOL.md'),
@@ -88,31 +141,31 @@ const diffGroup = (group) => (previous?.fingerprints?.[group]
   : null)
 
 const dataChanged = diffGroup('data')
+const signoffChanged = diffGroup('signoff')
 const artifactChanged = diffGroup('artifact')
 const narrativeChanged = diffGroup('narrative')
-const legacySnapshot = Boolean(previous) && !previous.fingerprints
+// 缺 signoff 组的 v3 快照按旧格式处理，不静默放行
+const legacySnapshot = Boolean(previous) && (!previous.fingerprints || !previous.fingerprints.signoff)
 
 const ageDays = previous?.capturedAt
   ? Math.floor((Date.now() - Date.parse(previous.capturedAt)) / 86_400_000)
   : null
 
-// CURRENT  = 三组一致
+// CURRENT  = 四组一致
 // DRIFTED  = 仅发布物重建 / 描述文字变化（不阻断，但留痕）
-// STALE    = 运行代码或证据数据变化 / 旧格式快照 / 超过 30 天（阻断）
-// 发布物（tgz）是派生产物，且 npm pack 不可复现（gzip 头带时间戳）：
-// 同样内容两次打包 sha 不同。所以 artifact 变化**只记录、不参与判定**，
-// 否则每次 repack 都会误报。防「发布物与源码脱节」靠 G4 之外的实时校验，
-// 而不是快照指纹。
+// STALE    = 运行代码 / 会签材料 / 证据数据变化 / 旧格式快照 / 超期（阻断）
 let status
 if (!previous) status = 'FIRST_RUN'
 else if (legacySnapshot) status = 'STALE'
 else if (dataChanged?.length) status = 'STALE'
+else if (signoffChanged?.length) status = 'STALE'
 else if (narrativeChanged?.length) status = 'DRIFTED'
 else status = 'CURRENT'
 
 const freshness = {
   status,
   dataChanged: dataChanged ?? [],
+  signoffChanged: signoffChanged ?? [],
   artifactChanged: artifactChanged ?? [],
   narrativeChanged: narrativeChanged ?? [],
   notes: [],
@@ -125,9 +178,11 @@ if (artifactChanged?.length) {
   freshness.notes.push(`发布物已重建（仅记录，不影响判定）：${artifactChanged.join(', ')}`)
 }
 if (legacySnapshot) {
-  freshness.reason = `快照格式为 ${previous.schema ?? '未知'}（缺少分组指纹），需重算一次`
+  freshness.reason = `快照格式为 ${previous.schema ?? '未知'}（缺少 signoff 指纹组或分组指纹），需重算一次`
 } else if (status === 'STALE' && dataChanged?.length) {
   freshness.reason = `运行代码/证据已变化（阻断）：${dataChanged.join(', ')}`
+} else if (status === 'STALE' && signoffChanged?.length) {
+  freshness.reason = `会签材料已变化（阻断）：${signoffChanged.join(', ')}`
 } else if (status === 'DRIFTED') {
   freshness.reason = `描述文字变化（不阻断）：${narrativeChanged.join(', ')}`
 }
@@ -138,7 +193,6 @@ if ((status === 'CURRENT' || status === 'DRIFTED') && ageDays !== null && ageDay
 
 // G9：发布包内容与仓库源码逐文件一致。
 // tgz 不可复现（gzip 头带时间），所以只比对**解包后的文件 sha**，不比 tgz 本身。
-// 这样既能保证「装到的东西 = 源码」，又不会被 repack 误报。
 const TARBALL = join(ROOT, 'dist/dsh-wb-cloud-sync-spike-0.1.0.tgz')
 const TARBALL_MAP = {
   'package/index.js': 'index.js',
@@ -176,8 +230,8 @@ const automated = [
     pass: report.includes('4.1.3') },
   { id: 'G7', label: 'ADR-007~010 已写入 03',
     pass: (arch.match(/^### ADR-(00[789]|010)/gm) ?? []).length === 4 },
-  { id: 'G8', label: '仓库跟踪文件无 PAT/密钥命中',
-    pass: secretClean },
+  { id: 'G8', label: '工作区（含未跟踪）无多形态密钥命中',
+    pass: secretScan.clean },
   { id: 'G9', label: '发布包内容与仓库源码逐文件一致（解包比对）',
     pass: tarballConsistent },
 ]
@@ -189,13 +243,13 @@ const manual = [
   { id: 'M3', label: 'ADR-008 幂等与写入权归宿主', status: '提议中，待会签', owner: 'ARC + PM' },
   { id: 'M4', label: 'ADR-009 PROTOCOL.md 为唯一契约源', status: '提议中，待会签', owner: 'ARC' },
   { id: 'M5', label: '安全项一票否决权行使（08 / 01 §6）', status: '待安全 Owner', owner: '安全 Owner' },
-  { id: 'M6a', label: 'CI 闸门接入（GitHub Actions · gate.yml）', status: 'MET · run 42366496926', owner: 'HE-A + BE-RL' },
-  { id: 'M6b', label: '本地构建链 Node ≥24.9 + pnpm 11（见 scripts/check-env.mjs）', status: 'NOT MET · 2/5', owner: 'HE-A + BE-RL' },
+  { id: 'M6a', label: 'CI 闸门接入（GitHub Actions · gate.yml）', status: 'MET · 持续绿灯', owner: 'HE-A + BE-RL' },
+  { id: 'M6b', label: '本地构建链 Node ≥24.9 + pnpm 11（见 scripts/check-env.mjs）', status: 'MET · 5/5 READY', owner: 'HE-A + BE-RL' },
   { id: 'M7', label: 'ADR-010 正文可见性边界（信任边界，安全 Owner 必看）', status: '提议中，待会签', owner: 'ARC + 安全 Owner' },
 ]
 
 const result = {
-  schema: 'wbsync-gate-check/3',
+  schema: 'wbsync-gate-check/4',
   capturedAt: new Date().toISOString(),
   git: {
     head: git('rev-parse', 'HEAD'),
@@ -205,6 +259,11 @@ const result = {
   pinnedCommit: upstreamCommit,
   freshness,
   fingerprints,
+  secretScan: {
+    filesScanned: secretScan.filesScanned,
+    patterns: secretScan.patterns,
+    hits: secretScan.hits,
+  },
   tarballFiles: tarballChecks,
   automated,
   automatedPassed: automated.filter((c) => c.pass).length,
@@ -231,6 +290,7 @@ if (!process.argv.includes('--check')) {
         capturedAt: freshness.previousCapturedAt,
         gitHead: freshness.previousGitHead,
         dataChanged: freshness.dataChanged,
+        signoffChanged: freshness.signoffChanged,
         artifactChanged: freshness.artifactChanged,
         narrativeChanged: freshness.narrativeChanged,
       },
@@ -242,6 +302,7 @@ if (!process.argv.includes('--check')) {
 console.log('P0 门禁自动核查 ·', result.capturedAt)
 for (const c of automated) console.log(`  ${c.id} ${(c.pass ? 'PASS' : 'FAIL').padEnd(5)} ${c.label}`)
 console.log(`  自动项 ${result.automatedPassed}/${result.automatedTotal}`)
+console.log(`  密钥扫描 ${secretScan.filesScanned} 个文本文件 / ${secretScan.hits.length} 命中`)
 console.log('  人工项（不由脚本判定）：')
 for (const m of manual) console.log(`    ${m.id} ${m.status.padEnd(16)} ${m.label}`)
 console.log('  门禁:', result.gate, '| git:', result.git.branch, result.git.head?.slice(0, 8), '| clean:', result.git.worktreeClean)
@@ -252,7 +313,7 @@ if (process.argv.includes('--check')) {
   const ok = automated.every((c) => c.pass)
   const stale = freshness.status === 'STALE'
   if (process.argv.includes('--assert-fresh') && stale) {
-    console.error('  FAIL: 快照 STALE（证据数据变了 / 旧格式 / 超期）→ 先运行 node scripts/gate-check.mjs 重算并提交')
+    console.error('  FAIL: 快照 STALE（运行代码 / 会签材料 / 证据变了，或旧格式 / 超期）→ 先运行 node scripts/gate-check.mjs 重算并提交')
     process.exitCode = 2
   } else {
     if (freshness.reason) console.log('  NOTE:', freshness.reason)
