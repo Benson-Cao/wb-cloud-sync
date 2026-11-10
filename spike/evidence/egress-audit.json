@@ -1,19 +1,19 @@
 {
   "schema": "wbsync-egress-audit/1",
-  "capturedAt": "2026-11-10T14:22:33.009Z",
+  "capturedAt": "2026-11-10T14:32:44.996Z",
   "scope": "p1",
   "extensions": [
     ".js",
     ".mjs",
     ".html"
   ],
-  "filesScanned": 31,
-  "urlLiterals": 38,
+  "filesScanned": 32,
+  "urlLiterals": 40,
   "hosts": [
     {
       "host": "127.0.0.1",
       "class": "loopback",
-      "count": 30,
+      "count": 32,
       "files": [
         "p1/host-plugin/build-bundle.mjs",
         "p1/host-plugin/test/bundle.test.mjs",
@@ -24,6 +24,7 @@
         "p1/pwa/test/pwa.test.mjs",
         "p1/relay/run.mjs",
         "p1/relay/src/server.js",
+        "p1/relay/test/chaos.test.mjs",
         "p1/relay/test/cp-separation.test.mjs",
         "p1/relay/test/events.test.mjs",
         "p1/relay/test/listen.test.mjs",
@@ -89,7 +90,9 @@
       }
     ],
     "external": [],
-    "note": "只覆盖 Relay 进程；DSH 宿主进程组不在审计范围（第三方应用的更新/遥测会干扰结论）"
+    "note": "只覆盖 Relay 进程；DSH 宿主进程组不在审计范围（第三方应用的更新/遥测会干扰结论） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:22:33.009Z 的实测；要刷新请加 --runtime）",
+    "carriedOver": true,
+    "measuredAt": "2026-11-10T14:22:33.009Z"
   },
   "pktmon": {
     "status": "NOT_RUN",

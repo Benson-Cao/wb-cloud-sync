@@ -149,7 +149,30 @@ const collectRuntime = (enabled) => {
   }
 }
 
-const runtime = collectRuntime(process.argv.includes('--runtime'))
+const MEASURED_RUNTIME = ['PASS', 'REVIEW_REQUIRED', 'ERROR']
+
+/**
+ * 只跑静态档时**不得抹掉**上一份的运行时实测结论。
+ * 曾经发生过：加过一次 `--runtime` 拿到 PASS，之后随手跑 `--check` 再写证据，
+ * 运行时半边被覆盖成 `NOT_RUN`——证据自己降级，比没测更糟（读的人会以为没测过）。
+ * 因此沿用上一份实测值并标明来源与测量时间，要刷新就显式加 `--runtime`。
+ */
+const carryOverRuntime = (fresh, previous) => {
+  if (fresh.status !== 'NOT_RUN') return fresh
+  const prev = previous?.runtimeHalf
+  if (!prev || !MEASURED_RUNTIME.includes(prev.status)) return fresh
+  return {
+    ...prev,
+    carriedOver: true,
+    measuredAt: previous.capturedAt ?? null,
+    note: `${prev.note ? `${prev.note} ` : ''}（本次只跑了静态档，运行时数字沿用 ${previous.capturedAt ?? '上一份'} 的实测；要刷新请加 --runtime）`,
+  }
+}
+
+const previousEvidence = (() => {
+  try { return JSON.parse(readFileSync(OUT, 'utf8')) } catch { return null }
+})()
+const runtime = carryOverRuntime(collectRuntime(process.argv.includes('--runtime')), previousEvidence)
 
 const result = {
   schema: 'wbsync-egress-audit/1',

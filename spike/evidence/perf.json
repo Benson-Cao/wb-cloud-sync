@@ -1,0 +1,282 @@
+{
+  "schema": "wbsync-perf/1",
+  "capturedAt": "2026-11-10T14:31:07.445Z",
+  "scope": "p1/relay 单实例 · 本机回环（不含跨网 RTT）",
+  "runtime": {
+    "node": "v24.22.2",
+    "platform": "win32 10.0.26200",
+    "arch": "x64",
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13600KF",
+    "cores": 20
+  },
+  "config": {
+    "requestTimeoutMs": 10000,
+    "frameSamples": 500,
+    "burstSamples": 200,
+    "eventSamples": 1000,
+    "wsConnections": 500
+  },
+  "limits": {
+    "eventP95Ms": 300,
+    "concurrentWs": 500,
+    "hangMs": 10000
+  },
+  "cases": [
+    {
+      "id": "B1",
+      "name": "帧往返延迟（顺序）",
+      "metric": "P95",
+      "value": 0.434,
+      "threshold": 300,
+      "unit": "ms",
+      "verdict": "PASS"
+    },
+    {
+      "id": "B1b",
+      "name": "帧往返延迟（顺序）",
+      "metric": "失败请求数",
+      "value": 0,
+      "threshold": 0,
+      "unit": "count",
+      "verdict": "PASS",
+      "pass": true,
+      "note": "状态码非 200 或响应串号都算失败"
+    },
+    {
+      "id": "B2",
+      "name": "帧延迟（200 并发）",
+      "metric": "P95",
+      "value": 73.004,
+      "threshold": 300,
+      "unit": "ms",
+      "verdict": "PASS"
+    },
+    {
+      "id": "B2b",
+      "name": "帧延迟（200 并发）",
+      "metric": "串号/失败数",
+      "value": 0,
+      "threshold": 0,
+      "unit": "count",
+      "verdict": "PASS",
+      "pass": true
+    },
+    {
+      "id": "B3",
+      "name": "事件端到端（1000 条 · 逐条）",
+      "metric": "P95",
+      "value": 28,
+      "threshold": 300,
+      "unit": "ms",
+      "verdict": "PASS",
+      "note": "docs/07 TC-8.1 局域网 P95 < 300ms；本机回环取最优情形"
+    },
+    {
+      "id": "B3b",
+      "name": "事件端到端（1000 条 · 逐条）",
+      "metric": "丢帧数",
+      "value": 0,
+      "threshold": 0,
+      "unit": "count",
+      "verdict": "PASS",
+      "pass": true
+    },
+    {
+      "id": "B4",
+      "name": "事件端到端（1000 条 · 一次性灌入）",
+      "metric": "P95",
+      "value": 27,
+      "threshold": 300,
+      "unit": "ms",
+      "verdict": "PASS",
+      "note": "最坏情形：不做流控一次性推完，P95 含排队时间"
+    },
+    {
+      "id": "B5",
+      "name": "10s 防悬挂",
+      "metric": "最大观测延迟",
+      "value": 73.048,
+      "threshold": 10000,
+      "unit": "ms",
+      "verdict": "PASS",
+      "pass": true,
+      "note": "任何一帧逼近 10s 都说明搬运路径在堆积"
+    },
+    {
+      "id": "B6",
+      "name": "单实例并发 WS",
+      "metric": "同时挂住的 Host 连接",
+      "value": 501,
+      "threshold": 500,
+      "unit": "count",
+      "verdict": "PASS",
+      "pass": true,
+      "note": "建连耗时 237.8ms"
+    },
+    {
+      "id": "B7",
+      "name": "并发连接拆除",
+      "metric": "残留 socket",
+      "value": 0,
+      "threshold": 0,
+      "unit": "count",
+      "verdict": "PASS",
+      "pass": true,
+      "note": "残留在途请求 0 条；死连接会拖住 server.close()"
+    }
+  ],
+  "latency": {
+    "frameSequential": {
+      "count": 500,
+      "minMs": 0.155,
+      "p50Ms": 0.231,
+      "p90Ms": 0.383,
+      "p95Ms": 0.434,
+      "p99Ms": 0.692,
+      "maxMs": 1.89,
+      "meanMs": 0.264
+    },
+    "frameBurst": {
+      "count": 200,
+      "minMs": 55.16,
+      "p50Ms": 65.277,
+      "p90Ms": 72.973,
+      "p95Ms": 73.004,
+      "p99Ms": 73.043,
+      "maxMs": 73.048,
+      "meanMs": 66.384
+    },
+    "eventPaced": {
+      "count": 1000,
+      "minMs": 1,
+      "p50Ms": 15,
+      "p90Ms": 27,
+      "p95Ms": 28,
+      "p99Ms": 29,
+      "maxMs": 29,
+      "meanMs": 14.461
+    },
+    "eventBlast": {
+      "count": 1000,
+      "minMs": 19,
+      "p50Ms": 23,
+      "p90Ms": 26,
+      "p95Ms": 27,
+      "p99Ms": 27,
+      "maxMs": 28,
+      "meanMs": 23.187
+    }
+  },
+  "histogram": {
+    "frameSequential": {
+      "buckets": [
+        {
+          "leMs": 1,
+          "count": 498
+        },
+        {
+          "leMs": 2,
+          "count": 2
+        },
+        {
+          "leMs": 5,
+          "count": 0
+        },
+        {
+          "leMs": 10,
+          "count": 0
+        },
+        {
+          "leMs": 20,
+          "count": 0
+        },
+        {
+          "leMs": 50,
+          "count": 0
+        },
+        {
+          "leMs": 100,
+          "count": 0
+        },
+        {
+          "leMs": 200,
+          "count": 0
+        },
+        {
+          "leMs": 500,
+          "count": 0
+        },
+        {
+          "leMs": 1000,
+          "count": 0
+        },
+        {
+          "leMs": 5000,
+          "count": 0
+        },
+        {
+          "leMs": 10000,
+          "count": 0
+        }
+      ],
+      "overflow": 0,
+      "total": 500
+    },
+    "eventPaced": {
+      "buckets": [
+        {
+          "leMs": 1,
+          "count": 49
+        },
+        {
+          "leMs": 2,
+          "count": 45
+        },
+        {
+          "leMs": 5,
+          "count": 105
+        },
+        {
+          "leMs": 10,
+          "count": 150
+        },
+        {
+          "leMs": 20,
+          "count": 350
+        },
+        {
+          "leMs": 50,
+          "count": 301
+        },
+        {
+          "leMs": 100,
+          "count": 0
+        },
+        {
+          "leMs": 200,
+          "count": 0
+        },
+        {
+          "leMs": 500,
+          "count": 0
+        },
+        {
+          "leMs": 1000,
+          "count": 0
+        },
+        {
+          "leMs": 5000,
+          "count": 0
+        },
+        {
+          "leMs": 10000,
+          "count": 0
+        }
+      ],
+      "overflow": 0,
+      "total": 1000
+    }
+  },
+  "verdict": "PASS",
+  "note": "帧延迟含同进程 Host 应答的事件循环调度开销；真实跨网需叠加网络 RTT，故此处是下限值而非上限。"
+}

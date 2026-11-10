@@ -1,6 +1,6 @@
 {
   "schema": "wbsync-env-check/2",
-  "capturedAt": "2026-11-10T00:57:45.416Z",
+  "capturedAt": "2026-11-10T14:30:52.992Z",
   "platform": "win32",
   "scope": "构建链（当前进程 + 隔离工具链），不是 DSH 宿主运行时",
   "tools": {

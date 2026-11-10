@@ -257,6 +257,31 @@ export function createRelay(options = {}) {
     return cp.isDeviceAlive(deviceId, now())
   }
 
+  /**
+   * 往一个可能已经断掉的 HTTP 响应上写错误：客户端先断开时 writeHead 会抛
+   * `ERR_STREAM_DESTROYED`，在 setTimeout 回调里抛就是未捕获异常，能把进程带走。
+   */
+  const safeFail = (res, status, code, message, retryable) => {
+    try { fail(res, status, code, message, retryable) } catch { /* 对端已断开，无需再写 */ }
+  }
+
+  /**
+   * Host 连接猝死时，挂在它上面的在途请求永远等不到回帧：立刻判失败，
+   * 不让手机空等到超时窗口（默认 10s）才看到 504。
+   * 只回收**这一条连接**上的请求——降级轮询通道的条目 conn 为 undefined，不受影响。
+   */
+  const failPendingOnConn = (conn) => {
+    let failed = 0
+    for (const [reqId, p] of [...state.pending]) {
+      if (p.conn !== conn) continue
+      state.pending.delete(reqId)
+      clearTimeout(p.timer)
+      safeFail(p.res, 409, 'HOST_OFFLINE', 'Host 连接中断，请求未完成', true)
+      failed++
+    }
+    return failed
+  }
+
   /** 手机侧 /d/<id>/<endpoint> 请求 → 帧 → 等待 Host 响应。afterResponse 在响应落地后拿到原始应答（可选）。 */
   const bridge = (req, res, deviceId, endpoint, body, afterResponse = null) => {
     const reqId = hex(16)
@@ -274,10 +299,12 @@ export function createRelay(options = {}) {
       const p = state.pending.get(reqId)
       if (!p) return
       state.pending.delete(reqId)
-      fail(res, 504, 'NO_PROGRESS', '10s 内 Host 未回响应', true)
+      safeFail(res, 504, 'NO_PROGRESS', '10s 内 Host 未回响应', true)
     }, cfg.requestTimeoutMs)
 
     state.pending.set(reqId, {
+      res,                                 // 连接猝死时用它快速回错误
+      conn: conn?.isOpen() ? conn : null,  // 记住这帧发在哪条连接上
       resolve: (response) => {
         clearTimeout(timer)
         reply(res, response.status ?? 200, response.body ?? { ok: true, data: {}, protocol: PROTOCOL })
@@ -664,6 +691,9 @@ export function createRelay(options = {}) {
       },
       onClose() {
         if (deviceId === null) return
+        // 发在这条连接上的在途帧已经不可能有回音（Host 换了新连接也认不出旧 reqId），
+        // 先就地判失败，再摘连接——顺序不能反，反了就先丢 socket 再没人认领这些请求。
+        failPendingOnConn(conn)
         if (state.sockets.get(deviceId) === conn) state.sockets.delete(deviceId)
         // WS 断开即视为离线，不等 45s 心跳窗口；HTTP 心跳可把状态再拉回 online
         cp.markDeviceOffline(deviceId)

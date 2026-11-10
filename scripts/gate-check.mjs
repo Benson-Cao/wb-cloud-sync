@@ -224,6 +224,48 @@ try {
 } catch { tarballChecks = [] }
 const tarballConsistent = tarballChecks.length > 0 && tarballChecks.every((c) => c.present && c.matched)
 
+// G10：P3 W10 的混沌 + 压测两件证据。
+// 混沌套件**现场重跑**（约 3s，确定性用例，适合放门禁）；压测只校验证据，
+// 不在这里重压 500 连接——门禁要快，重压留给 scripts/bench.mjs。
+let chaosPerf = { chaosPass: 0, chaosFail: null, chaosError: null, perfVerdict: null, perfAgeDays: null, perfReason: null }
+try {
+  const out = execFileSync(process.execPath, ['--test', 'p1/relay/test/chaos.test.mjs'],
+    { cwd: ROOT, encoding: 'utf8', timeout: 120_000, stdio: ['ignore', 'pipe', 'pipe'] })
+  const m = /# pass (\d+)[\s\S]*?# fail (\d+)/.exec(out)
+  chaosPerf.chaosPass = m ? Number(m[1]) : 0
+  chaosPerf.chaosFail = m ? Number(m[2]) : null
+} catch (e) {
+  const out = String(e.stdout ?? '')
+  const m = /# pass (\d+)[\s\S]*?# fail (\d+)/.exec(out)
+  chaosPerf.chaosPass = m ? Number(m[1]) : 0
+  chaosPerf.chaosFail = m ? Number(m[2]) : -1
+  chaosPerf.chaosError = String(e.message ?? e).split('\n')[0].slice(0, 120)
+}
+// 混沌套件至少 8 例全绿；`fail` 解析不出来也算失败（不能把「没跑成」当「没失败」）
+const chaosOk = chaosPerf.chaosFail === 0 && chaosPerf.chaosPass >= 8
+
+const perf = json('spike/evidence/perf.json')
+const perfAgeDays = perf.capturedAt ? (Date.now() - Date.parse(perf.capturedAt)) / 86_400_000 : null
+const perfB6 = (perf.cases ?? []).find((c) => c.id === 'B6')
+const perfReason = !perf.schema
+  ? '缺少 spike/evidence/perf.json（先跑 node scripts/bench.mjs）'
+  : perf.schema !== 'wbsync-perf/1'
+    ? `证据 schema 不符：${perf.schema}`
+    : perf.verdict !== 'PASS'
+      ? `压测判定 ${perf.verdict}`
+      : (perf.config?.wsConnections ?? 0) < 500 || perfB6?.threshold !== 500
+        // 快速档只冒烟 100 连接：拿它充全量会让「≥500」这条指标永远绿
+        ? '证据来自快速档（--quick），不能代表 500 并发指标'
+        : perfB6?.value < 500
+          ? `并发 WS 实测 ${perfB6?.value} < 500`
+          : perfAgeDays === null || perfAgeDays > 30
+            ? `压测证据已 ${Math.round(perfAgeDays ?? 999)} 天，超过 30 天上限`
+            : null
+chaosPerf.perfVerdict = perf.verdict ?? null
+chaosPerf.perfAgeDays = perfAgeDays === null ? null : Number(perfAgeDays.toFixed(1))
+chaosPerf.perfReason = perfReason
+const chaosPerfOk = chaosOk && perfReason === null
+
 const automated = [
   { id: 'G1', label: '三问离线取证 Q1/Q2/Q3 全 PASS',
     pass: ['Q1', 'Q2', 'Q3'].every((q) => hostProbe.questions?.[q]?.verdict === 'PASS') },
@@ -243,6 +285,8 @@ const automated = [
     pass: secretScan.clean },
   { id: 'G9', label: '发布包内容与仓库源码逐文件一致（解包比对）',
     pass: tarballConsistent },
+  { id: 'G10', label: '混沌套件现场重跑全绿 + 压测证据 PASS（500 并发 WS / P95 / 防悬挂）',
+    pass: chaosPerfOk },
 ]
 
 // 2026-11-10 发起人裁定：四方会签要求永久取消（SIGNOFF-WAIVER.md）。
@@ -259,7 +303,7 @@ const manual = [
 ]
 
 const result = {
-  schema: 'wbsync-gate-check/4',
+  schema: 'wbsync-gate-check/5',
   capturedAt: new Date().toISOString(),
   git: {
     head: git('rev-parse', 'HEAD'),
@@ -275,6 +319,7 @@ const result = {
     hits: secretScan.hits,
   },
   tarballFiles: tarballChecks,
+  chaosAndPerf: chaosPerf,
   automated,
   automatedPassed: automated.filter((c) => c.pass).length,
   automatedTotal: automated.length,
