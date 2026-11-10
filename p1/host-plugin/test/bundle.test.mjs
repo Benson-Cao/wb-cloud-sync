@@ -4,6 +4,9 @@
  * 外连真 Relay、本地路由（status / pair 代理）可注册、wrapper 配置合并生效。
  */
 import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { createRelay } from '../../relay/src/server.js'
 
@@ -49,6 +52,8 @@ const waitFor = async (predicate, timeout = 3000, describe = '条件') => {
 }
 
 before(async () => {
+  // 隔离 wrapper 的配置文件，避免测试写用户真实的 ~/.dsh/wbsync-host.json
+  process.env.WBSYNC_HOST_CONFIG = join(mkdtempSync(join(tmpdir(), 'wbsync-bundle-')), 'wbsync-host.json')
   bundle = await import('../bundle/index.js')
   relay = createRelay({ hostToken: 'host-secret', requestTimeoutMs: 1000 })
   port = await relay.start(0)
@@ -81,6 +86,43 @@ test('B2 bundle 的 pair 路由代理真 Relay 的 /pair/generate', async () => 
   assert.match(String(res.data.code), /^\d{6}$/)
   assert.equal(res.data.deviceId, 'pc-pair-b')
   ctx.dispose()
+})
+
+test('B4 wrapper 持久化 deviceId：跨调用稳定、显式配置优先且不覆写落盘值', async () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'wbsync-stable-')), 'nested', 'wbsync-host.json')
+  const prevConfig = process.env.WBSYNC_HOST_CONFIG
+  const prevDevice = process.env.WBSYNC_DEVICE_ID
+  process.env.WBSYNC_HOST_CONFIG = file
+  delete process.env.WBSYNC_DEVICE_ID
+  const made = []
+  let firstId = null
+  try {
+    for (let i = 0; i < 2; i++) {
+      const { ctx, routes } = createMockCtx()
+      made.push(ctx)
+      bundle.apply(ctx, { autoConnect: false })
+      const res = await callRoute(routes.get('/__wbsync/status'))
+      assert.match(res.data.deviceId, /^host-[0-9a-f-]{36}$/, '首次应生成稳定的 host-<uuid>')
+      if (i === 0) firstId = res.data.deviceId
+      else assert.equal(res.data.deviceId, firstId, '跨调用必须读到同一个稳定 ID')
+    }
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).deviceId, firstId, '已落盘到 0600 配置')
+
+    // 显式 env 只影响本次进程，不改写落盘的稳定 ID
+    process.env.WBSYNC_DEVICE_ID = 'pc-from-env'
+    const { ctx, routes } = createMockCtx()
+    made.push(ctx)
+    bundle.apply(ctx, { autoConnect: false })
+    const res = await callRoute(routes.get('/__wbsync/status'))
+    assert.equal(res.data.deviceId, 'pc-from-env')
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).deviceId, firstId)
+  } finally {
+    for (const ctx of made) ctx.dispose()
+    if (prevConfig === undefined) delete process.env.WBSYNC_HOST_CONFIG
+    else process.env.WBSYNC_HOST_CONFIG = prevConfig
+    if (prevDevice === undefined) delete process.env.WBSYNC_DEVICE_ID
+    else process.env.WBSYNC_DEVICE_ID = prevDevice
+  }
 })
 
 test('B3 wrapper 配置链：环境变量覆盖默认值（deviceId）', async () => {

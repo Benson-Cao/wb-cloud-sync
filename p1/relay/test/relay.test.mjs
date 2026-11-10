@@ -190,6 +190,67 @@ test('T8 #5b 客户端 sinceSeq 只作观测记录，不参与补齐决策', asy
   assert.equal((await inflight).status, 200)
 })
 
+test('T10 PC 侧主动吊销：写操作需 adminToken，吊销后令牌失效且墓碑不复活', async () => {
+  // 共享实例未配置 adminToken：页面可取，写操作必须拒绝
+  const ui = await fetch(`http://127.0.0.1:${port}/admin/ui`)
+  assert.equal(ui.status, 200)
+  const html = await ui.text()
+  assert.match(html, /设备管理/)
+  assert.match(html, /\/admin\/revoke/)
+  // 共享实例配置了 adminToken：缺 token 必须 401
+  const noToken = await call('/admin/revoke', { method: 'POST', body: { deviceId: 'dev-1' } })
+  assert.equal(noToken.status, 401)
+  assert.equal(noToken.json.error.code, 'UNAUTHORIZED')
+
+  // 未配置 adminToken 的实例：写操作明确 409 拒绝，不接受裸奔
+  const bare = createRelay()
+  const pBare = await bare.start(0)
+  try {
+    const r = await fetch(`http://127.0.0.1:${pBare}/admin/revoke`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'dev-1' }),
+    })
+    assert.equal(r.status, 409)
+    assert.equal((await r.json()).error.code, 'ENDPOINT_NOT_ALLOWED')
+  } finally { await bare.stop() }
+
+  // 独立实例配置 adminToken，走完整吊销链路
+  const admin = createRelay({ adminToken: 'adm-1', hostToken: 'host-secret' })
+  const p2 = await admin.start(0)
+  const base2 = `http://127.0.0.1:${p2}`
+  const post2 = async (path, body, headers = {}) => {
+    const r = await fetch(base2 + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    })
+    return { status: r.status, json: await r.json() }
+  }
+  try {
+    const g = await post2('/pair/generate', { deviceId: 'pc-revoke' })
+    const c = await post2('/pair', { code: g.json.data.code })
+    const sig = createHmac('sha256', c.json.data.pairSecret).update(c.json.data.challenge).digest('hex')
+    const v = await post2('/pair/verify', { challenge: c.json.data.challenge, sig })
+    const token = v.json.data.deviceToken
+
+    const before = await fetch(`${base2}/api/sessions?deviceId=pc-revoke`, { headers: { Authorization: `Bearer ${token}` } })
+    assert.equal(before.status, 200)
+    assert.equal((await post2('/admin/revoke', { deviceId: 'pc-revoke' })).status, 401)
+    const done = await post2('/admin/revoke', { deviceId: 'pc-revoke' }, { Authorization: 'Bearer adm-1' })
+    assert.equal(done.status, 200, JSON.stringify(done.json))
+    assert.equal(done.json.data.tombstone, true)
+
+    const after = await fetch(`${base2}/api/sessions?deviceId=pc-revoke`, { headers: { Authorization: `Bearer ${token}` } })
+    assert.equal(after.status, 401, '吊销后旧令牌立即失效')
+    const reg = await post2('/host/register', { deviceId: 'pc-revoke', hostToken: 'host-secret' })
+    assert.equal(reg.status, 401, '墓碑设备不复活')
+    const list = await (await fetch(`${base2}/admin`, { headers: { Authorization: 'Bearer adm-1' } })).json()
+    assert.equal(list.data.rows.find((r) => r.deviceId === 'pc-revoke').tombstone, true)
+  } finally {
+    await admin.stop()
+  }
+})
+
 test('T9 /admin 需鉴权，返回设备状态与令牌指纹', async () => {
   const noAuth = await call('/admin')
   assert.equal(noAuth.status, 401)

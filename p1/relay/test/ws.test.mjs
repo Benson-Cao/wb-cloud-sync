@@ -241,3 +241,34 @@ test('W8 配对先于 WS 注册：积压下行帧转交新 WS，不 504', async 
     await waitClose(ws)
   }
 })
+
+test('W9 host/sessions diff 帧：只应用变化，不误删未提及行', async () => {
+  await pair('ws-diff')
+  const ws = await openWs()
+  const inbox = createInbox(ws)
+  try {
+    await register(ws, inbox, 'ws-diff')
+    ws.send(JSON.stringify({ t: 'host/sessions', mode: 'full', rows: [
+      { sessionId: 'd1', state: 'stopped', lastSeq: 1 },
+      { sessionId: 'd2', state: 'stopped', lastSeq: 2 },
+    ] }))
+    assert.equal((await inbox.next()).mode, 'full')
+
+    ws.send(JSON.stringify({
+      t: 'host/sessions', mode: 'diff', removedIds: [],
+      rows: [{ sessionId: 'd2', state: 'stopped', lastSeq: 5 }],
+    }))
+    assert.equal((await inbox.next()).mode, 'diff')
+    let rows = (await call('/host/indexes?deviceId=ws-diff')).json.data.rows
+    assert.equal(rows.length, 2, '未提及的 d1 不能被删')
+    assert.equal(rows.find((r) => r.sessionId === 'd1').lastSeq, 1)
+    assert.equal(rows.find((r) => r.sessionId === 'd2').lastSeq, 5)
+
+    ws.send(JSON.stringify({ t: 'host/sessions', mode: 'diff', rows: [], removedIds: ['d1'] }))
+    await inbox.next()
+    rows = (await call('/host/indexes?deviceId=ws-diff')).json.data.rows
+    assert.deepEqual(rows.map((r) => r.sessionId), ['d2'])
+  } finally {
+    await waitClose(ws)
+  }
+})

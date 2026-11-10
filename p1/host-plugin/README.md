@@ -132,7 +132,7 @@ Relay 的事件缓冲在内存里，进程一重启就空；手机断线重连�
 4. **丢弃窗口靠 follow 兜底，但没人自动触发**：`dropped` 只计数，重连后主动补拉要等手机侧（PWA）发起。
 5. **索引里没有 `title`**：宿主会话头里确实没有标题字段（实测只有 `version/id/createdAt/cwd/isSeeded/delegationDepth/agentPreset`），标题要由 PC 侧会话管理器补，此处给 `null` 而不是从 `cwd` 编一个。
 
-## 九、测试（73 个用例，`node --test`）
+## 九、测试（75 个用例，`node --test`）
 
 ```bash
 node --test p1/host-plugin/test/*.test.mjs
@@ -178,13 +178,15 @@ node --test p1/host-plugin/test/*.test.mjs
 
 ## 十、下一步
 
-1. `deviceId` 派生 + 本机持久化 + 与配对令牌双绑（bundle 期临时用主机名）。
+1. ~~`deviceId` 派生 + 本机持久化 + 与配对令牌双绑~~（0.1.7：`host-<uuid>` 落盘 `~/.dsh/wbsync-host.json`，显式配置优先且不覆写落盘值）。
 2. ~~手机侧（PWA）在重连后主动发 `session/follow`~~（`p1/pwa` 已落地）。
-3. CP 已分离（`p1/cp` 接管索引 / 租约 / 位点 / 设备表）；剩「增量同步」——现在每次全量上报，会话多了要做 diff。
-4. ~~正式包换标识，接入 `dsh.bundle` 分发给真机验证~~（`bundle/` + `dist/dsh-wb-cloud-sync-host-0.1.6.tgz` 已落地并真机装包成功，`build-bundle.mjs --check` 入 CI 防脱节）。
+3. ~~会话索引增量同步~~（0.1.7：`collectDiff()` + `cp.applySessionDiff()`；首轮 / 重连后发 `full` 建基线，之后只发变化行与 `removedIds`）。
+4. ~~正式包换标识，接入 `dsh.bundle` 分发给真机验证~~（`bundle/` + `dist/dsh-wb-cloud-sync-host-0.1.7.tgz` 已落地并真机装包成功，`build-bundle.mjs --check` 入 CI 防脱节）。
 5. ~~真机装 bundle 跑通「配对 → 列表 → 新建 → 事件流」~~（0.1.5 真机复验通过：`writer:"sessionController.create"`、`downlinks:2`、CP 新增 2 条真实会话行、`indexCount` 11 → 13；会话日志含 `user/message` ×4 与 `turn/end`，第一句话投递亦真机可用）。
 6. ~~`cancelTurn` 接宿主取消入口~~（0.1.6 接官方 `sessionController.cancel({sessionId})`，手机端事件流「取消当前轮次」按钮已上线）。
 7. ~~Relay `isOnline` 与 `bridge` 就绪判定不一致导致 504~~（0.1.6 改为 Host WS 注册时转交积压帧，W8 回归覆盖）。
+8. ~~PC 侧主动吊销 UI~~（0.1.7：Relay `POST /admin/revoke` + `GET /admin/ui` 管理页；写操作必须配置 `WBSYNC_ADMIN_TOKEN`）。
+9. 附件上行（`attachments/*`）：需协议 `wbsync/1 r3` + 宿主 `ctx.fileUploads` 取证 + ADR-010 信任边界裁定，列为 P2 独立工作项（清单见 `p1/pwa/README.md`）。
 
 ---
 
@@ -193,7 +195,7 @@ node --test p1/host-plugin/test/*.test.mjs
 ## 十一、可安装 bundle（`bundle/`）
 
 - `bundle/index.js` 由 `node p1/host-plugin/build-bundle.mjs` 从 `src/` **自动生成**（单文件自包含，顶层重名构建期即失败）；CI 用 `--check` 防「改了 src 忘了生成」。
-- `npm pack` 产出 `dist/dsh-wb-cloud-sync-host-0.1.6.tgz` → DSH「添加插件」安装；`dsh` 块只声明 `bundle.patch`（host-only，写法对齐已验证的探针 / dsh-nas-sync）。
+- `npm pack` 产出 `dist/dsh-wb-cloud-sync-host-0.1.7.tgz` → DSH「添加插件」安装；`dsh` 块只声明 `bundle.patch`（host-only，写法对齐已验证的探针 / dsh-nas-sync）。
 - **真机取证（2026-11-10）**：装包后插件在 PC 端 DSH 正常加载——`/__wbsync/status` 报 `connected:true`、索引 11 条已上送；DSH web 端口是**动态**的（`netstat -ano | findstr <DSH进程PID>` 查 LISTENING），浏览器地址栏 `http://127.0.0.1:<端口>/__wbsync/pair` 即可出码。
 - wrapper 配置链（低→高）：代码默认（本机 Relay + 主机名 deviceId）← `~/.dsh/wbsync-host.json` ← `WBSYNC_*` 环境变量 ← `apply` 的 `config`。
 - 安装 / 配置详见 `bundle/README.md`。

@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T11:00:48.745Z",
+  "capturedAt": "2026-11-10T12:06:25.321Z",
   "git": {
-    "head": "5f660109b0cea971c3aaa84b98a6c52e471b37bb",
+    "head": "8e30f5aab194f4a88ff60021521d185a2dc36756",
     "branch": "main",
     "worktreeClean": false
   },
@@ -13,7 +13,9 @@
       "host-probe.json",
       "check-plugin.json"
     ],
-    "signoffChanged": [],
+    "signoffChanged": [
+      "SIGN-OFF.md"
+    ],
     "artifactChanged": [
       "dist-tarball"
     ],
@@ -21,20 +23,22 @@
     "notes": [
       "发布物已重建（仅记录，不影响判定）：dist-tarball"
     ],
-    "previousCapturedAt": "2026-11-10T10:31:59.925Z",
-    "previousGitHead": "714c813a13ff45781ebdc64259c2893650e0224d",
+    "previousCapturedAt": "2026-11-10T11:48:02.924Z",
+    "previousGitHead": "8e30f5aab194f4a88ff60021521d185a2dc36756",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：运行代码/证据：host-probe.json, check-plugin.json",
-      "capturedAt": "2026-11-10T10:31:59.925Z",
-      "gitHead": "714c813a13ff45781ebdc64259c2893650e0224d",
+      "previousReason": "已变化（阻断）：运行代码/证据：host-probe.json, check-plugin.json；会签材料：SIGN-OFF.md",
+      "capturedAt": "2026-11-10T11:48:02.924Z",
+      "gitHead": "8e30f5aab194f4a88ff60021521d185a2dc36756",
       "dataChanged": [
         "host-probe.json",
         "check-plugin.json"
       ],
-      "signoffChanged": [],
+      "signoffChanged": [
+        "SIGN-OFF.md"
+      ],
       "artifactChanged": [
         "dist-tarball"
       ],
@@ -46,24 +50,24 @@
       "index.js": "639eeebca42695b1841a65d99b9812d77c37985171537d90e2429761cbe75523",
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
-      "host-probe.json": "b11a04b3957a4015b85a55bfad5e4f728f746022dd05ae84a4104627f2792e52",
-      "check-plugin.json": "2ee765e6c7c013a7fb1da1be6782a861c4b047f845b8b17562c8ee33495528c5",
-      "gate-check.mjs": "fd0f14dbaa0f927801aa0191398e0f0cdef3baa669b13715f4375568cf7d5da1",
+      "host-probe.json": "a7f3aaaed7f9307c6fc185c4103b1194e5f78d39630aaaf2c8b3d04cca287901",
+      "check-plugin.json": "700cd3ada001351f382386770f6ba1d11bb8a0662fab569a92cd22236dfba308",
+      "gate-check.mjs": "336f35b54d38ec043e7b7ce4a06e1d63580a337a39852e85f429b13d97a7c2de",
       "check-env.mjs": "d26c26749008404f631c64be52d908e5c0a60074235218327ff6eeb8c270e5b3",
-      "signoff-check.mjs": "04de87da587e985b33f3a9f50b424b5d8f8814969ded5b053b42bb03a269057b",
+      "signoff-check.mjs": "4491b857f555f520c6170c91e4c46d008b554de9721d9d3900d71f3a63a92938",
       "sync-protocol.mjs": "b2f251a6bea2f7313e27c828914615ee33aa8bffafcc61116d3f1b46bca8631e"
     },
     "signoff": {
       "SECURITY-REVIEW.md": "654740fe43c975e8a6fe2ee4dd2205b14e79c0641fa4874947fc0ce6acd529c0",
-      "SIGN-OFF.md": "702e95581f4a56ca750ba08096fdac3250cd8f68e667f4575e1f20d1663a0649",
-      "SIGN-OFF-PROCEDURE.md": "017b4b3f4a55dc1e36b0740958633414aa8b869c30b6e41d34b8966adde3710e",
-      "SIGNOFF-WAIVER.md": "7c774e098e9e9841622bc369f6bfffa1cf8f4931d724ceb26dae5ed21852e964",
-      "01-charter.md": "cfe7a784aceb3a1bd70aaa3ded39414ab1b9f7de44d396da9d29cc840c93b14d",
+      "SIGN-OFF.md": "5980bcc44fb44b2a3a127ba447285f875bde720230bc6c0af1c0a558553a4614",
+      "SIGN-OFF-PROCEDURE.md": "2c279eb54b44ff3b5fab18c121c53b68b8f3f23da27e0f98fdf18abbb17fd1df",
+      "SIGNOFF-WAIVER.md": "920af35df5a96b39d83d401e99d01957d558479b3ad52df1e0cafa12d7c60336",
+      "01-charter.md": "3740d12f8192aa94945b9f4de6a7b4a0ecc18a4c3fcd174bd054df45a98d83df",
       "P1-PREREQUISITES.md": "5d05eba21653bf104488ab8a58d02da61ebc3757d3946dff1c4871022ae2fda6",
       "WORKBUDDY-REFERENCE.md": "e286a4af7afe2aab6f9462bfec7d0baf25ff4c892b21245624963490be49cdcc"
     },
     "artifact": {
-      "dist-tarball": "cd9a817dfeae4578223e81ad0fd58841b454005eac2d0f8b20068120240665fe"
+      "dist-tarball": "5e809f6ea5959fd6bc140bd5af84fedce8c450ef29c18cd5afc4b432b0cc9d01"
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
@@ -159,33 +163,33 @@
   "manual": [
     {
       "id": "M1",
-      "label": "四方文档会签（01 §9：PM / 架构师 / 安全 Owner / QA Owner）",
-      "status": "NOT MET",
-      "owner": "PM"
+      "label": "四方文档会签（01 §9）",
+      "status": "已取消 · 发起人裁定",
+      "owner": "发起人"
     },
     {
       "id": "M2",
       "label": "ADR-007 事件契约以宿主实测为准",
-      "status": "提议中，待会签",
-      "owner": "ARC + PM"
+      "status": "按默认口径落地",
+      "owner": "发起人裁定"
     },
     {
       "id": "M3",
       "label": "ADR-008 幂等与写入权归宿主",
-      "status": "提议中，待会签",
-      "owner": "ARC + PM"
+      "status": "按默认口径落地",
+      "owner": "发起人裁定"
     },
     {
       "id": "M4",
       "label": "ADR-009 PROTOCOL.md 为唯一契约源",
-      "status": "提议中，待会签",
-      "owner": "ARC"
+      "status": "按默认口径落地",
+      "owner": "发起人裁定"
     },
     {
       "id": "M5",
-      "label": "安全项一票否决权行使（08 / 01 §6）",
-      "status": "待安全 Owner",
-      "owner": "安全 Owner"
+      "label": "安全项一票否决权（08 / 01 §6）",
+      "status": "随会签取消 · 责任承接",
+      "owner": "发起人"
     },
     {
       "id": "M6a",
@@ -201,10 +205,10 @@
     },
     {
       "id": "M7",
-      "label": "ADR-010 正文可见性边界（信任边界，安全 Owner 必看）",
-      "status": "提议中，待会签",
-      "owner": "ARC + 安全 Owner"
+      "label": "ADR-010 正文可见性边界（信任边界）",
+      "status": "按默认口径落地",
+      "owner": "发起人裁定"
     }
   ],
-  "gate": "BLOCKED_BY_SIGNOFF"
+  "gate": "PASS"
 }

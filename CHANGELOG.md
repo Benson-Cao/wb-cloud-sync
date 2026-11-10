@@ -4,6 +4,29 @@
 
 ---
 
+## [P1 W3 续 22] · 2026-11-10 19:5x · 非协议变更（P2 收尾）
+
+- 四方会签取消后，收掉 P2 backlog 中可自主落地的三项：
+  1. **`deviceId` 本机持久化**：bundle wrapper 不再用主机名，改为从 `~/.dsh/wbsync-host.json` 读稳定 ID；缺失则生成 `host-<uuid>` 并以 0600 落盘，落盘失败才退回主机名。显式 `WBSYNC_DEVICE_ID` / `apply(config)` 优先且不覆写落盘值；新增 `WBSYNC_HOST_CONFIG` 供测试隔离路径。令牌按 `deviceId` 登记，稳定 ID 即完成与配对令牌双绑（B4 覆盖跨调用稳定、显式优先、不覆写）。
+  2. **会话索引增量 diff**：`sessions.js` 新增 `collectDiff()` / `resetBaseline()`，按整行 JSON 指纹只返回新增/变更行与消失 id；首轮或重连后发 `mode:'full'` 建基线，之后发 `mode:'diff'`。`index.js` 上报帧带 `mode/removedIds`；Relay WS 帧与 HTTP `/host/sessions` 分流到新增的 `cp.applySessionDiff()`（只 upsert + 按 id 删，绝不全量替换）。`indexCount` / `indexStats` 同步显示模式与变化量。
+  3. **PC 侧主动吊销 UI**：Relay 新增 `POST /admin/revoke`（**未配置 `WBSYNC_ADMIN_TOKEN` 时 409 明确拒绝**，配置后要求 Bearer），吊销即置墓碑、清令牌/会话/租约并断开现有 WS；新增同源管理页 `GET /admin/ui`（输入 admin token → 列设备 → 逐台吊销，token 只存内存，不进 URL / localStorage）。T10 覆盖 401 / 409 / 完整吊销链路 / 墓碑不复活。
+- **附件上行（`attachments/*`）评估完成，本轮不实现**：需协议 `wbsync/1 r3` 变更（端点 + receipt 语义）、`ALLOWED_ENDPOINTS` 白名单裁定、CP receipt 存储与大小/过期策略、Host 侧 `ctx.fileUploads.registerAgentResolver` 取证接线、PWA 文件选择与 `session/prompt` 的 `{type:'file',receiptId}` 内容组装，并触及 ADR-010「文件正文是否出网」信任边界。跨 4 个包且依赖未取证宿主 API，列为 P2 独立工作项（清单见 `p1/pwa/README.md`）。
+- 测试 158 → **163**（B4 / sessions diff / cp diff / W9 / T10）；`build-bundle.mjs --check` 通过；门禁自动项 **9/9**、门禁 **PASS**（会签取消后）、快照 `CURRENT`。版本 **0.1.7**。
+- **部署**：Host bundle 变更（`0.1.7.tgz` 需重装 + 重启 DSH）；Relay / CP 变更需重启 Relay（清内存态 CP、手机重新配对）。管理页在 `http://<Relay>:8787/admin/ui`。
+
+---
+
+## [治理裁定] · 2026-11-10 19:4x · 四方会签永久取消
+
+- **发起人原话「四方会签取消掉，剩下的继续做」**：裁定永久取消 PM / 架构师 / 安全 Owner / QA Owner 四方会签要求，P0 设计冻结判定改由发起人裁定；`BLOCKED_BY_SIGNOFF` 不再是门禁状态。
+- 落点：`SIGNOFF-WAIVER.md` 重写为裁定文档（唯一权威）；`SIGN-OFF-PROCEDURE.md` 标记已废止；`docs/01` §9 会签表改为裁定记录；`SIGN-OFF.md` 结论段更新；`gate-check.mjs` 的 M1 / M2–M4 / M5 / M7 改为治理状态说明、`gate` 在自动项 9/9 全过时输出 `PASS`；`signoff-check.mjs` 的 verdict 改为 `SIGNOFF_ABOLISHED`。
+- **审计链完整**：原签署栏未填姓名 / 日期 / 结论、ADR-007~010 仍「提议中」、`SECURITY-REVIEW.md` 会签表仍「待签」，不伪造签字、不代签、不代裁定；`SIGNOFF_ABOLISHED` 明确**不是** `SIGNED_OFF`。安全一票否决随流程取消，决策责任由发起人承接，残留风险 W1–W4 登记在裁定文档 §4 与 `09` R-20。
+- **其余 GA 门禁不变**：`00` 成功指标、`07` M3 验收、`08` §10 合规检查、P3 W10 出网流量镜像审计照旧；G1–G9、快照 `CURRENT`、CI、构建链、协议单向同步、发布包比对全部保留。
+- 历史文档中「GA 前必须补签 / 待会签 / BLOCKED_BY_SIGNOFF」表述以裁定文档为准，原文保留作历史记录（避免散改 11 份冻结文档破坏 P0 快照可追溯性）。
+- 验证：自动项 9/9、门禁 `PASS`、快照 `CURRENT`、`signoff-check` 输出 `SIGNOFF_ABOLISHED`。
+
+---
+
 ## [P1 W3 续 21] · 2026-11-10 18:5x · 非协议变更
 
 - **真机截图暴露两处 PWA 显示缺陷，已修（0.1.6 壳补丁）**：

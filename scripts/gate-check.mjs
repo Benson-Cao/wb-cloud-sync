@@ -245,16 +245,17 @@ const automated = [
     pass: tarballConsistent },
 ]
 
-// 脚本判不了、必须由人签署 / 人工复核的项
+// 2026-11-10 发起人裁定：四方会签要求永久取消（SIGNOFF-WAIVER.md）。
+// 以下保留为治理状态说明，**不再是门禁阻塞项**；不代签、不填签署栏、不改 ADR 状态。
 const manual = [
-  { id: 'M1', label: '四方文档会签（01 §9：PM / 架构师 / 安全 Owner / QA Owner）', status: 'NOT MET', owner: 'PM' },
-  { id: 'M2', label: 'ADR-007 事件契约以宿主实测为准', status: '提议中，待会签', owner: 'ARC + PM' },
-  { id: 'M3', label: 'ADR-008 幂等与写入权归宿主', status: '提议中，待会签', owner: 'ARC + PM' },
-  { id: 'M4', label: 'ADR-009 PROTOCOL.md 为唯一契约源', status: '提议中，待会签', owner: 'ARC' },
-  { id: 'M5', label: '安全项一票否决权行使（08 / 01 §6）', status: '待安全 Owner', owner: '安全 Owner' },
+  { id: 'M1', label: '四方文档会签（01 §9）', status: '已取消 · 发起人裁定', owner: '发起人' },
+  { id: 'M2', label: 'ADR-007 事件契约以宿主实测为准', status: '按默认口径落地', owner: '发起人裁定' },
+  { id: 'M3', label: 'ADR-008 幂等与写入权归宿主', status: '按默认口径落地', owner: '发起人裁定' },
+  { id: 'M4', label: 'ADR-009 PROTOCOL.md 为唯一契约源', status: '按默认口径落地', owner: '发起人裁定' },
+  { id: 'M5', label: '安全项一票否决权（08 / 01 §6）', status: '随会签取消 · 责任承接', owner: '发起人' },
   { id: 'M6a', label: 'CI 闸门接入（GitHub Actions · gate.yml）', status: 'MET · 持续绿灯', owner: 'HE-A + BE-RL' },
   { id: 'M6b', label: '本地构建链 Node ≥24.9 + pnpm 11（见 scripts/check-env.mjs）', status: 'MET · 5/5 READY', owner: 'HE-A + BE-RL' },
-  { id: 'M7', label: 'ADR-010 正文可见性边界（信任边界，安全 Owner 必看）', status: '提议中，待会签', owner: 'ARC + 安全 Owner' },
+  { id: 'M7', label: 'ADR-010 正文可见性边界（信任边界）', status: '按默认口径落地', owner: '发起人裁定' },
 ]
 
 const result = {
@@ -278,7 +279,8 @@ const result = {
   automatedPassed: automated.filter((c) => c.pass).length,
   automatedTotal: automated.length,
   manual,
-  gate: automated.every((c) => c.pass) ? 'BLOCKED_BY_SIGNOFF' : 'FAIL',
+  // 四方会签已取消：自动项全过即 PASS，不再输出 BLOCKED_BY_SIGNOFF
+  gate: automated.every((c) => c.pass) ? 'PASS' : 'FAIL',
 }
 
 const out = SNAPSHOT

@@ -17,13 +17,13 @@ node p1/relay/run.mjs                    # PORT=8787；WBSYNC_HOST_TOKEN / WBSYN
 「Relay 地址」= 跑在 PC 上、手机与 PC 插件共同连着的这个进程的 `http://<局域网IP>:<端口>`；
 `start(port, host)` 默认只听 `127.0.0.1`（单测/本机调试），真机联调传 `'0.0.0.0'` 或直接用 `run.mjs`。
 
-`createRelay(options)` 返回未监听的 `http.Server` + 内存 `state`，注入 `now()` / `randomBytes()` 可让时间与随机性确定，规则判定不靠运行时猜测。`node --test` 共 **37 个用例**：HTTP 9、Host WS 8（含 W8 积压帧转交）、手机事件订阅 7、跨实例共享 CP 4、静态壳服务 6、监听与启动器形态 3。
+`createRelay(options)` 返回未监听的 `http.Server` + 内存 `state`，注入 `now()` / `randomBytes()` 可让时间与随机性确定，规则判定不靠运行时猜测。`node --test` 共 **39 个用例**：HTTP 10（含 T10 主动吊销）、Host WS 9（含 W8 积压帧转交、W9 增量索引帧）、手机事件订阅 7、跨实例共享 CP 4、静态壳服务 6、监听与启动器形态 3。
 
 ## 传输形态
 
 | 方向 | 通道 | 说明 |
 |---|---|---|
-| Host → Relay | **`WS /ws/host` 长连** | 先 `host/register`（带 `HOST_TOKEN`），再 `host/heartbeat`、`host/sessions`、`session/event`、`http/response` |
+| Host → Relay | **`WS /ws/host` 长连** | 先 `host/register`（带 `HOST_TOKEN`），再 `host/heartbeat`、`host/sessions`（`mode:'full'\|'diff'`）、`session/event`、`http/response` |
 | 手机订阅事件 | **`WS /d/<deviceId>/events/<sessionId>?token=&sinceSeq=`** | 只下行；令牌走 query（浏览器 WebSocket 不能设 Authorization 头） |
 | 手机读会话列表 | **`GET /api/sessions?deviceId=&pinned=`** | `Bearer <deviceToken>`；协议 §4 CP API 的 W3 单机实现（CP 仍在 Relay 进程内，P2 迁独立服务），测试见 `p1/pwa` A1–A3 |
 | 手机新建会话 | **`POST /api/sessions`**（body 带 `deviceId`） | `Bearer <deviceToken>`；Host 离线 409 `HOST_OFFLINE`（入口置灰）；桥接白名单内 `session/create` → Host `createSession` 适配器；未注入适配器 409 透传。成功后 Relay 把**引导行**（`state:'awaiting'`）以 `cp.putSession` **单行合并**写进 CP（不走全量替换，否则会清掉该设备其余会话、手机列表闪一下），Host 下一次全量上报校正 |
@@ -31,6 +31,9 @@ node p1/relay/run.mjs                    # PORT=8787；WBSYNC_HOST_TOKEN / WBSYN
 | 手机请求 → Host | `http/request` 帧 | 同一连接按发送顺序到达，**帧序即流序** |
 | 手机打开壳页面 | **`GET /app`**（及 `/app/*`、`/src/*`） | 无鉴权静态（PWA 必需，docs/04）；`/app` → `p1/pwa/public`，`/src` → `p1/pwa/src`（页面里 `../src/client.js` 的解析目标）；单层文件名 + 解码后校验拒绝路径遍历；`staticDir: null` 关闭 |
 | 降级 | `GET /host/poll` + `POST /host/respond` | 设备没有活跃 WS 时使用，便于旧 Host 与单测 |
+| Host 索引增量 | `host/sessions` 帧 / `POST /host/sessions` | `mode:'full'`（首轮 / 重连后）走 `cp.upsertSessions` 建基线；`mode:'diff'` 走 `cp.applySessionDiff`，只应用 `rows` 与 `removedIds`，不误删未提及行 |
+| PC 管理台 | **`GET /admin/ui`** + `GET /admin` | 同源 HTML：输入 admin token → 列设备 → 逐台吊销；token 只存内存，不进 URL / localStorage |
+| PC 主动吊销 | **`POST /admin/revoke`** | `Bearer <adminToken>`；**未配置 `WBSYNC_ADMIN_TOKEN` 时 409 拒绝写**；吊销即置墓碑、清令牌 / 会话 / 租约并断开现有 WS |
 
 `src/ws.js` 是零依赖 RFC 6455 子集：握手、单帧文本 / 关闭 / 心跳、客户端 mask 校验、1 MiB 上限；不做分片与扩展协商。换成 `ws` 或 uWebSockets 时只替换该文件。
 

@@ -5,9 +5,10 @@
  * 改源码后运行 `node p1/host-plugin/build-bundle.mjs` 重新生成（CI 有 --check 同步校验）。
  * 外层 wrapper 负责默认配置：代码默认 ← ~/.dsh/wbsync-host.json ← WBSYNC_* 环境变量 ← apply 的 config。
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 // ===== 内联自 src/replay.js（重启后历史补齐，只读回放） =====
 /**
@@ -247,7 +248,11 @@ function createSessionIndexReporter({
     return STATES.includes(hinted) ? hinted : 'stopped'
   }
 
-  return async function collect(options = {}) {
+  /** 增量上报基线：id -> 行指纹。首轮（或重连后）必须发 full 建立 CP 基线。 */
+  const lastSent = new Map()
+  let bootstrapped = false
+
+  const collectFn = async function collect(options = {}) {
     let snapshots
     try {
       snapshots = await listSessions(options.listOptions ?? {})
@@ -292,6 +297,37 @@ function createSessionIndexReporter({
     }
     return { rows, error: null, stats: { ...stats, sources } }
   }
+
+  /**
+   * 增量快照：只返回新增 / 变化的行与消失的 id。
+   * 行不多（默认上限 50），用整行 JSON 作指纹，避免逐字段 diff 漏判。
+   * `mode:'full'` 表示首轮或重连后重建基线，Relay 应走全量替换；
+   * `mode:'diff'` 只应用 upserts 与 removedIds，绝不误删未提及的行。
+   */
+  collectFn.collectDiff = async (options = {}) => {
+    const snap = await collectFn(options)
+    if (snap.error) return { ...snap, rows: [], removedIds: [], unchanged: 0, mode: 'full' }
+    const next = new Map()
+    const rows = []
+    let unchanged = 0
+    for (const row of snap.rows) {
+      const fp = JSON.stringify(row)
+      next.set(row.sessionId, fp)
+      if (lastSent.get(row.sessionId) === fp) unchanged++
+      else rows.push(row)
+    }
+    const removedIds = [...lastSent.keys()].filter((id) => !next.has(id))
+    const mode = bootstrapped ? 'diff' : 'full'
+    lastSent.clear()
+    for (const [id, fp] of next) lastSent.set(id, fp)
+    bootstrapped = true
+    return { ...snap, rows, removedIds, unchanged, mode, total: snap.rows.length }
+  }
+
+  /** 重连后 CP 可能已重建：清空基线，下一轮重新发 full。 */
+  collectFn.resetBaseline = () => { lastSent.clear(); bootstrapped = false }
+
+  return collectFn
 }
 // ===== 内联自 src/host-adapters.js（宿主真实入口：create / prompt 软探测） =====
 /**
@@ -847,14 +883,18 @@ function __apply(ctx, config = {}) {
   /** 上报会话索引；`connected` 为假或没有 list() 时直接跳过，不制造空表。 */
   const sendIndexes = async () => {
     if (!collectIndex || !state.connected) return null
-    const { rows, error, stats } = await collectIndex()
+    // 有 collectDiff 就走增量；注入的 mock 没有该方法时退回全量（保持兼容）。
+    const snap = typeof collectIndex.collectDiff === 'function'
+      ? await collectIndex.collectDiff()
+      : { ...(await collectIndex()), removedIds: [], mode: 'full' }
+    const { rows, error, stats, removedIds = [], mode = 'full' } = snap
     if (error) { state.indexError = error; return null }
     state.indexError = null
-    if (!send({ t: 'host/sessions', rows })) return null
-    state.indexCount = rows.length
+    if (!send({ t: 'host/sessions', rows, removedIds, mode })) return null
+    state.indexCount = snap.total ?? rows.length
     state.indexSentAt = Date.now()
-    state.indexStats = stats
-    return { count: rows.length, stats }
+    state.indexStats = { ...stats, mode, unchanged: snap.unchanged ?? 0, removed: removedIds.length }
+    return { count: rows.length, stats: state.indexStats }
   }
 
   const scheduleReconnect = () => {
@@ -884,6 +924,8 @@ function __apply(ctx, config = {}) {
       try { msg = JSON.parse(String(event.data)) } catch { return }
       if (msg.t === 'host/registered') {
         state.connected = true
+        // 重连后 Relay/CP 可能已重建：清空增量基线，重新发一份 full 快照
+        collectIndex?.resetBaseline?.()
         startHeartbeat()
         startIndexRefresh()
         void sendIndexes()          // 注册成功即推一份索引，手机不必等下一个刷新周期
@@ -975,15 +1017,30 @@ function __apply(ctx, config = {}) {
   return { state, adapters, connect, collectIndex, sendIndexes }
 }
 
-// ===== bundle wrapper：默认配置解析（真机零配置试跑：本机 Relay + 主机名当 deviceId） =====
-const BUNDLE_DEFAULTS = () => ({
-  relayUrl: 'http://127.0.0.1:8787',
-  deviceId: hostname(),          // 试跑期 deviceId = PC 主机名；正式部署从配置文件 / 环境变量给稳定 ID
-  hostToken: '',
-})
+// ===== bundle wrapper：稳定 deviceId + 默认配置解析 =====
+const HOST_CONFIG_PATH = () =>
+  process.env.WBSYNC_HOST_CONFIG || join(homedir(), '.dsh', 'wbsync-host.json')
+
 const loadFileConfig = () => {
-  try { return JSON.parse(readFileSync(join(homedir(), '.dsh', 'wbsync-host.json'), 'utf8')) } catch { return {} }
+  try { return JSON.parse(readFileSync(HOST_CONFIG_PATH(), 'utf8')) } catch { return {} }
 }
+
+/**
+ * deviceId 必须跨重启稳定：手机侧令牌按 deviceId 登记，Host 每次换 ID 会让
+ * 旧令牌失效、会话索引串到另一台设备名下。
+ * 优先读配置文件；缺失则生成 host-<uuid> 并以 0600 落盘；落盘失败退回主机名。
+ */
+const resolveStableDeviceId = (cfg) => {
+  const file = HOST_CONFIG_PATH()
+  if (typeof cfg.deviceId === 'string' && cfg.deviceId.trim()) return cfg.deviceId.trim()
+  cfg.deviceId = 'host-' + randomUUID()
+  try {
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, JSON.stringify(cfg, null, 2), { mode: 0o600 })
+  } catch { cfg.deviceId = hostname() }
+  return cfg.deviceId
+}
+
 const envConfig = () => Object.fromEntries(Object.entries({
   relayUrl: process.env.WBSYNC_RELAY_URL,
   deviceId: process.env.WBSYNC_DEVICE_ID,
@@ -991,5 +1048,17 @@ const envConfig = () => Object.fromEntries(Object.entries({
 }).filter(([, v]) => v !== undefined))
 
 export function apply(ctx, config = {}) {
-  return __apply(ctx, { ...BUNDLE_DEFAULTS(), ...loadFileConfig(), ...envConfig(), ...config })
+  const fileCfg = loadFileConfig()
+  const env = envConfig()
+  // 显式 deviceId（apply config > 环境变量）优先；否则用持久化的稳定 ID
+  const explicit = config.deviceId ?? env.deviceId ?? fileCfg.deviceId
+  const deviceId = (typeof explicit === 'string' && explicit.trim())
+    ? explicit.trim()
+    : resolveStableDeviceId(fileCfg)
+  return __apply(ctx, {
+    relayUrl: 'http://127.0.0.1:8787',
+    hostToken: '',
+    ...fileCfg, ...env, ...config,
+    deviceId,
+  })
 }

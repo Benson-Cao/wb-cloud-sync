@@ -4,7 +4,7 @@
 
 ## 安装
 
-DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.6.tgz`（由本目录 `npm pack` 产出）。
+DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.7.tgz`（由本目录 `npm pack` 产出）。
 
 ## 配置（缺省即可本机试跑）
 
@@ -20,7 +20,15 @@ PC 浏览器地址栏打开 `http://127.0.0.1:<DSH端口>/__wbsync/pair` 生成 
 端口是动态的，用 `netstat -ano | findstr <DSH进程PID>` 查 LISTENING 行），手机在
 `http://<局域网IP>:8787/app` 输码配对。
 
-## 宿主入口（0.1.6 定案）
+## 稳定 deviceId（0.1.7 起）
+
+`deviceId` 不再用主机名：首次启动生成 `host-<uuid>` 并写入 `~/.dsh/wbsync-host.json`（权限 0600），
+后续重启复用同一 ID。手机令牌按 `deviceId` 登记，稳定 ID 即为「本机持久化 + 与配对令牌双绑」。
+优先级：`apply(ctx, config)` 的 `config.deviceId` > `WBSYNC_DEVICE_ID` > 配置文件 > 新生成并落盘；
+显式指定只影响当前进程，**不覆写落盘值**。`WBSYNC_HOST_CONFIG` 可改配置文件路径（测试隔离用）。
+落盘失败（只读目录等）才退回主机名，并在 status 中如实可见。
+
+## 宿主入口（0.1.7 定案）
 
 每次调用**惰性重探**宿主服务（0.1.4 的启动期静态快照会漏掉晚注册依赖），按官方完整语义排序：
 

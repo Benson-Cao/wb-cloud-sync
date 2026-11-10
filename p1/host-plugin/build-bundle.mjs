@@ -81,21 +81,37 @@ const BANNER = `/**
  * 改源码后运行 \`node p1/host-plugin/build-bundle.mjs\` 重新生成（CI 有 --check 同步校验）。
  * 外层 wrapper 负责默认配置：代码默认 ← ~/.dsh/wbsync-host.json ← WBSYNC_* 环境变量 ← apply 的 config。
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 `
 
 const WRAPPER = `
-// ===== bundle wrapper：默认配置解析（真机零配置试跑：本机 Relay + 主机名当 deviceId） =====
-const BUNDLE_DEFAULTS = () => ({
-  relayUrl: 'http://127.0.0.1:8787',
-  deviceId: hostname(),          // 试跑期 deviceId = PC 主机名；正式部署从配置文件 / 环境变量给稳定 ID
-  hostToken: '',
-})
+// ===== bundle wrapper：稳定 deviceId + 默认配置解析 =====
+const HOST_CONFIG_PATH = () =>
+  process.env.WBSYNC_HOST_CONFIG || join(homedir(), '.dsh', 'wbsync-host.json')
+
 const loadFileConfig = () => {
-  try { return JSON.parse(readFileSync(join(homedir(), '.dsh', 'wbsync-host.json'), 'utf8')) } catch { return {} }
+  try { return JSON.parse(readFileSync(HOST_CONFIG_PATH(), 'utf8')) } catch { return {} }
 }
+
+/**
+ * deviceId 必须跨重启稳定：手机侧令牌按 deviceId 登记，Host 每次换 ID 会让
+ * 旧令牌失效、会话索引串到另一台设备名下。
+ * 优先读配置文件；缺失则生成 host-<uuid> 并以 0600 落盘；落盘失败退回主机名。
+ */
+const resolveStableDeviceId = (cfg) => {
+  const file = HOST_CONFIG_PATH()
+  if (typeof cfg.deviceId === 'string' && cfg.deviceId.trim()) return cfg.deviceId.trim()
+  cfg.deviceId = 'host-' + randomUUID()
+  try {
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, JSON.stringify(cfg, null, 2), { mode: 0o600 })
+  } catch { cfg.deviceId = hostname() }
+  return cfg.deviceId
+}
+
 const envConfig = () => Object.fromEntries(Object.entries({
   relayUrl: process.env.WBSYNC_RELAY_URL,
   deviceId: process.env.WBSYNC_DEVICE_ID,
@@ -103,7 +119,19 @@ const envConfig = () => Object.fromEntries(Object.entries({
 }).filter(([, v]) => v !== undefined))
 
 export function apply(ctx, config = {}) {
-  return __apply(ctx, { ...BUNDLE_DEFAULTS(), ...loadFileConfig(), ...envConfig(), ...config })
+  const fileCfg = loadFileConfig()
+  const env = envConfig()
+  // 显式 deviceId（apply config > 环境变量）优先；否则用持久化的稳定 ID
+  const explicit = config.deviceId ?? env.deviceId ?? fileCfg.deviceId
+  const deviceId = (typeof explicit === 'string' && explicit.trim())
+    ? explicit.trim()
+    : resolveStableDeviceId(fileCfg)
+  return __apply(ctx, {
+    relayUrl: 'http://127.0.0.1:8787',
+    hostToken: '',
+    ...fileCfg, ...env, ...config,
+    deviceId,
+  })
 }
 `
 

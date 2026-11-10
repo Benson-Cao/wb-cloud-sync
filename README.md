@@ -170,9 +170,9 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 │  ├─ lib/                      # ASAR 读取器 / 多帧 zstd 解码器
 │  └─ evidence/                 # 脱敏后的证据 JSON
 ├─ p1/                          # P1 开发代码（不进探针 tarball）
-│  ├─ cp/                       # W3 控制面：设备 / 会话索引 / 写句柄租约 / 位点四张表（19 用例）
-│  ├─ relay/                    # W3 Relay：配对 / Host WS 长连 / 手机事件订阅 / 壳静态服务 / 跨实例共享 CP（37 用例，run.mjs 真机启动器）
-│  ├─ host-plugin/              # W3 Host 插件：上行 / 下行分派 / 宿主新建会话 / 取消轮次 / 历史补齐 / 会话索引 / 可逆卸载（73 用例，bundle/ 可安装包）
+│  ├─ cp/                       # W3 控制面：设备 / 会话索引（含增量 diff）/ 写句柄租约 / 位点四张表（20 用例）
+│  ├─ relay/                    # W3 Relay：配对 / Host WS 长连 / 手机事件订阅 / 壳静态服务 / 设备管理台 / 跨实例共享 CP（39 用例，run.mjs 真机启动器）
+│  ├─ host-plugin/              # W3 Host 插件：上行 / 下行分派 / 宿主新建会话 / 取消轮次 / 稳定 deviceId / 增量索引 / 历史补齐 / 可逆卸载（75 用例，bundle/ 可安装包）
 │  └─ pwa/                      # W3 手机侧：配对向导 + 会话列表 / 新建 / 取消 + 事件订阅 + 断线重连补拉（29 用例）
 └─ LICENSE (MIT)
 ```
@@ -187,7 +187,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 | Q2 不经写句柄提交用户消息 | PASS | 宿主 `dsh-api-session-controller.prompt(request)` + `requestId` 原生幂等 + `SessionAlreadyOwnedError` 单写者 |
 | Q3 枚举与只读回放 | PASS | `list()` / `open(id,access)` / `persistContiguous`；`sinceSeq=400` 补齐 266/266 |
 
-**P0 门禁**：三问离线 PASS、真机加载 + 运行时事件闭环 8/8 PASS、上游 commit 锁定（`66491b0…`）、`04` 已修订至 `wbsync/1 r2`（含 WorkBuddy 对标复核）、自动项 9/9、快照 `CURRENT`、M6b 构建链 5/5 `READY`。**唯一剩余硬阻塞是四方会签**（ADR-007~010 均为「提议中」），完成前不得进入 P1 编码。P1 开工前置四项已有提案白皮书 `P1-PREREQUISITES.md`，可并入同一次会签裁定。详见 `SIGN-OFF.md` 与 `spike/REPORT.md` §5。
+**P0 门禁**：三问离线 PASS、真机加载 + 运行时事件闭环 8/8 PASS、上游 commit 锁定（`66491b0…`）、`04` 已修订至 `wbsync/1 r2`（含 WorkBuddy 对标复核）、自动项 9/9、`gate: PASS`、快照 `CURRENT`、M6b 构建链 5/5 `READY`。**四方会签已由发起人于 2026-11-10 永久取消**（`SIGNOFF-WAIVER.md`），`SIGN-OFF-PROCEDURE.md` 同步废止；原签署栏未填写、ADR-007~010 仍为「提议中」，不伪造签字。P1 W3 手机 ↔ PC 全链路已真机验收（`p1/` 163/163 单测）。其余 GA 门禁（`00` 成功指标、`07` M3、`08` §10、P3 W10 出网审计）照旧。详见 `SIGN-OFF.md` 与 `spike/REPORT.md` §5。
 
 `docs/` 是设计冻结包的发布副本（含 v1.1 Spike 实测修订与 `wbsync/1 r2` 对标复核），唯一契约源是 `docs/04`；根 `PROTOCOL.md` 由脚本单向生成，字段变更须在同一 PR 同时改 `04` + `PROTOCOL.md` + `CHANGELOG.md`（06 §9 / ADR-009）。对标偏差与依据见 `WORKBUDDY-REFERENCE.md`。
 

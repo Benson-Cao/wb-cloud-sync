@@ -114,7 +114,11 @@ export function createSessionIndexReporter({
     return STATES.includes(hinted) ? hinted : 'stopped'
   }
 
-  return async function collect(options = {}) {
+  /** 增量上报基线：id -> 行指纹。首轮（或重连后）必须发 full 建立 CP 基线。 */
+  const lastSent = new Map()
+  let bootstrapped = false
+
+  const collectFn = async function collect(options = {}) {
     let snapshots
     try {
       snapshots = await listSessions(options.listOptions ?? {})
@@ -159,4 +163,35 @@ export function createSessionIndexReporter({
     }
     return { rows, error: null, stats: { ...stats, sources } }
   }
+
+  /**
+   * 增量快照：只返回新增 / 变化的行与消失的 id。
+   * 行不多（默认上限 50），用整行 JSON 作指纹，避免逐字段 diff 漏判。
+   * `mode:'full'` 表示首轮或重连后重建基线，Relay 应走全量替换；
+   * `mode:'diff'` 只应用 upserts 与 removedIds，绝不误删未提及的行。
+   */
+  collectFn.collectDiff = async (options = {}) => {
+    const snap = await collectFn(options)
+    if (snap.error) return { ...snap, rows: [], removedIds: [], unchanged: 0, mode: 'full' }
+    const next = new Map()
+    const rows = []
+    let unchanged = 0
+    for (const row of snap.rows) {
+      const fp = JSON.stringify(row)
+      next.set(row.sessionId, fp)
+      if (lastSent.get(row.sessionId) === fp) unchanged++
+      else rows.push(row)
+    }
+    const removedIds = [...lastSent.keys()].filter((id) => !next.has(id))
+    const mode = bootstrapped ? 'diff' : 'full'
+    lastSent.clear()
+    for (const [id, fp] of next) lastSent.set(id, fp)
+    bootstrapped = true
+    return { ...snap, rows, removedIds, unchanged, mode, total: snap.rows.length }
+  }
+
+  /** 重连后 CP 可能已重建：清空基线，下一轮重新发 full。 */
+  collectFn.resetBaseline = () => { lastSent.clear(); bootstrapped = false }
+
+  return collectFn
 }

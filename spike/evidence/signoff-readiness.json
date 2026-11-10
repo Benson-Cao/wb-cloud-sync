@@ -1,16 +1,16 @@
 {
-  "schema": "wbsync-signoff-readiness/3",
-  "capturedAt": "2026-11-10T02:25:33.156Z",
-  "verdict": "DEV_PROCEED_WAIVED",
-  "note": "SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；P1 前置四项须由 ARC / 安全 Owner 裁定。DEV_PROCEED_WAIVED 只表示发起人豁免了开发期会签，设计冻结未完成、GA 前必须补签。脚本不代签、不代裁定，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境",
+  "schema": "wbsync-signoff-readiness/4",
+  "capturedAt": "2026-11-10T12:06:24.853Z",
+  "verdict": "SIGNOFF_ABOLISHED",
+  "note": "SIGNOFF_ABOLISHED 表示发起人永久取消了四方会签要求，**不是** SIGNED_OFF：原签署栏未填写、ADR-007~010 仍为「提议中」、不代签不代裁定。其余 GA 门禁（00 成功指标 / 07 M3 / 08 §10 / P3 W10 出网审计）照旧。脚本不因治理状态返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境",
   "engineering": {
-    "currentHead": "6761c32b55f219356d0b07711731a2e81cb83eef",
+    "currentHead": "8e30f5aab194f4a88ff60021521d185a2dc36756",
     "worktreeClean": false,
     "automated": "9/9",
     "automatedOk": true,
     "snapshotStatus": "CURRENT",
-    "snapshotCapturedAt": "2026-11-10T02:18:28.224Z",
-    "snapshotGitHead": "7802932f1b05bb1e43a560775d78c5598c8db0d0",
+    "snapshotCapturedAt": "2026-11-10T11:48:02.924Z",
+    "snapshotGitHead": "8e30f5aab194f4a88ff60021521d185a2dc36756",
     "snapshotOk": true,
     "envVerdict": "READY",
     "envPassed": "5/5",
@@ -25,20 +25,22 @@
   },
   "waiver": {
     "active": true,
+    "abolished": true,
     "document": "SIGNOFF-WAIVER.md",
-    "scope": "W3–W6 内部开发",
-    "gaBlocked": true,
-    "note": "一票否决权依然有效；任一 Owner 提出异议即暂停 P1"
+    "scope": "四方会签要求永久取消；P0 设计冻结由发起人裁定",
+    "gaBlocked": false,
+    "note": "原签署栏未填写、ADR 未由四方接受；不伪造签字，决策责任由发起人承接（09 R-20）"
   },
   "signatures": {
-    "pending": 4,
+    "pending": 0,
     "roles": [
       "发起人 / PM",
       "架构师",
       "安全 Owner",
       "QA Owner"
     ],
-    "source": "docs/01_项目章程.md §9"
+    "source": "docs/01_项目章程.md §9",
+    "note": "四方会签已取消，此列表仅作历史角色记录"
   },
   "adrs": [
     {
@@ -109,7 +111,7 @@
       "#5b Cursor 双真源"
     ],
     "proposalDocument": "P1-PREREQUISITES.md",
-    "note": "未经会签；当前按推荐方案作默认实现口径（SIGNOFF-WAIVER.md §5），可回滚"
+    "note": "经发起人裁定采纳推荐方案为默认实现口径，非四方会签，可回滚"
   },
-  "nextStep": "继续 W3 开发（PWA 骨架 / 队列 / M1 验收）；GA 前按 SIGN-OFF-PROCEDURE.md 补签，P3 W10 出网审计照旧"
+  "nextStep": "四方会签已取消；按自动项 9/9 + 快照 CURRENT 继续推进，其余 GA 门禁（07 M3 / 08 §10 / P3 W10 出网审计）照旧"
 }

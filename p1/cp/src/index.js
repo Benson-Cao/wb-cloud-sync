@@ -169,6 +169,26 @@ export function createControlPlane({
   }
 
   /**
+   * 应用增量索引：只 upsert 给定行、只删给定 id，**绝不做全量替换**。
+   * Host 侧每 60s 只发变化的行；CP 里未提及的会话必须保留。
+   */
+  const applySessionDiff = (ownerDeviceId, rows = [], removedIds = []) => {
+    if (!ownerDeviceId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 ownerDeviceId')
+    let upserted = 0
+    for (const raw of Array.isArray(rows) ? rows : []) {
+      if (!raw?.sessionId) continue
+      putSession(ownerDeviceId, raw)
+      upserted++
+    }
+    let removed = 0
+    for (const id of Array.isArray(removedIds) ? removedIds : []) {
+      const row = sessions.get(id)
+      if (row && row.ownerDeviceId === ownerDeviceId) { sessions.delete(id); removed++ }
+    }
+    return { upserted, removed }
+  }
+
+  /**
    * 写入某台 Host 的会话索引快照（全量；本轮未出现的会话会被移除）。
    * @returns { upserted, removed }
    */
@@ -310,7 +330,7 @@ export function createControlPlane({
     getDevice, upsertDevice, setDeviceToken, verifyDeviceToken, heartbeatDevice,
     markDeviceOffline, revokeDevice, isDeviceAlive, listDevices,
     // session index
-    putSession, upsertSessions, getSession, listSessions, patchSession,
+    putSession, applySessionDiff, upsertSessions, getSession, listSessions, patchSession,
     // lease
     sweepExpired, getLease, acquireLease, renewLease, releaseLease, listLeases,
     // cursor

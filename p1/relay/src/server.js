@@ -122,6 +122,70 @@ const sendStatic = (res, result) => {
   res.end(result.body)
 }
 
+/**
+ * PC 侧设备管理页（同源调 /admin 与 /admin/revoke）。内联而非落盘，
+ * 保持 Relay 零静态资源依赖；token 只存本页内存，不进 URL / localStorage。
+ */
+const ADMIN_UI_HTML = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WBSync 设备管理</title>
+<style>
+body{font:15px/1.6 system-ui,sans-serif;max-width:900px;margin:24px auto;padding:0 16px;background:#11151c;color:#e6ecf5}
+h1{font-size:20px} p{color:#9fb0c8}
+input,button{font:inherit;padding:6px 10px;border-radius:6px;border:1px solid #3a4658;background:#1b2431;color:#e6ecf5}
+button{cursor:pointer;background:#2b5fbd;border-color:#2b5fbd}
+button.danger{background:#8b3030;border-color:#8b3030}
+table{width:100%;border-collapse:collapse;margin-top:16px}
+th,td{text-align:left;padding:8px;border-bottom:1px solid #2a3444;font-size:13px}
+code{color:#8ab8e8} #msg{margin:12px 0;min-height:1.4em}
+</style></head><body>
+<h1>WBSync 设备管理</h1>
+<p>吊销已配对设备：令牌立即失效、设备进入墓碑不可复活，其会话索引与租约一并清除。<b>写操作必须配置 <code>WBSYNC_ADMIN_TOKEN</code></b>；令牌只存本页内存，不写入 URL 或本地存储。</p>
+<label>Admin Token <input id="token" type="password" autocomplete="off" size="32"></label>
+<button id="refresh">刷新设备列表</button>
+<div id="msg"></div>
+<table><thead><tr><th>设备</th><th>状态</th><th>最近活跃</th><th>令牌摘要</th><th>操作</th></tr></thead><tbody id="rows"></tbody></table>
+<script>
+const $ = (id) => document.getElementById(id)
+const say = (t, bad) => { $('msg').textContent = t; $('msg').style.color = bad ? '#e07a7a' : '#7fd18c' }
+const headers = () => ({ Authorization: 'Bearer ' + $('token').value.trim() })
+const load = async () => {
+  try {
+    const r = await fetch('/admin', { headers: headers() })
+    const j = await r.json()
+    if (!r.ok) { say('读取失败：' + (j.error && j.error.code) + ' ' + (j.error && j.error.message), true); return }
+    $('rows').innerHTML = ''
+    for (const d of j.data.rows) {
+      const tr = document.createElement('tr')
+      const cell = (s) => { const td = document.createElement('td'); td.textContent = s; return td }
+      tr.appendChild(cell(d.deviceId))
+      tr.appendChild(cell(d.tombstone ? '已吊销' : d.state))
+      tr.appendChild(cell(d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : '—'))
+      tr.appendChild(cell(d.tokenDigest ? d.tokenDigest.slice(0, 12) + '…' : '—'))
+      const td = document.createElement('td')
+      const btn = document.createElement('button')
+      btn.textContent = d.tombstone ? '已吊销' : '吊销'
+      btn.className = 'danger'
+      btn.disabled = Boolean(d.tombstone)
+      btn.onclick = () => revoke(d.deviceId)
+      td.appendChild(btn); tr.appendChild(td); $('rows').appendChild(tr)
+    }
+    say('已列出 ' + j.data.rows.length + ' 台设备')
+  } catch (e) { say('读取失败：' + e.message, true) }
+}
+const revoke = async (deviceId) => {
+  if (!window.confirm('确认吊销 ' + deviceId + '？该操作不可撤销。')) return
+  try {
+    const r = await fetch('/admin/revoke', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, headers()), body: JSON.stringify({ deviceId }) })
+    const j = await r.json()
+    if (!r.ok) { say('吊销失败：' + (j.error && j.error.code) + ' ' + (j.error && j.error.message), true); return }
+    say('已吊销：' + deviceId); await load()
+  } catch (e) { say('吊销失败：' + e.message, true) }
+}
+$('refresh').onclick = load
+load()
+</script></body></html>`
+
 const reply = (res, status, payload, extraHeaders = {}) => {
   const body = JSON.stringify(payload)
   res.writeHead(status, {
@@ -232,8 +296,12 @@ export function createRelay(options = {}) {
     }
     if (msg.t === 'host/sessions') {
       const rows = Array.isArray(msg.rows) ? msg.rows : []
-      cp.upsertSessions(deviceId, rows)
-      return conn.sendJson({ t: 'host/sessions/ack', count: rows.length })
+      const removedIds = Array.isArray(msg.removedIds) ? msg.removedIds : []
+      // mode:'full'（首轮 / 重连后）走全量替换建基线；'diff' 只应用变化
+      const r = msg.mode === 'diff'
+        ? cp.applySessionDiff(deviceId, rows, removedIds)
+        : cp.upsertSessions(deviceId, rows)
+      return conn.sendJson({ t: 'host/sessions/ack', count: rows.length, removed: r.removed, mode: msg.mode ?? 'full' })
     }
     if (msg.t === 'http/response') {
       const p = state.pending.get(String(msg.reqId ?? ''))
@@ -345,8 +413,11 @@ export function createRelay(options = {}) {
         const body = await readBody(req, cfg.maxBodyBytes)
         const d = cp.getDevice(body.deviceId)
         if (!d || d.tombstone) return fail(res, 409, 'HOST_OFFLINE', '设备未注册或已吊销', true)
-        const { upserted, removed } = cp.upsertSessions(body.deviceId, body.rows ?? [])
-        return ok(res, { count: upserted, removed })
+        const rows = body.rows ?? []
+        const r = body.mode === 'diff'
+          ? cp.applySessionDiff(body.deviceId, rows, body.removedIds ?? [])
+          : cp.upsertSessions(body.deviceId, rows)
+        return ok(res, { count: r.upserted, removed: r.removed, mode: body.mode ?? 'full' })
       }
       if (method === 'GET' && path === '/host/indexes') {
         // 开发降级通道，但**不能永远裸奔**：配置了 adminToken 就要求 Bearer。
@@ -441,6 +512,36 @@ export function createRelay(options = {}) {
           transport: state.sockets.get(d.deviceId)?.isOpen() ? 'ws' : 'http-poll',
         }))
         return ok(res, { rows })
+      }
+
+      // PC 侧主动吊销（写操作）：未配置 adminToken 时明确拒绝，不接受裸奔
+      if (method === 'POST' && path === '/admin/revoke') {
+        if (!cfg.adminToken) {
+          return fail(res, 409, 'ENDPOINT_NOT_ALLOWED', '未配置 WBSYNC_ADMIN_TOKEN，吊销入口不可用')
+        }
+        if (req.headers.authorization !== `Bearer ${cfg.adminToken}`) {
+          return fail(res, 401, 'UNAUTHORIZED', 'admin token 缺失')
+        }
+        const body = await readBody(req, cfg.maxBodyBytes)
+        if (!body.deviceId) return fail(res, 400, 'INVALID_JSON', '缺少 deviceId')
+        const id = String(body.deviceId)
+        const d = cp.revokeDevice(id)
+        if (!d) return fail(res, 404, 'HOST_OFFLINE', '设备不存在')
+        // 现有 WS 立刻断开，避免吊销后旧连接继续收事件
+        try { state.sockets.get(id)?.close?.() } catch { /* 已断开 */ }
+        return ok(res, { deviceId: d.deviceId, tombstone: d.tombstone, state: d.state })
+      }
+
+      // PC 侧管理页：同源 HTML，不走 PWA 的 Service Worker
+      if (method === 'GET' && (path === '/admin/ui' || path === '/admin/ui/')) {
+        const body = Buffer.from(ADMIN_UI_HTML, 'utf8')
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': body.length,   // 中文必须按字节算，不能用字符串长度
+          'Cache-Control': 'no-cache',
+          'X-Protocol-Version': PROTOCOL,
+        })
+        return res.end(body)
       }
 
       // PWA 壳：/app → p1/pwa/public，/src → p1/pwa/src（页面里 `../src/client.js`

@@ -222,14 +222,18 @@ export function apply(ctx, config = {}) {
   /** 上报会话索引；`connected` 为假或没有 list() 时直接跳过，不制造空表。 */
   const sendIndexes = async () => {
     if (!collectIndex || !state.connected) return null
-    const { rows, error, stats } = await collectIndex()
+    // 有 collectDiff 就走增量；注入的 mock 没有该方法时退回全量（保持兼容）。
+    const snap = typeof collectIndex.collectDiff === 'function'
+      ? await collectIndex.collectDiff()
+      : { ...(await collectIndex()), removedIds: [], mode: 'full' }
+    const { rows, error, stats, removedIds = [], mode = 'full' } = snap
     if (error) { state.indexError = error; return null }
     state.indexError = null
-    if (!send({ t: 'host/sessions', rows })) return null
-    state.indexCount = rows.length
+    if (!send({ t: 'host/sessions', rows, removedIds, mode })) return null
+    state.indexCount = snap.total ?? rows.length
     state.indexSentAt = Date.now()
-    state.indexStats = stats
-    return { count: rows.length, stats }
+    state.indexStats = { ...stats, mode, unchanged: snap.unchanged ?? 0, removed: removedIds.length }
+    return { count: rows.length, stats: state.indexStats }
   }
 
   const scheduleReconnect = () => {
@@ -259,6 +263,8 @@ export function apply(ctx, config = {}) {
       try { msg = JSON.parse(String(event.data)) } catch { return }
       if (msg.t === 'host/registered') {
         state.connected = true
+        // 重连后 Relay/CP 可能已重建：清空增量基线，重新发一份 full 快照
+        collectIndex?.resetBaseline?.()
         startHeartbeat()
         startIndexRefresh()
         void sendIndexes()          // 注册成功即推一份索引，手机不必等下一个刷新周期

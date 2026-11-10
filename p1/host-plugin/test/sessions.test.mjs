@@ -243,3 +243,40 @@ test('toHeaderRef 对缺字段的 header 给 null，不抛错', () => {
   })
   assert.equal(toHeaderRef(undefined).version, null)
 })
+
+test('collectDiff：首轮 full、无变化零行、变更只发变化行、消失给 removedIds', async () => {
+  const reader = fakeReader({ s1: mkEvents(2), s2: mkEvents(3), s3: mkEvents(1) })
+  let list = [snapshot('s1'), snapshot('s2')]
+  const reporter = createSessionIndexReporter({
+    listSessions: async () => list,
+    openSession: reader.open,
+    deviceId: 'pc-1',
+  })
+
+  const first = await reporter.collectDiff()
+  assert.equal(first.mode, 'full', '首轮必须发全量建基线')
+  assert.deepEqual(first.rows.map((r) => r.sessionId), ['s1', 's2'])
+  assert.deepEqual(first.removedIds, [])
+  assert.equal(first.total, 2)
+
+  const same = await reporter.collectDiff()
+  assert.equal(same.mode, 'diff')
+  assert.deepEqual(same.rows, [], '无变化时一行都不发')
+  assert.equal(same.unchanged, 2)
+  assert.equal(same.total, 2)
+
+  list = [snapshot('s1'), snapshot('s3')]
+  const swapped = await reporter.collectDiff()
+  assert.deepEqual(swapped.rows.map((r) => r.sessionId), ['s3'], '只发新增行')
+  assert.deepEqual(swapped.removedIds, ['s2'], '消失的只给 id')
+
+  list = [snapshot('s1'), { ...snapshot('s3'), header: header('s3', { title: '新标题' }) }]
+  const changed = await reporter.collectDiff()
+  assert.deepEqual(changed.rows.map((r) => r.sessionId), ['s3'], '字段变化也只发该行')
+  assert.equal(changed.rows[0].title, '新标题')
+
+  reporter.resetBaseline()
+  const again = await reporter.collectDiff()
+  assert.equal(again.mode, 'full', '重连重置后重新发 full')
+  assert.equal(again.rows.length, 2)
+})

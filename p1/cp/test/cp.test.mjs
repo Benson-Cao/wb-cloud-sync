@@ -145,6 +145,21 @@ test('putSession 单行合并：不清掉同设备其他会话（真机 0.1.5 �
   assert.deepEqual(cp.putSession('pc-1', { title: '缺少 sessionId' }), { upserted: 0, removed: 0 })
 })
 
+test('applySessionDiff 只应用变化，不清掉未提及的行（增量上报）', () => {
+  const { cp } = makeCp()
+  cp.upsertSessions('pc-1', [sessionRow('s1'), sessionRow('s2'), sessionRow('s3')])
+  const r = cp.applySessionDiff('pc-1', [sessionRow('s2', { lastSeq: 9 })], ['s3'])
+  assert.deepEqual(r, { upserted: 1, removed: 1 })
+  assert.equal(cp.getSession('s1').lastSeq, 3, '未提及的行必须保留')
+  assert.equal(cp.getSession('s2').lastSeq, 9)
+  assert.equal(cp.getSession('s3'), null)
+  // 跨设备隔离：不能删别家的行
+  cp.upsertSessions('pc-2', [sessionRow('s9', { ownerDeviceId: 'pc-2' })])
+  assert.deepEqual(cp.applySessionDiff('pc-1', [], ['s9']), { upserted: 0, removed: 0 })
+  assert.ok(cp.getSession('s9'))
+  assert.throws(() => cp.applySessionDiff('', [], []), /ownerDeviceId/)
+})
+
 test('Host 上报不会覆盖 PC 侧置顶状态', () => {
   const { cp } = makeCp()
   cp.upsertSessions('pc-1', [sessionRow('s1')])
