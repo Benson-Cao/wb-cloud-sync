@@ -148,6 +148,35 @@ test('C4 Host 离线（心跳窗口过后）→ 409 HOST_OFFLINE（retryable）'
   assert.equal(r.json.error.retryable, true)
 })
 
+test('C9 客户端 uploadAttachment + submitPrompt：附件 receiptId 进 prompt content', async () => {
+  const token = await pair('pc-c9')
+  const seen = { upload: null, prompt: null }
+  await registerHost('pc-c9', null, {
+    'fileUploads/upload': async (body) => {
+      seen.upload = body
+      return { status: 200, body: { ok: true, data: { receiptId: 'rc-c9', file: { bytes: 3, name: 'a.txt' } }, protocol: 'wbsync/1' } }
+    },
+    'session/prompt': async (body) => {
+      seen.prompt = body
+      return { status: 200, body: { ok: true, data: { accepted: true }, protocol: 'wbsync/1' } }
+    },
+  })
+  const client = createPwaClient({ baseUrl: base, deviceId: 'pc-c9', token })
+  try {
+    const file = new File([new Uint8Array([97, 98, 99])], 'a.txt', { type: 'text/plain' })
+    const up = await client.uploadAttachment({ sessionId: 'session-c9', file })
+    assert.equal(up.receiptId, 'rc-c9')
+    assert.equal(seen.upload.data, 'YWJj', '三个字节 abc 的标准 base64')
+    assert.equal(seen.upload.name, 'a.txt')
+    await client.submitPrompt({ sessionId: 'session-c9', text: '看这个', attachments: ['rc-c9'] })
+    assert.deepEqual(seen.prompt.attachments, ['rc-c9'])
+    assert.equal(seen.prompt.text, '看这个')
+    assert.match(String(seen.prompt.clientMsgId), /\S/)
+  } finally {
+    client.stop()
+  }
+})
+
 test('C8 客户端 cancelTurn()：走白名单 session/cancel，缺参数如实拒绝', async () => {
   const token = await pair('pc-c8')
   const seen = []

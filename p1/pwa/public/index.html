@@ -77,6 +77,11 @@
     <div id="stream" hidden>
       <h2 id="streamTitle">事件流</h2>
       <button id="cancel" title="取消该会话当前正在运行的轮次">取消当前轮次</button>
+      <div id="compose">
+        <input id="msgText" placeholder="向该会话发消息…" />
+        <input id="file" type="file" />
+        <button id="send">发送</button>
+      </div>
       <div id="events"></div>
     </div>
   </main>
@@ -231,6 +236,29 @@
         say(`取消失败：${e.message}${e.code === 'HOST_OFFLINE' ? '（Host 离线）' : ''}`, true)
       } finally {
         $('cancel').disabled = false
+      }
+    })
+    $('send').addEventListener('click', async () => {
+      if (!client || !activeSession) return
+      const text = $('msgText').value.trim()
+      const file = $('file').files?.[0] ?? null
+      if (!text && !file) { say('需要文本或文件', true); return }
+      $('send').disabled = true
+      try {
+        const attachments = []
+        if (file) {
+          const up = await client.uploadAttachment({ sessionId: activeSession, file })
+          if (up?.receiptId) attachments.push(up.receiptId)
+          say(`已上传：${file.name}（${up?.file?.bytes ?? '?'} B）`)
+        }
+        await client.submitPrompt({ sessionId: activeSession, text, attachments })
+        $('msgText').value = ''
+        $('file').value = ''
+        say(`已发送${attachments.length ? '（含附件）' : ''}`)
+      } catch (e) {
+        say(`发送失败：${e.message}`, true)
+      } finally {
+        $('send').disabled = false
       }
     })
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {})

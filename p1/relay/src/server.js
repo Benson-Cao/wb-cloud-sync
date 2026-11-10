@@ -32,7 +32,8 @@ import { createEventHub } from './events.js'
 import { upgradeToWebSocket } from './ws.js'
 
 export const PROTOCOL = 'wbsync/1'
-export const ALLOWED_ENDPOINTS = ['session/*', '$events/*']
+// `fileUploads/*` 于 wbsync/1 r3 加入：附件上行经 Relay 内存中转，不落盘、不缓存、不进事件流
+export const ALLOWED_ENDPOINTS = ['session/*', 'fileUploads/*', '$events/*']
 
 const DEFAULTS = {
   codeTtlMs: 600_000,          // 6 位码 10 分钟

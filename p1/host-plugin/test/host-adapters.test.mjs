@@ -283,6 +283,68 @@ test('HA21 cancel 服务缺失 / 宿主抛错 / 缺 sessionId 如实报错', asy
   assert.match((await thrown.cancelTurn({})).message, /缺 sessionId/)
 })
 
+test('HA22 uploadAttachment：走 fileUploads.upload(agent, {data,name})', async () => {
+  const calls = []
+  const agent = { id: 'session-up' }
+  const ctx = {
+    fileUploads: {
+      upload: async (a, req) => { calls.push([a, req]); return { receiptId: 'rc-1', file: { bytes: 3 } } },
+    },
+    agents: { get: () => agent },
+  }
+  const adapters = createHostAdapters(ctx)
+  assert.equal(adapters.capabilities().upload, true)
+  assert.equal(adapters.capabilities().uploader, 'fileUploads.upload')
+  const r = await adapters.uploadAttachment({ sessionId: 'session-up', data: 'YWJj', name: 'a.txt' })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.receiptId, 'rc-1')
+  assert.equal(calls[0][0], agent, '第一参必须是 Agent 对象（@Remote 由 Typert 解析）')
+  assert.deepEqual(calls[0][1], { data: 'YWJj', name: 'a.txt' })
+})
+
+test('HA23 uploadAttachment：uploadStream 兜底 / 会话未挂载 / 缺参', async () => {
+  const seen = []
+  const viaStream = createHostAdapters({
+    fileUploads: { uploadStream: async (req) => { seen.push(req); return { receiptId: 'rc-2', file: { bytes: 3 } } } },
+  })
+  assert.equal(viaStream.capabilities().uploader, 'fileUploads.uploadStream')
+  assert.equal((await viaStream.uploadAttachment({ sessionId: 's', data: 'YWJj' })).value.receiptId, 'rc-2')
+  assert.equal(seen[0].sessionId, 's')
+  const chunks = []
+  for await (const c of seen[0].data) chunks.push(c)
+  assert.deepEqual([...chunks[0]], [97, 98, 99], 'base64 YWJj → abc')
+
+  const noAgent = createHostAdapters({
+    fileUploads: { upload: async () => ({}) }, agents: { get: () => undefined },
+  })
+  assert.match((await noAgent.uploadAttachment({ sessionId: 'x', data: 'YWJj' })).message, /未挂载/)
+  assert.match((await viaStream.uploadAttachment({ sessionId: 's' })).message, /缺 sessionId/)
+  assert.equal((await createHostAdapters({}).uploadAttachment({})).code, 'WRITER_UNAVAILABLE')
+})
+
+test('HA24 submitPrompt 带 attachments：content 里出现 file receiptId', async () => {
+  const calls = []
+  const ctx = { sessionController: {
+    prompt: async (req) => { calls.push(req); return { accepted: true } },
+  } }
+  const r = await createHostAdapters(ctx).submitPrompt({
+    sessionId: 's-24', text: '看图',
+    attachments: ['rc-9', { type: 'file', receiptId: 'rc-8' }, { bogus: 1 }],
+  })
+  assert.equal(r.ok, true)
+  assert.deepEqual(calls[0].content, [
+    { type: 'text', text: '看图' },
+    { type: 'file', receiptId: 'rc-9' },
+    { type: 'file', receiptId: 'rc-8' },
+  ])
+  // 只有附件、没有文本也允许
+  const only = await createHostAdapters(ctx).submitPrompt({ sessionId: 's-24', attachments: ['rc-7'] })
+  assert.equal(only.ok, true)
+  assert.deepEqual(calls[1].content, [{ type: 'file', receiptId: 'rc-7' }])
+  // 文本与附件都缺则拒绝
+  assert.match((await createHostAdapters(ctx).submitPrompt({ sessionId: 's-24' })).message, /缺 text/)
+})
+
 test('HA6 create 抛错 / 未返回 sessionId → HOST_ADAPTER_ERROR', async () => {
   const thrown = createHostAdapters({ sessionController: { create: async () => { throw new Error('workspace gone') } } })
   const a = await thrown.createSession({})

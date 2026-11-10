@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T12:06:25.321Z",
+  "capturedAt": "2026-11-10T12:45:38.499Z",
   "git": {
-    "head": "8e30f5aab194f4a88ff60021521d185a2dc36756",
+    "head": "86904e82c8fbb22b39dd0fe0c3b5d076f86a6715",
     "branch": "main",
     "worktreeClean": false
   },
@@ -13,36 +13,36 @@
       "host-probe.json",
       "check-plugin.json"
     ],
-    "signoffChanged": [
-      "SIGN-OFF.md"
-    ],
+    "signoffChanged": [],
     "artifactChanged": [
       "dist-tarball"
     ],
-    "narrativeChanged": [],
+    "narrativeChanged": [
+      "PROTOCOL.md"
+    ],
     "notes": [
       "发布物已重建（仅记录，不影响判定）：dist-tarball"
     ],
-    "previousCapturedAt": "2026-11-10T11:48:02.924Z",
+    "previousCapturedAt": "2026-11-10T12:06:25.321Z",
     "previousGitHead": "8e30f5aab194f4a88ff60021521d185a2dc36756",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：运行代码/证据：host-probe.json, check-plugin.json；会签材料：SIGN-OFF.md",
-      "capturedAt": "2026-11-10T11:48:02.924Z",
+      "previousReason": "已变化（阻断）：运行代码/证据：host-probe.json, check-plugin.json",
+      "capturedAt": "2026-11-10T12:06:25.321Z",
       "gitHead": "8e30f5aab194f4a88ff60021521d185a2dc36756",
       "dataChanged": [
         "host-probe.json",
         "check-plugin.json"
       ],
-      "signoffChanged": [
-        "SIGN-OFF.md"
-      ],
+      "signoffChanged": [],
       "artifactChanged": [
         "dist-tarball"
       ],
-      "narrativeChanged": []
+      "narrativeChanged": [
+        "PROTOCOL.md"
+      ]
     }
   },
   "fingerprints": {
@@ -50,8 +50,8 @@
       "index.js": "639eeebca42695b1841a65d99b9812d77c37985171537d90e2429761cbe75523",
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
-      "host-probe.json": "a7f3aaaed7f9307c6fc185c4103b1194e5f78d39630aaaf2c8b3d04cca287901",
-      "check-plugin.json": "700cd3ada001351f382386770f6ba1d11bb8a0662fab569a92cd22236dfba308",
+      "host-probe.json": "c54554e614003bfa6ddde525d645b3a6bd1b7ea2f349336f021c5598a56a6c90",
+      "check-plugin.json": "bdbbe46b0994a5e5218206a97d928aec6ae6714b9ebe6612e33f66e56c0a1180",
       "gate-check.mjs": "336f35b54d38ec043e7b7ce4a06e1d63580a337a39852e85f429b13d97a7c2de",
       "check-env.mjs": "d26c26749008404f631c64be52d908e5c0a60074235218327ff6eeb8c270e5b3",
       "signoff-check.mjs": "4491b857f555f520c6170c91e4c46d008b554de9721d9d3900d71f3a63a92938",
@@ -67,11 +67,11 @@
       "WORKBUDDY-REFERENCE.md": "e286a4af7afe2aab6f9462bfec7d0baf25ff4c892b21245624963490be49cdcc"
     },
     "artifact": {
-      "dist-tarball": "5e809f6ea5959fd6bc140bd5af84fedce8c450ef29c18cd5afc4b432b0cc9d01"
+      "dist-tarball": "5af118083fd288a2d92b6385332e7a797b1b33450d61db033de354d2f28e15b9"
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "9bd79939c4043f4a1a0e95e4aaeb92c93aeb2e3aa6a43a0a6bf43d1a35abdc9d"
+      "PROTOCOL.md": "fcfacc1aa99c0ab6ecf56cfcb4378cae55e23f6fb2183653edfe65d26f3d8e2e"
     }
   },
   "secretScan": {

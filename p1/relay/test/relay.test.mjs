@@ -190,6 +190,15 @@ test('T8 #5b 客户端 sinceSeq 只作观测记录，不参与补齐决策', asy
   assert.equal((await inflight).status, 200)
 })
 
+test('T11 白名单：r3 加入 fileUploads/*，其它高危前缀仍未开放', async () => {
+  const list = relay.allowedEndpoints
+  assert.ok(list.includes('fileUploads/*'), 'r3 附件上行必须开放')
+  assert.ok(list.includes('session/*'))
+  for (const bad of ['attachments/*', 'config/*', 'permission/*', 'remote-desktop/*']) {
+    assert.ok(!list.includes(bad), `${bad} 不得默认开放`)
+  }
+})
+
 test('T10 PC 侧主动吊销：写操作需 adminToken，吊销后令牌失效且墓碑不复活', async () => {
   // 共享实例未配置 adminToken：页面可取，写操作必须拒绝
   const ui = await fetch(`http://127.0.0.1:${port}/admin/ui`)

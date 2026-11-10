@@ -4,6 +4,18 @@
 
 ---
 
+## [P1 W3 续 23] · 2026-11-10 20:5x · 协议 **r3**：附件上行
+
+- **宿主取证**：`fileUploads` 是 cordis 服务（`super(ctx,"fileUploads")`，inject `agents/attachments/commands/connection`），可用入口两条：`upload(agent, {data(base64),name?}, signal)`（第一参是 **Agent 对象**，`@Remote` 由 Typert 解析）与 `uploadStream({sessionId, data: AsyncIterable<Uint8Array>, name?})`。返回 `{receiptId, file:{attachmentId,name,bytes}}`，`receiptId` 只在接收 Agent 作用域内有效。
+- **Host 适配器**：新增 `uploadAttachment({sessionId,data,name})`，按 `fileUploads.upload` → `uploadStream` 分层；`SERVICE_CANDIDATES` 增 `fileUploads` / `attachments`；`capabilities` 增 `upload` / `uploader`。`submitPrompt` 支持 `attachments`（receiptId 字符串或 `{type:'file',receiptId}`），`promptText` 按「有文本才加 text 段」组装 content，允许纯附件消息。
+- **协议 r3**：`docs/04` 新增 `POST /d/<deviceId>/fileUploads/upload`、白名单 `fileUploads/*`、安全边界（Relay 内存中转、不落盘 / 不缓存 / 不进事件流、receipt 限作用域、1 MiB body ≈ ≤750 KiB 原始文件）；§9 / §10 记 r3，`PROTOCOL.md` 由 `sync-protocol.mjs` 重新生成。
+- **Relay**：`ALLOWED_ENDPOINTS` 加 `fileUploads/*`；T11 断言该前缀开放、`attachments/config/permission/remote-desktop` 仍未开放。
+- **PWA**：`client.js` 增 `uploadAttachment({sessionId,file})`（File→标准 base64，分块转码避免大文件展开参数爆栈）与 `submitPrompt({sessionId,text,attachments})`（`clientMsgId` 幂等键）；事件流面板增「发消息 + 选文件 + 发送」；SW 升 `wbsync-shell-v7`。
+- 新增 4 例（HA22/23/24 覆盖 upload / uploadStream / 缺参 / 纯附件 content；C9 端到端 upload→prompt）+ T11；测试 163 → **168**；`build-bundle.mjs --check` 通过；版本 **0.1.8**。
+- **部署**：0.1.8 tgz 重装 + DSH 重启；Relay 源码变更需重启 Relay；手机刷新两次拿 SW `v7`。
+
+---
+
 ## [P1 W3 续 22] · 2026-11-10 19:5x · 非协议变更（P2 收尾）
 
 - 四方会签取消后，收掉 P2 backlog 中可自主落地的三项：

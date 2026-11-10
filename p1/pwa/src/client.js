@@ -26,6 +26,21 @@ const toWsUrl = (base) => String(base)
   .replace(/^http:/, 'ws:')
   .replace(/^https:/, 'wss:')
 
+/** File / Blob → 标准 base64（分块转二进制串，避免大文件展开参数爆栈）。 */
+const fileToBase64 = async (file) => {
+  const buf = new Uint8Array(await file.arrayBuffer())
+  let bin = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    bin += String.fromCharCode(...buf.subarray(i, i + CHUNK))
+  }
+  return btoa(bin)
+}
+
+/** 客户端消息幂等键：宿主用它去重，重发同一 clientMsgId 只落一条。 */
+const makeClientMsgId = () =>
+  globalThis.crypto?.randomUUID?.() ?? `c-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
 export function createPwaClient({
   baseUrl,
   deviceId,
@@ -343,6 +358,61 @@ export function createPwaClient({
     return payload.data
   }
 
+  /**
+   * 向已有会话发一条消息：文本 + 已上传附件的 receiptId。
+   * 走白名单 `session/prompt`；`clientMsgId` 是宿主原生幂等键，重发同一条不会重复落库。
+   */
+  const submitPrompt = async ({ sessionId, text = '', attachments = [], clientMsgId } = {}) => {
+    if (!sessionId) {
+      throw Object.assign(new Error('发消息缺 sessionId'), { code: 'INVALID_ARGUMENT' })
+    }
+    const rid = clientMsgId ?? makeClientMsgId()
+    const r = await fetchImpl(`${base}/d/${encodeURIComponent(deviceId)}/session/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ clientId, sessionId, text, attachments, clientMsgId: rid }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      const detail = typeof payload?.error?.message === 'string' ? payload.error.message : ''
+      throw Object.assign(
+        new Error(`发送失败：${code}${detail && detail !== code ? ` · ${detail}` : ''}`),
+        { code, detail },
+      )
+    }
+    return payload.data
+  }
+
+  /**
+   * 附件上行：文件 → base64 → 宿主 `fileUploads`，拿回 receiptId 供同一会话的 prompt 引用。
+   * 只走白名单 `fileUploads/upload`；本客户端不缓存文件内容。
+   */
+  const uploadAttachment = async ({ sessionId, file, name } = {}) => {
+    if (!sessionId || !file) {
+      throw Object.assign(new Error('上传缺 sessionId / file'), { code: 'INVALID_ARGUMENT' })
+    }
+    const r = await fetchImpl(`${base}/d/${encodeURIComponent(deviceId)}/fileUploads/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        clientId, sessionId,
+        data: await fileToBase64(file),
+        name: name ?? file.name ?? null,
+      }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      const detail = typeof payload?.error?.message === 'string' ? payload.error.message : ''
+      throw Object.assign(
+        new Error(`上传失败：${code}${detail && detail !== code ? ` · ${detail}` : ''}`),
+        { code, detail },
+      )
+    }
+    return payload.data
+  }
+
   const snapshot = () => ({
     deviceId,
     stopped,
@@ -358,5 +428,8 @@ export function createPwaClient({
     })),
   })
 
-  return { refreshSessions, createSession, cancelTurn, follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null }
+  return {
+    refreshSessions, createSession, cancelTurn, submitPrompt, uploadAttachment,
+    follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null,
+  }
 }

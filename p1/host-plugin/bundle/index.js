@@ -372,6 +372,8 @@ function createSessionIndexReporter({
 const SERVICE_CANDIDATES = [
   'sessionController', 'sessions', 'agents', 'connection', 'gateway',
   'workspaceRegistry', 'sessionPersistence', 'typert',
+  // 附件上行：`fileUploads`（super(ctx,"fileUploads")）与它依赖的 `attachments`
+  'fileUploads', 'attachments',
 ]
 
 /**
@@ -489,6 +491,24 @@ const cancelEntry = (services) => {
   return null
 }
 
+/**
+ * 附件上行入口（asar 取证）：`fileUploads` 是 cordis 服务，
+ *   `upload(agent, request, signal)` —— 第一参是 **Agent 对象**（@Remote 由 Typert 解析），
+ *     request = `{ data: base64, name? }`，返回 `{ receiptId, file:{attachmentId,name,bytes} }`；
+ *   `uploadStream({ sessionId, data: AsyncIterable<Uint8Array>, name? })` —— 接受 sessionId。
+ * `receiptId` 只在接收 Agent 作用域内有效，必须与同一 session 的 prompt 一起用。
+ */
+const uploadEntry = (services) => {
+  const f = services.fileUploads
+  if (typeof f?.upload === 'function' && typeof services.agents?.get === 'function') {
+    return { svc: f, name: 'fileUploads', kind: 'upload' }
+  }
+  if (typeof f?.uploadStream === 'function') {
+    return { svc: f, name: 'fileUploads', kind: 'uploadStream' }
+  }
+  return null
+}
+
 function createHostAdapters(ctx, options = {}) {
   // 只留作「服务注册晚于插件」的对照，不参与实际调用（0.1.4 的教训）。
   const boot = probeServices(ctx)
@@ -506,9 +526,18 @@ function createHostAdapters(ctx, options = {}) {
     message: `${entry ? `${entry.name}.${entry.kind}: ` : ''}${error?.message ?? String(error)}`,
   })
 
-  const promptText = async (sessionId, text, requestId, services) => {
+  /**
+   * 提交一条消息。`extra` 是附加内容段（如 `{type:'file', receiptId}`），
+   * 与文本一起按 session/prompt 的 content 顺序下发；文本为空时只发附件。
+   */
+  const promptText = async (sessionId, text, requestId, services, extra = []) => {
     const entry = promptEntry(services)
     if (!entry) return unavailable('可用的消息提交入口（prompt / followup）', services)
+    const trimmed = typeof text === 'string' ? text.trim() : ''
+    const content = [...(trimmed ? [{ type: 'text', text }] : []), ...extra]
+    if (!content.length) {
+      return { ok: false, code: 'HOST_ADAPTER_ERROR', message: '消息内容为空（无文本也无附件）' }
+    }
     const rid = requestId || randomId()
     try {
       if (entry.kind === 'followup') {
@@ -518,7 +547,7 @@ function createHostAdapters(ctx, options = {}) {
         }
         await agent.followup({
           id: rid, role: 'user',
-          content: [{ type: 'text', text }],
+          content,
           source: { kind: 'plugin:wbsync' },
         })
         return { ok: true, value: { accepted: true }, requestId: rid }
@@ -526,7 +555,7 @@ function createHostAdapters(ctx, options = {}) {
       // 官方 (request, signal)：required = requestId / sessionId / mode / content
       const signal = typeof AbortController === 'function' ? new AbortController().signal : undefined
       const r = await entry.svc.prompt(
-        { requestId: rid, sessionId, mode: 'queue', content: [{ type: 'text', text }] },
+        { requestId: rid, sessionId, mode: 'queue', content },
         signal,
       )
       return { ok: true, value: r ?? { accepted: true }, requestId: rid }
@@ -546,6 +575,7 @@ function createHostAdapters(ctx, options = {}) {
       const c = createEntry(now.services)
       const p = promptEntry(now.services)
       const x = cancelEntry(now.services)
+      const u = uploadEntry(now.services)
       const serviceReport = {}
       for (const name of SERVICE_CANDIDATES) {
         const r = now.resolved[name]
@@ -558,9 +588,11 @@ function createHostAdapters(ctx, options = {}) {
         create: Boolean(c),
         prompt: Boolean(p),
         cancel: Boolean(x),
+        upload: Boolean(u),
         writer: c ? `${c.name}.${c.kind}` : null,
         messenger: p ? `${p.name}.${p.kind}` : null,
         canceller: x ? `${x.name}.${x.kind}` : null,
+        uploader: u ? `${u.name}.${u.kind}` : null,
         probe: {
           hasGet: safeType('get') === 'function',
           hasInject: safeType('inject') === 'function',
@@ -575,11 +607,18 @@ function createHostAdapters(ctx, options = {}) {
     },
 
     /** 手机向已有会话发一句话：clientMsgId → requestId（宿主原生幂等）。 */
-    submitPrompt: async ({ sessionId, text, clientMsgId }) => {
-      if (!sessionId || typeof text !== 'string') {
-        return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'submitPrompt 缺 sessionId / text' }
+    submitPrompt: async ({ sessionId, text, clientMsgId, attachments }) => {
+      if (!sessionId) {
+        return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'submitPrompt 缺 sessionId' }
       }
-      const r = await promptText(sessionId, text, clientMsgId, current())
+      // attachments 允许传 receiptId 字符串或 {type:'file',receiptId} 对象
+      const extra = (Array.isArray(attachments) ? attachments : [])
+        .map((a) => (typeof a === 'string' ? { type: 'file', receiptId: a } : a))
+        .filter((a) => a && a.type === 'file' && typeof a.receiptId === 'string' && a.receiptId)
+      if (typeof text !== 'string' && !extra.length) {
+        return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'submitPrompt 缺 text / attachments' }
+      }
+      const r = await promptText(sessionId, text ?? '', clientMsgId, current(), extra)
       return r.requestId ? { ok: r.ok, code: r.code, message: r.message, value: r.value } : r
     },
 
@@ -602,6 +641,36 @@ function createHostAdapters(ctx, options = {}) {
         }
         const r = await entry.svc.cancel({ sessionId })
         return { ok: true, value: r ?? { cancelled: true } }
+      } catch (error) {
+        return asError(error, entry)
+      }
+    },
+
+    /**
+     * 附件上行：base64 → 宿主 `fileUploads`，返回 `receiptId` 供同一 session 的 prompt 引用。
+     * 本插件不落任何文件内容，只做透传；体积上限由调用方（Relay，1 MiB body）先行拒绝。
+     */
+    uploadAttachment: async ({ sessionId, data, name } = {}) => {
+      const services = current()
+      const entry = uploadEntry(services)
+      if (!entry) return unavailable('可用的附件上传入口（fileUploads）', services)
+      if (!sessionId || typeof data !== 'string' || !data) {
+        return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'uploadAttachment 缺 sessionId / data' }
+      }
+      const signal = typeof AbortController === 'function' ? new AbortController().signal : undefined
+      try {
+        if (entry.kind === 'upload') {
+          const agent = services.agents.get(sessionId)
+          if (!agent) {
+            return { ok: false, code: 'HOST_ADAPTER_ERROR', message: `会话未挂载，无法上传：${sessionId}` }
+          }
+          const r = await entry.svc.upload(agent, { data, ...(name ? { name } : {}) }, signal)
+          return { ok: true, value: { receiptId: r?.receiptId ?? null, file: r?.file ?? null } }
+        }
+        // uploadStream 形态：把 base64 还原成一帧字节流，交给服务自己 resolveAgent
+        async function* chunks() { yield Uint8Array.from(Buffer.from(data, 'base64')) }
+        const r = await entry.svc.uploadStream({ sessionId, data: chunks(), ...(name ? { name } : {}) })
+        return { ok: true, value: { receiptId: r?.receiptId ?? null, file: r?.file ?? null } }
       } catch (error) {
         return asError(error, entry)
       }
@@ -830,6 +899,8 @@ function __apply(ctx, config = {}) {
       if (endpoint === 'session/prompt') {
         const r = await adapters.submitPrompt({
           sessionId: body?.sessionId, text: body?.text, clientMsgId: body?.clientMsgId,
+          // 无附件时不带该字段，保持适配器收到的参数形状与旧版一致
+          ...(body?.attachments === undefined ? {} : { attachments: body.attachments }),
         })
         const { status, body: payload } = unwrap(r, { accepted: true })
         return send({ t: 'http/response', reqId, status, body: payload })
@@ -849,6 +920,13 @@ function __apply(ctx, config = {}) {
       if (endpoint === 'session/follow') {
         const r = await adapters.replay({ sessionId: body?.sessionId, sinceSeq: body?.sinceSeq })
         const { status, body: payload } = unwrap(r, { events: [] })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'fileUploads/upload') {
+        const r = await adapters.uploadAttachment({
+          sessionId: body?.sessionId, data: body?.data, name: body?.name,
+        })
+        const { status, body: payload } = unwrap(r, { receiptId: null })
         return send({ t: 'http/response', reqId, status, body: payload })
       }
       return send({

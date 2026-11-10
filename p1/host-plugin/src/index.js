@@ -169,6 +169,8 @@ export function apply(ctx, config = {}) {
       if (endpoint === 'session/prompt') {
         const r = await adapters.submitPrompt({
           sessionId: body?.sessionId, text: body?.text, clientMsgId: body?.clientMsgId,
+          // 无附件时不带该字段，保持适配器收到的参数形状与旧版一致
+          ...(body?.attachments === undefined ? {} : { attachments: body.attachments }),
         })
         const { status, body: payload } = unwrap(r, { accepted: true })
         return send({ t: 'http/response', reqId, status, body: payload })
@@ -188,6 +190,13 @@ export function apply(ctx, config = {}) {
       if (endpoint === 'session/follow') {
         const r = await adapters.replay({ sessionId: body?.sessionId, sinceSeq: body?.sinceSeq })
         const { status, body: payload } = unwrap(r, { events: [] })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'fileUploads/upload') {
+        const r = await adapters.uploadAttachment({
+          sessionId: body?.sessionId, data: body?.data, name: body?.name,
+        })
+        const { status, body: payload } = unwrap(r, { receiptId: null })
         return send({ t: 'http/response', reqId, status, body: payload })
       }
       return send({
