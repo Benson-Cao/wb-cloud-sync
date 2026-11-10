@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T06:08:13.854Z",
+  "capturedAt": "2026-11-10T09:04:05.612Z",
   "git": {
-    "head": "28a7e16a002e5c381382b4ebb34b40531d131212",
+    "head": "fae6fe67416b7c92cd66cec3a175e0ef9d88f310",
     "branch": "main",
     "worktreeClean": false
   },
@@ -21,15 +21,15 @@
     "notes": [
       "发布物已重建（仅记录，不影响判定）：dist-tarball"
     ],
-    "previousCapturedAt": "2026-11-10T05:49:02.017Z",
-    "previousGitHead": "02bdd8b2a799c65e9e95cda1ef169672d0e1519b",
+    "previousCapturedAt": "2026-11-10T06:08:13.854Z",
+    "previousGitHead": "28a7e16a002e5c381382b4ebb34b40531d131212",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
       "previousReason": "已变化（阻断）：运行代码/证据：host-probe.json, check-plugin.json",
-      "capturedAt": "2026-11-10T05:49:02.017Z",
-      "gitHead": "02bdd8b2a799c65e9e95cda1ef169672d0e1519b",
+      "capturedAt": "2026-11-10T06:08:13.854Z",
+      "gitHead": "28a7e16a002e5c381382b4ebb34b40531d131212",
       "dataChanged": [
         "host-probe.json",
         "check-plugin.json"
@@ -46,8 +46,8 @@
       "index.js": "639eeebca42695b1841a65d99b9812d77c37985171537d90e2429761cbe75523",
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
-      "host-probe.json": "d1bfbef8fdbd97e5c2d28a281f3a8b72c6bedf96420060732a06c06df7a10546",
-      "check-plugin.json": "c24fa3ca5eafddfdd03247e1dc08fe0590e93fd6e3b0d5ca055e5008c57e37a6",
+      "host-probe.json": "6d15d130ff3e3d0754c1b59c7b1370a88a20a7704f98991571f906a313933c0f",
+      "check-plugin.json": "6ad41471fd04ab29fb73378a3e4b255bea1f70e78194de70ae00d52f7172404c",
       "gate-check.mjs": "fd0f14dbaa0f927801aa0191398e0f0cdef3baa669b13715f4375568cf7d5da1",
       "check-env.mjs": "d26c26749008404f631c64be52d908e5c0a60074235218327ff6eeb8c270e5b3",
       "signoff-check.mjs": "04de87da587e985b33f3a9f50b424b5d8f8814969ded5b053b42bb03a269057b",
@@ -63,7 +63,7 @@
       "WORKBUDDY-REFERENCE.md": "e286a4af7afe2aab6f9462bfec7d0baf25ff4c892b21245624963490be49cdcc"
     },
     "artifact": {
-      "dist-tarball": "96d72b55c19d3f0425161acafce8d1126952b2aa6bd10c6d6cc22e8d2fd99d30"
+      "dist-tarball": "8381b66f8b7ac57b5c3808f9365a84b820803492cec6916b831f936fc9fcf5f3"
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",

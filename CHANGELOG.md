@@ -4,6 +4,16 @@
 
 ---
 
+## [P1 W3 续 17] · 2026-11-10 16:5x · 非协议变更
+
+- **0.1.3 真机诊断到位但仍 409**：`probe` 报 `hasGet/hasInject/hasRoot:true`、`keys:["fiber"]`，`controller` 仍 false。
+- **静态取证推翻上一轮假设**：枚举 asar 全部 `reflect.provide("...")` → 服务名只有 `actionCards / documentPreviews / layout / loader / modules / pluginNavigation / resources / sessions / sidebarRight / sidebarRightTabs / uiRenderer / userQuestionPanels`，**没有 `sessionController`**；`super(ctx,"sessionController")` 零命中。它只是 RPC endpoint 表的路由名。参照物 `dsh-drawai` 是**双端插件**（`exports["./client"]`），那行 `ctx.get('sessionController')` 是未走通的 fallback；`sessions` 服务标注 `session-controller.client`，host-only 插件看不到。host 侧真正注册的是 `agents`（`AgentRegistry extends Service`, `super(ctx,"agents")`）。
+- **0.1.4 改为多路探测 + 自动适配**：一次探测候选表 `sessionController / sessions / agents / connection / gateway / workspaceRegistry / sessionPersistence / typert`；谁有 `create` / `createSession` 就用谁，消息提交优先 `prompt(request, signal)`、其次 `agents.get(id).followup(...)`。返回形态兼容字符串 / `{sessionId}` / `{agent:{id}}`。`writer.probe.services` 逐项报 `{present, methods}`（原型链 4 层），`writer` / `messenger` 指出实际选中的通道——下一轮不用再猜。
+- 新增 3 例（sessions 字符串返回、agents createSession+followup、服务清单诊断）；测试 140 → **143**，版本 **0.1.4**（`dist/dsh-wb-cloud-sync-host-0.1.4.tgz`）。
+- **教训**：RPC endpoint 表的 `service` 字段 ≠ cordis 服务名；「同机插件里出现过某行代码」不等于「这行跑通过」。真机统计据优先于静态推测。
+
+---
+
 ## [P1 W3 续 16] · 2026-11-10 14:0x · 非协议变更
 
 - **真机装 0.1.2 后 `/__wbsync/status` 报 `writer` 全 false**——宿主服务没暴露给插件 ctx，上轮标注的未验证点被真机证实。

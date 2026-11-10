@@ -65,7 +65,7 @@ test('HA4 prompt 入口缺失 → 仍返回会话，附未发送说明', async (
   const r = await createHostAdapters(ctx).createSession({ text: 'hi' })
   assert.equal(r.ok, true)
   assert.equal(r.value.prompted, false)
-  assert.match(r.value.promptError, /未提供 prompt/)
+  assert.match(r.value.promptError, /未发送/)
 })
 
 test('HA5 服务软探测：直接属性 / ctx.get / 缺失 → 409', async () => {
@@ -107,6 +107,52 @@ test('HA5b 真机回归：ctx[name] 抛错时，ctx.get 仍必须能拿到服务
   assert.equal((await adapters.createSession({ text: 'hi' })).value.sessionId, 'session-via-get-only')
   assert.equal((await adapters.submitPrompt({ sessionId: 's', text: 'x' })).ok, true)
   assert.equal(adapters.capabilities().probe.hasGet, true)
+})
+
+test('HA10 sessions 服务（client RPC 代理）返回字符串 sessionId 也能建会话', async () => {
+  const calls = { create: [], prompt: [] }
+  const ctx = { sessions: {
+    create: async (r) => { calls.create.push(r); return 'session-via-sessions' },
+    prompt: async (r, s) => { calls.prompt.push({ request: r, source: s }); return { accepted: true } },
+  } }
+  const adapters = createHostAdapters(ctx, { randomId: () => 'r-sessions' })
+  assert.equal(adapters.capabilities().writer, 'sessions.create')
+  const r = await adapters.createSession({ text: '你好', cwd: 'D:/pwa' })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.sessionId, 'session-via-sessions')
+  assert.equal(r.value.prompted, true)
+  assert.deepEqual(calls.create, [{ cwd: 'D:/pwa' }])
+  assert.equal(calls.prompt[0].request.sessionId, 'session-via-sessions')
+})
+
+test('HA11 agents 服务（host 侧）走 createSession + followup', async () => {
+  const followed = []
+  const created = []
+  const ctx = { agents: {
+    createSession: async (o) => { created.push(o); return { agent: { id: 'session-via-agents' } } },
+    get: () => ({ followup: (msg) => { followed.push(msg); return true } }),
+  } }
+  const adapters = createHostAdapters(ctx, { randomId: () => 'r-agents' })
+  assert.equal(adapters.capabilities().writer, 'agents.createSession')
+  assert.equal(adapters.capabilities().messenger, 'agents.followup')
+  const r = await adapters.createSession({ text: '从 agents 建', cwd: 'D:/w' })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.sessionId, 'session-via-agents')
+  assert.equal(r.value.prompted, true)
+  assert.deepEqual(created[0].cwd, 'D:/w')
+  assert.equal(typeof created[0].reusable, 'function')
+  assert.equal(followed[0].content[0].text, '从 agents 建')
+  assert.equal(followed[0].source.kind, 'plugin:wbsync')
+})
+
+test('HA12 capabilities 列出整张服务表（真机排查用）', async () => {
+  const { ctx } = makeController()
+  const caps = createHostAdapters(ctx).capabilities()
+  assert.equal(caps.probe.services.sessionController.present, true)
+  assert.ok(caps.probe.services.sessionController.methods.includes('create'))
+  assert.equal(caps.probe.services.sessions.present, false)
+  assert.equal(caps.probe.services.agents.present, false)
+  assert.equal(caps.writer, 'sessionController.create')
 })
 
 test('HA6 create 抛错 / 未返回 sessionId → HOST_ADAPTER_ERROR', async () => {
