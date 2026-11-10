@@ -10,7 +10,7 @@ source scripts/toolchain-env.sh          # 仓库根执行，启用隔离 Node 2
 pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.mjs
 ```
 
-`createRelay(options)` 返回未监听的 `http.Server` + 内存 `state`，注入 `now()` / `randomBytes()` 可让时间与随机性确定，规则判定不靠运行时猜测。`node --test` 共 **23 个用例**：HTTP 9、Host WS 7、手机事件订阅 7。
+`createRelay(options)` 返回未监听的 `http.Server` + 内存 `state`，注入 `now()` / `randomBytes()` 可让时间与随机性确定，规则判定不靠运行时猜测。`node --test` 共 **27 个用例**：HTTP 9、Host WS 7、手机事件订阅 7、跨实例共享 CP 4。
 
 ## 传输形态
 
@@ -18,6 +18,7 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 |---|---|---|
 | Host → Relay | **`WS /ws/host` 长连** | 先 `host/register`（带 `HOST_TOKEN`），再 `host/heartbeat`、`host/sessions`、`session/event`、`http/response` |
 | 手机订阅事件 | **`WS /d/<deviceId>/events/<sessionId>?token=&sinceSeq=`** | 只下行；令牌走 query（浏览器 WebSocket 不能设 Authorization 头） |
+| 手机读会话列表 | **`GET /api/sessions?deviceId=&pinned=`** | `Bearer <deviceToken>`；协议 §4 CP API 的 W3 单机实现（CP 仍在 Relay 进程内，P2 迁独立服务），测试见 `p1/pwa` A1–A3 |
 | 手机发指令 | HTTP（`/d/<deviceId>/session/*`） | 走白名单 + 桥接成 `http/request` 帧 |
 | 手机请求 → Host | `http/request` 帧 | 同一连接按发送顺序到达，**帧序即流序** |
 | 降级 | `GET /host/poll` + `POST /host/respond` | 设备没有活跃 WS 时使用，便于旧 Host 与单测 |
@@ -43,7 +44,7 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 | `WS /d/<id>/events/<sid>` 订阅 + 连续 `seq` 补齐 + `gap` 显式上报 | `04` §5.3、`ADR-004`、G4 |
 | `allowedEndpoints` 默认仅 `session/*`、`$events/*`，白名单外 403 | `04` §7、BR-6 |
 | 请求超时 10s → `NO_PROGRESS` 504；Host 离线 → `HOST_OFFLINE` 409 | `04` §1 |
-| `POST /host/register`、`/host/heartbeat`、`/host/sessions`、`GET /host/indexes`（HTTP 降级） | `04` §5.2 |
+| `POST /host/register`、`/host/heartbeat`、`/host/sessions`、`GET /host/indexes`（HTTP 降级；配置 `adminToken` 后加锁） | `04` §5.2 |
 | `GET /admin`（含 `transport` `ws` / `http-poll`）、`GET /health`、统一响应包与 `X-Protocol-Version` | `04` §1 / §5 |
 
 ## 四项默认裁定如何落进代码
@@ -65,7 +66,8 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 
 ## 下一步（`05` W3 剩余）
 
-1. 重启后的历史补齐：手机请求超出内存缓冲时，由 Host 只读 `sessionPersistence.open(id,'read')` 回放连续前缀。
-2. CP 分离：账号 / `DeviceRegistry` / `SessionIndex` / `RouteLease` / `Cursor` 四张元数据表。
-3. Host 插件 bundle 最小可运行（`apply` + `inject` + `effect` + 本地具名路由）。
-4. PWA 骨架：设备选择、会话列表、`sinceSeq` 补齐渲染。
+1. ~~重启后的历史补齐~~（`p1/host-plugin/src/replay.js` + 手机侧 `session/follow` 桥，已落地）。
+2. ~~CP 分离~~（`p1/cp` 四张表，已落地）。
+3. ~~Host 插件 bundle 最小可运行~~（`p1/host-plugin`，已落地）。
+4. ~~PWA 骨架：设备选择、会话列表、`sinceSeq` 补齐渲染~~（`p1/pwa`，已落地）。
+5. 剩余：配对向导 UI（手机不再手填令牌）、`POST /api/sessions` 新建会话、附件上行、真机联调。

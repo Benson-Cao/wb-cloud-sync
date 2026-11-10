@@ -4,6 +4,19 @@
 
 ---
 
+## [P1 W3 续 7] · 2026-11-10 11:2x · 非协议变更
+
+- **PWA 骨架落地**：新增 `p1/pwa/`（`@wbsync/pwa-dev`，零依赖）。手机侧三件事补齐——鉴权会话列表、事件订阅、断线重连补拉——W3「PWA 骨架：设备选择、会话列表、`sinceSeq` 补齐渲染」首次可跑通端到端。`src/client.js` 是框架无关的纯逻辑核心（`fetchImpl` / `WebSocketImpl` / `now` 全可注入，Node 里对着真 Relay 跑端到端）；`public/` 是最小 PWA 壳（会话列表 + 事件流渲染 + 只缓存外壳的 sw.js，业务请求网络直连）。
+- **补上协议 §4 的手机侧 CP 读端点**：Relay 新增 `GET /api/sessions?deviceId=&pinned=`（`Bearer <deviceToken>` 鉴权）。此前手机的会话列表只能查无鉴权的 `/host/indexes`，这是本轮发现的真缺口。W3 的 CP 还是进程内库对象所以由 Relay 代挂，P2 CP 独立成服务时整体迁走，客户端 URL 不变。
+- **收掉第二个裸奔口子**：`GET /host/indexes` 配置 `adminToken` 后要求 Bearer（向后兼容：未配置时行为不变）。降级通道可以简化，但不能永远无鉴权。
+- **客户端语义**（ADR-004 / #5b）：连续 `seq` 唯一游标，`seq <= lastSeq` 幂等丢弃，实时跳帧按缺口处理不硬渲染；断线按 `base×2^n`（上限 15s）退避，重连带本地 `lastSeq` 由 Relay 补 dropped 窗口；收到 `session/gap` 或 `replay(complete=false)` 走白名单内 `session/follow` 桥到 Host 只读回放，拿回连续前缀后关旧订阅重订阅续流；Host 硬缺口（`complete:false`）如实停在 `gap`，**不跳跃、不静默、不重试风暴**。
+- **写客户端时抓到自己三个缺陷**：① `replay(complete=false)` 与 `session/gap` 背靠背到达会各自触发一次补齐 → 并发双补齐，加 `refilling` 守卫去重；② 补齐成功后旧订阅连接不关 → 双连接重复推送，且主动 close 会触发 close 事件引发多余重连，加 `closing` 标记；③ 测试里模拟 Host 的常驻收件循环挂 60s pending timer 吊住事件循环 → 文件级测试 8s 超时，timer `unref()` + `after` 统一关 Host 连接。
+- 测试 92 → **100**（`p1/pwa` 8 个，全部真实 `createRelay()` 端到端：鉴权 401 / CP 读索引 + `pinned` 过滤 / `/host/indexes` 加锁 / 实时按序 / 重连补窗口 / gap 回 Host 补齐后无缝续流 / 硬缺口有界停止 / `unfollow` 清理）。
+
+**边界未变**：配对向导 UI 未做（壳页面手填令牌，凭据暂存 localStorage 仅开发期）；`POST /api/sessions`（新建会话）与 `PATCH`（置顶，手机 403）未接；附件上行未做；`deviceId` 单机期 = Host 设备 ID（单活跃令牌，一台 Host 一部手机）。
+
+---
+
 ## [P1 W3 续 6] · 2026-11-10 10:24 · 非协议变更
 
 - **CP 分离落地**：新增 `p1/cp/`（`@wbsync/cp-dev`，零依赖）。协议 §2 的四张表——`Device` / `SessionIndex` / `RouteLease` / `Cursor`——从 Relay 进程内存搬到 CP，接口按 Postgres 表 1:1 设计，P2 换真库时替换实现、不动调用方。Relay 的 `state` 只剩传输状态：套接字、待转发帧、事件缓冲、配对短时码、限速计数。

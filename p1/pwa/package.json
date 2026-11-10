@@ -1,0 +1,11 @@
+{
+  "name": "@wbsync/pwa-dev",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "P1 W3 手机侧 PWA 骨架：会话列表 + 事件订阅 + 断线重连补拉（零依赖逻辑核心）",
+  "engines": { "node": ">=24.9" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

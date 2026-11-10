@@ -1,0 +1,13 @@
+{
+  "name": "WBSync 会话",
+  "short_name": "WBSync",
+  "description": "wb-cloud-sync P1 手机端骨架：会话列表与事件流",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#141414",
+  "theme_color": "#141414",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

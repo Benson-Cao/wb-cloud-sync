@@ -276,8 +276,31 @@ export function createRelay(options = {}) {
         return ok(res, { count: upserted, removed })
       }
       if (method === 'GET' && path === '/host/indexes') {
+        // 开发降级通道，但**不能永远裸奔**：配置了 adminToken 就要求 Bearer。
+        // 手机侧正式入口是下面的 GET /api/sessions（设备令牌鉴权）。
+        if (cfg.adminToken && req.headers.authorization !== `Bearer ${cfg.adminToken}`) {
+          return fail(res, 401, 'UNAUTHORIZED', 'admin token 缺失')
+        }
         const deviceId = url.searchParams.get('deviceId') ?? ''
         return ok(res, { deviceId, rows: cp.listSessions({ ownerDeviceId: deviceId }) })
+      }
+
+      // 手机侧会话列表（协议 §4 CP API 的 W3 单机实现）。
+      // CP 目前是 Relay 进程内的库对象，所以由 Relay 代挂 /api/*；P2 CP 独立成
+      // 服务时这条路由整体迁走，客户端 URL 不变。
+      if (method === 'GET' && path === '/api/sessions') {
+        const deviceId = url.searchParams.get('deviceId') ?? ''
+        const auth = String(req.headers.authorization ?? '')
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        if (!cp.verifyDeviceToken(deviceId, token)) {
+          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+        }
+        const rawPinned = url.searchParams.get('pinned')
+        const pinned = rawPinned === null ? null : rawPinned === 'true'
+        return ok(res, {
+          deviceId,
+          rows: cp.listSessions({ ownerDeviceId: deviceId, pinned }),
+        })
       }
 
       // 降级通道：轮询取帧 / 回响应
