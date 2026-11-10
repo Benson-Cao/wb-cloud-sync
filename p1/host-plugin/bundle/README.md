@@ -4,7 +4,7 @@
 
 ## 安装
 
-DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.2.tgz`（由本目录 `npm pack` 产出）。
+DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.3.tgz`（由本目录 `npm pack` 产出）。
 
 ## 配置（缺省即可本机试跑）
 

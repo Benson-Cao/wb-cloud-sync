@@ -4,6 +4,17 @@
 
 ---
 
+## [P1 W3 续 16] · 2026-11-10 14:0x · 非协议变更
+
+- **真机装 0.1.2 后 `/__wbsync/status` 报 `writer` 全 false**——宿主服务没暴露给插件 ctx，上轮标注的未验证点被真机证实。
+- **根因（确定的代码 bug）**：同机在跑的 `dsh-drawai` 用 `ctx.get?.('sessionController')` 拿服务；我们的 `lookupService` 把 `ctx[name]` 与 `ctx.get(name)` 放进**同一个 try**，cordis 访问未注入属性抛错 → 第一步抛了把 `get` 整段吞掉。0.1.3 改为 **`ctx.get` 优先、每路独立 try/catch**（另加 `ctx.root` 回退），并新增 Proxy 回归用例（未知属性抛错但 `get()` 可用）。
+- **第二处修正**：asar 里的 `async prompt(request, source)` 是**内部实现**；公开服务入口是 `prompt(request, signal)`，Remote 层自己用 `request.requestId` 铸出 `{kind:'user', rpcId}` 的 durable source。0.1.2 误传了 source 对象，现按 `dsh-drawai` 真机在用的形态调用。幂等仍由 `clientMsgId → requestId` 保证。
+- **诊断加满**：`writer.probe` 增 `hasGet / hasInject / hasRoot / keys / controllerMethods`（逐项独立 try，Proxy 拒绝枚举也不炸），下一轮若仍不通可直接定位服务对象形态。
+- 版本 **0.1.3**（`dist/dsh-wb-cloud-sync-host-0.1.3.tgz`）；测试 139 → **140**，门禁 9/9 + 快照 CURRENT。
+- **仍未真机验证**：`ctx.get('sessionController')` 在本插件 ctx 上是否返回服务对象、`create(request)` 是否可直接调——0.1.3 装包后看 `writer` 与 `writer.probe` 即可确认。
+
+---
+
 ## [P1 W3 续 15] · 2026-11-10 13:4x · 非协议变更
 
 - **真机全链路已通**：截图确认手机「已连接 · 11 个会话」、列表与实时事件流（seq 512）正常；唯一红字 `WRITER_UNAVAILABLE` 是上轮预告的已知待办——`createSession` 适配器未接宿主入口。本轮把它接上。

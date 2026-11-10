@@ -46,7 +46,8 @@ test('HA2 cwd 透传 + 第一句话：requestId/rpcId 一致、content 走宿主
   assert.equal(request.mode, 'queue')
   assert.deepEqual(request.content, [{ type: 'text', text: '第一句话' }])
   assert.equal(request.requestId, 'req-fixed')
-  assert.deepEqual(source, { kind: 'user', rpcId: 'req-fixed' })
+  assert.ok(source instanceof AbortSignal || source === undefined,
+    '公开入口第二参是 signal（Remote 层自铸 source），不是 {kind,rpcId}')
 })
 
 test('HA3 部分成功：create 成功但 prompt 抛错 → 如实返回成功 + promptError', async () => {
@@ -71,15 +72,41 @@ test('HA5 服务软探测：直接属性 / ctx.get / 缺失 → 409', async () =
   const viaGet = createHostAdapters({ get: (n) => (n === 'sessionController'
     ? { create: async () => ({ sessionId: 'session-via-get' }) } : undefined) })
   assert.equal((await viaGet.createSession({})).value.sessionId, 'session-via-get')
-  assert.deepEqual(viaGet.capabilities(), { controller: true, create: true, prompt: false, cancel: false })
+  const caps = viaGet.capabilities()
+  assert.equal(caps.controller, true)
+  assert.equal(caps.create, true)
+  assert.equal(caps.prompt, false)
+  assert.equal(caps.cancel, false)
 
   const missing = createHostAdapters({})
-  assert.deepEqual(missing.capabilities(), { controller: false, create: false, prompt: false, cancel: false })
+  const noCaps = missing.capabilities()
+  assert.deepEqual([noCaps.controller, noCaps.create, noCaps.prompt, noCaps.cancel], [false, false, false, false])
   const r = await missing.createSession({})
   assert.equal(r.ok, false)
   assert.equal(r.code, 'WRITER_UNAVAILABLE')
   assert.equal((await missing.submitPrompt({ sessionId: 's', text: 'x' })).code, 'WRITER_UNAVAILABLE')
   assert.equal((await missing.cancelTurn({})).code, 'WRITER_UNAVAILABLE')
+})
+
+test('HA5b 真机回归：ctx[name] 抛错时，ctx.get 仍必须能拿到服务', async () => {
+  // 0.1.2 的 bug：两步探测共用一个 try，cordis 访问未声明服务抛错 → get 被吞。
+  // 用 Proxy 复现「未知属性访问抛错、get() 可用」的真机 ctx 形态。
+  const real = {
+    get: (n) => (n === 'sessionController'
+      ? { create: async () => ({ sessionId: 'session-via-get-only' }), prompt: async () => ({ accepted: true }) }
+      : undefined),
+  }
+  const ctx = new Proxy(real, {
+    get(target, prop) {
+      if (prop === 'get' || prop === 'root' || typeof prop === 'symbol') return target[prop]
+      throw new Error(`cordis: service "${String(prop)}" is not injected`)
+    },
+  })
+  const adapters = createHostAdapters(ctx)
+  assert.equal(adapters.capabilities().controller, true)
+  assert.equal((await adapters.createSession({ text: 'hi' })).value.sessionId, 'session-via-get-only')
+  assert.equal((await adapters.submitPrompt({ sessionId: 's', text: 'x' })).ok, true)
+  assert.equal(adapters.capabilities().probe.hasGet, true)
 })
 
 test('HA6 create 抛错 / 未返回 sessionId → HOST_ADAPTER_ERROR', async () => {
@@ -97,7 +124,7 @@ test('HA7 submitPrompt：clientMsgId → requestId，宿主原生幂等键', asy
   const r = await createHostAdapters(ctx).submitPrompt({ sessionId: 's-7', text: '远程跑', clientMsgId: 'msg-7' })
   assert.equal(r.ok, true)
   assert.equal(calls.prompt[0].request.requestId, 'msg-7')
-  assert.equal(calls.prompt[0].source.rpcId, 'msg-7')
+  assert.ok(calls.prompt[0].source instanceof AbortSignal || calls.prompt[0].source === undefined)
   assert.equal(calls.prompt[0].request.sessionId, 's-7')
 })
 

@@ -19,7 +19,9 @@ P0 Spike Q2 已取证：手机投递必须走宿主 `dsh-api-session-controller.
 | `createSession` | `{text, cwd, clientId}` | 同上（`value.sessionId` 必备，可附 `value.index` 行） | **接宿主 `sessionController.create`**：返回 `sessionId`；`text` 非空再调 `prompt` 送第一句话 |
 | `replay` | `{sessionId, sinceSeq}` | 同上（`value.events` 为连续前缀） | 绑 `sessionPersistence.open(id,'read')`；拿不到句柄回 `NOT_AVAILABLE`（501） |
 
-`src/host-adapters.js` 负责软探测 `sessionController`（`ctx[name]` / `ctx.get(name)`，**不写进 `inject`**——cordis 缺服务会让整个插件 pending，连上行和状态路由都注册不上）。服务缺失时适配器如实回 `WRITER_UNAVAILABLE`（409），不静默降级、不自行追加日志；测试可用 `cfg.hostAdapters` 或单个适配器覆盖。`/__wbsync/status` 的 `writer: {controller, create, prompt, cancel}` 用于真机自检——装包后先看它，就能区分「服务没探测到」与「调用失败」。
+`src/host-adapters.js` 负责软探测 `sessionController`（`ctx[name]` / `ctx.get(name)`，**不写进 `inject`**——cordis 缺服务会让整个插件 pending，连上行和状态路由都注册不上）。服务缺失时适配器如实回 `WRITER_UNAVAILABLE`（409），不静默降级、不自行追加日志；测试可用 `cfg.hostAdapters` 或单个适配器覆盖。`/__wbsync/status` 的 `writer:{controller,create,prompt,cancel, probe}` 用于真机自检——装包后先看它，就能区分「服务没探测到」与「调用失败」；`probe` 里有 `hasGet / hasInject / hasRoot / ctx.keys / controllerMethods`，下一轮排查不用再猜。
+
+**0.1.2 真机复盘**：`writer` 全 false。查同机在跑的 `dsh-drawai` 发现它用 `ctx.get?.('sessionController')` 能拿到服务——我们的 `lookupService` 把 `ctx[name]` 与 `ctx.get(name)` 放进**同一个 try**，cordis 访问未注入属性会抛错，第一步抛了就把 `get` 整段吞掉。0.1.3 改为 `ctx.get` 优先、每路独立 try/catch，并加 Proxy 回归测试。同时发现公开服务入口是 `prompt(request, signal)`（Remote 层自铸 `{kind:'user',rpcId}` source），0.1.2 误把 asar 内部实现 `prompt(request, source)` 当公开签名，已按 `dsh-drawai` 已验证形态修正。
 
 **部分成功语义**：`create` 已建出会话但第一句话 `prompt` 失败时，会话已经客观存在，适配器返回**成功**并附 `prompted:false / promptError`——否则手机会以为没建、重复点「新建」造出第二个会话。
 
@@ -148,7 +150,7 @@ node --test p1/host-plugin/test/*.test.mjs
 | 断线与卸载 | 退避重连并重新注册；卸载后路由注销、监听移除、不再上行、**不在背后重连** |
 | 端到端（真 Relay） | 配对 → Host WS 注册 → 手机 HTTP 投递 → 适配器 → 响应回程 → 卸载后 Relay 判离线 |
 | **可安装 bundle（3 个）** | 单文件 `bundle/index.js` 独立外连真 Relay、`/__wbsync/status` 如实上报（无 `sessionPersistence` 时 `indexReady:false`）、pair 路由代理真 Relay 出码、wrapper 配置链（默认 ← 文件 ← 环境变量） |
-| **宿主入口适配器（9 个）** | `create` / `prompt` 参数映射、幂等 `requestId`、部分成功语义、服务软探测与缺失 409、真 Relay 端到端新建会话（src + **bundle 产物**各一例） |
+| **宿主入口适配器（10 个）** | `create` / `prompt` 参数映射、幂等 `requestId`、部分成功语义、服务软探测与缺失 409、**Proxy 抛错回归**、真 Relay 端到端新建会话（src + **bundle 产物**各一例） |
 
 宿主侧用两个替身：`createMockCtx()`（只实现三个能力 + 记录装载/拆除）和 `startFakeRelay()`（复用手写的 `upgradeToWebSocket`，可逐帧观察并可主动下发）；回放用假句柄（`read` / `close`）。端到端用例用**真 `createRelay()`**，跑真实配对与鉴权，不用 mock 绕过。
 
@@ -157,7 +159,7 @@ node --test p1/host-plugin/test/*.test.mjs
 1. `deviceId` 派生 + 本机持久化 + 与配对令牌双绑（bundle 期临时用主机名）。
 2. ~~手机侧（PWA）在重连后主动发 `session/follow`~~（`p1/pwa` 已落地）。
 3. CP 已分离（`p1/cp` 接管索引 / 租约 / 位点 / 设备表）；剩「增量同步」——现在每次全量上报，会话多了要做 diff。
-4. ~~正式包换标识，接入 `dsh.bundle` 分发给真机验证~~（`bundle/` + `dist/dsh-wb-cloud-sync-host-0.1.2.tgz` 已落地并真机装包成功，`build-bundle.mjs --check` 入 CI 防脱节）。
+4. ~~正式包换标识，接入 `dsh.bundle` 分发给真机验证~~（`bundle/` + `dist/dsh-wb-cloud-sync-host-0.1.3.tgz` 已落地并真机装包成功，`build-bundle.mjs --check` 入 CI 防脱节）。
 5. ~~真机装 bundle 跑通「配对 → 列表 → 新建 → 事件流」~~（截图已确认 11 个会话列表与实时事件流）；~~`createSession` 适配器接宿主新建会话入口~~（`host-adapters.js` 接 `sessionController.create/prompt`，0.1.2 待真机验证）。
 6. `cancelTurn` 接宿主取消入口（方法名需重新取证，asar 里命中均为 ACP 示例）。
 7. Relay `isOnline` 会因 CP 活跃标记**早于** WS 连接就绪而返回 true，此时 `bridge` 把帧投进降级轮询队列，而 Host 只走 WS → 504。真机常连形态下不触发，正式版应让 Host 接轮询或让 `isOnline` 只认活跃 WS。
@@ -169,7 +171,7 @@ node --test p1/host-plugin/test/*.test.mjs
 ## 十一、可安装 bundle（`bundle/`）
 
 - `bundle/index.js` 由 `node p1/host-plugin/build-bundle.mjs` 从 `src/` **自动生成**（单文件自包含，顶层重名构建期即失败）；CI 用 `--check` 防「改了 src 忘了生成」。
-- `npm pack` 产出 `dist/dsh-wb-cloud-sync-host-0.1.2.tgz` → DSH「添加插件」安装；`dsh` 块只声明 `bundle.patch`（host-only，写法对齐已验证的探针 / dsh-nas-sync）。
+- `npm pack` 产出 `dist/dsh-wb-cloud-sync-host-0.1.3.tgz` → DSH「添加插件」安装；`dsh` 块只声明 `bundle.patch`（host-only，写法对齐已验证的探针 / dsh-nas-sync）。
 - **真机取证（2026-11-10）**：装包后插件在 PC 端 DSH 正常加载——`/__wbsync/status` 报 `connected:true`、索引 11 条已上送；DSH web 端口是**动态**的（`netstat -ano | findstr <DSH进程PID>` 查 LISTENING），浏览器地址栏 `http://127.0.0.1:<端口>/__wbsync/pair` 即可出码。
 - wrapper 配置链（低→高）：代码默认（本机 Relay + 主机名 deviceId）← `~/.dsh/wbsync-host.json` ← `WBSYNC_*` 环境变量 ← `apply` 的 `config`。
 - 安装 / 配置详见 `bundle/README.md`。

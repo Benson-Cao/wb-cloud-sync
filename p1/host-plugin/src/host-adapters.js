@@ -8,10 +8,14 @@
  *   - `async create(request)`：入参 `{workspaceId?, cwd?, sessionId?, agentPreset?}`
  *     （`workspaceId` 与 `cwd` 互斥），返回 `{sessionId, agentPreset?}`；内部走
  *     `agents.createSession(...)`，由宿主持有写句柄与 Agent 生命周期。
- *   - `async prompt(request, source)`：`request = {requestId, sessionId, mode,
- *     content:[{type:'text', text}]}`，`source = {kind:'user', rpcId}`；
+ *   - `async prompt(request, source)` 是 **asar 内部实现**：`request = {requestId,
+ *     sessionId, mode, content:[{type:'text', text}]}`，`source = {kind:'user', rpcId}`；
  *     `hasPromptRequest()` 按 `source.rpcId === request.requestId` 原生去重
  *     （P0 Spike Q2 结论：`clientMsgId` 直接映射 `requestId`）。
+ *     但**公开服务入口是 `(request, signal)`**——Remote 层自己用 request.requestId
+ *     铸出 durable source。真机在用的 `dsh-drawai` 就是
+ *     `controller.prompt({requestId, sessionId, mode:'queue', content}, signal)`。
+ *     0.1.2 误把内部签名当公开签名，已按已验证形态修正。
  *
  * 铁律不变：**不自开 `open(id,'write')`、不自己追加日志**，一律走宿主入口。
  * 服务**软探测**（`ctx[name]` / `ctx.get(name)`），绝不写进 `inject`——
@@ -23,11 +27,26 @@
  * 重复点「新建」造出第二个会话。
  */
 
+/**
+ * 服务探测（真机取证 2026-11-10，0.1.2 全 false 的复盘）：
+ * `dsh-drawai`（同机在跑、已验证可用）用 `ctx.get?.('sessionController')` 拿服务。
+ * 0.1.2 的 bug 是把 `ctx[name]` 与 `ctx.get(name)` 放进**同一个 try**——cordis 访问
+ * 未声明服务会抛错，第一步抛了就把 `get` 整段吞掉，于是 controller 永远 false。
+ * 现在按已验证路径优先、每路独立 try/catch。
+ */
 const lookupService = (ctx, name) => {
   try {
-    if (ctx?.[name]) return ctx[name]
-    if (typeof ctx?.get === 'function') return ctx.get(name)
-  } catch { /* cordis 访问缺失服务可能抛错：按「不可用」处理 */ }
+    const got = typeof ctx?.get === 'function' ? ctx.get(name) : undefined
+    if (got) return got
+  } catch { /* 继续下一路 */ }
+  try { if (ctx?.[name]) return ctx[name] } catch { /* 继续下一路 */ }
+  try {
+    const root = ctx?.root
+    if (root) {
+      const got = typeof root.get === 'function' ? root.get(name) : root[name]
+      if (got) return got
+    }
+  } catch { /* 继续下一路 */ }
   return undefined
 }
 
@@ -55,9 +74,13 @@ export function createHostAdapters(ctx, options = {}) {
     if (typeof controller?.prompt !== 'function') return unavailable('sessionController.prompt')
     const rid = requestId || randomId()
     try {
+      // 公开服务入口是 (request, signal)：Remote 层自己把 request.requestId 铸成
+      // `{kind:'user', rpcId}` 的 durable source（dsh-drawai 真机在用的形态）。
+      // 0.1.2 误把 asar 内部实现 `prompt(request, source)` 当成公开签名，传了对象。
+      const signal = typeof AbortController === 'function' ? new AbortController().signal : undefined
       const r = await controller.prompt(
         { requestId: rid, sessionId, mode: 'queue', content: [{ type: 'text', text }] },
-        { kind: 'user', rpcId: rid },   // 与 requestId 一致才能触发宿主幂等去重
+        signal,
       )
       return { ok: true, value: r ?? { accepted: true }, requestId: rid }
     } catch (error) {
@@ -67,12 +90,34 @@ export function createHostAdapters(ctx, options = {}) {
 
   return {
     /** 给 /__wbsync/status 做真机自检：区分「服务没探测到」与「调用失败」。 */
-    capabilities: () => ({
-      controller: Boolean(controller),
-      create: typeof controller?.create === 'function',
-      prompt: typeof controller?.prompt === 'function',
-      cancel: false,   // 未取证，保持 409
-    }),
+    capabilities: () => {
+      let keys = []
+      try { keys = Object.keys(ctx ?? {}).filter((k) => typeof k === 'string').slice(0, 40) } catch { /* Proxy 可能拒绝 enumerate */ }
+      // 逐项独立 try：cordis 的 Proxy 访问未注入的属性也会抛（0.1.2 同类坑）
+      const safeType = (name) => { try { return typeof ctx?.[name] } catch { return 'blocked' } }
+      const safeBool = (name) => { try { return Boolean(ctx?.[name]) } catch { return false } }
+      // 拿到服务但方法名不符时，下一轮靠这份清单直接定位（Proxy 也可能拒绝枚举）
+      let controllerMethods = []
+      try {
+        const own = Object.getOwnPropertyNames(controller ?? {})
+        const proto = Object.getOwnPropertyNames(Object.getPrototypeOf(controller ?? {}))
+        controllerMethods = [...new Set([...own, ...proto])]
+          .filter((k) => !k.startsWith('_') && k !== 'constructor').slice(0, 40)
+      } catch { /* 保持空数组 */ }
+      return {
+        controller: Boolean(controller),
+        create: typeof controller?.create === 'function',
+        prompt: typeof controller?.prompt === 'function',
+        cancel: false,   // 未取证，保持 409
+        probe: {
+          hasGet: safeType('get') === 'function',
+          hasInject: safeType('inject') === 'function',
+          hasRoot: safeBool('root'),
+          keys,
+          controllerMethods,
+        },
+      }
+    },
 
     /** 手机向已有会话发一句话：clientMsgId → requestId（宿主原生幂等）。 */
     submitPrompt: async ({ sessionId, text, clientMsgId }) => {

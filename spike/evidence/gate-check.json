@@ -1,30 +1,43 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T05:49:02.017Z",
+  "capturedAt": "2026-11-10T06:08:13.854Z",
   "git": {
-    "head": "02bdd8b2a799c65e9e95cda1ef169672d0e1519b",
+    "head": "28a7e16a002e5c381382b4ebb34b40531d131212",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [],
+    "dataChanged": [
+      "host-probe.json",
+      "check-plugin.json"
+    ],
     "signoffChanged": [],
-    "artifactChanged": [],
+    "artifactChanged": [
+      "dist-tarball"
+    ],
     "narrativeChanged": [],
-    "notes": [],
-    "previousCapturedAt": "2026-11-10T05:46:49.601Z",
-    "previousGitHead": "21d81966da37b49334cbe872d761b20547b95697",
+    "notes": [
+      "发布物已重建（仅记录，不影响判定）：dist-tarball"
+    ],
+    "previousCapturedAt": "2026-11-10T05:49:02.017Z",
+    "previousGitHead": "02bdd8b2a799c65e9e95cda1ef169672d0e1519b",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-10T05:46:49.601Z",
-      "gitHead": "21d81966da37b49334cbe872d761b20547b95697",
-      "dataChanged": [],
+      "previousStatus": "STALE",
+      "previousReason": "已变化（阻断）：运行代码/证据：host-probe.json, check-plugin.json",
+      "capturedAt": "2026-11-10T05:49:02.017Z",
+      "gitHead": "02bdd8b2a799c65e9e95cda1ef169672d0e1519b",
+      "dataChanged": [
+        "host-probe.json",
+        "check-plugin.json"
+      ],
       "signoffChanged": [],
-      "artifactChanged": [],
+      "artifactChanged": [
+        "dist-tarball"
+      ],
       "narrativeChanged": []
     }
   },
@@ -33,8 +46,8 @@
       "index.js": "639eeebca42695b1841a65d99b9812d77c37985171537d90e2429761cbe75523",
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
-      "host-probe.json": "8c2cf02f5a2182f3e9c30c36b1ea71a366fe6145fb005b82e0eba5a3720c72c1",
-      "check-plugin.json": "b24957b42eb9a9778a935ae181421385f33f7ba9625c5386c9f0377d025aeb5f",
+      "host-probe.json": "d1bfbef8fdbd97e5c2d28a281f3a8b72c6bedf96420060732a06c06df7a10546",
+      "check-plugin.json": "c24fa3ca5eafddfdd03247e1dc08fe0590e93fd6e3b0d5ca055e5008c57e37a6",
       "gate-check.mjs": "fd0f14dbaa0f927801aa0191398e0f0cdef3baa669b13715f4375568cf7d5da1",
       "check-env.mjs": "d26c26749008404f631c64be52d908e5c0a60074235218327ff6eeb8c270e5b3",
       "signoff-check.mjs": "04de87da587e985b33f3a9f50b424b5d8f8814969ded5b053b42bb03a269057b",
@@ -50,7 +63,7 @@
       "WORKBUDDY-REFERENCE.md": "e286a4af7afe2aab6f9462bfec7d0baf25ff4c892b21245624963490be49cdcc"
     },
     "artifact": {
-      "dist-tarball": "110d700013fcda5f815437472858ee4a2b9e41588eef6a8cdcd65752fbb94ffa"
+      "dist-tarball": "96d72b55c19d3f0425161acafce8d1126952b2aa6bd10c6d6cc22e8d2fd99d30"
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
