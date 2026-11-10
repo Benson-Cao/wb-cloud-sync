@@ -53,3 +53,7 @@ jobs:
       # 会签就绪终检：输出待签清单与 P1 前置，报告型，不阻断 CI。
       - name: 会签就绪终检（记录，不阻断）
         run: node scripts/signoff-check.mjs --no-write
+
+      # W3 起进入开发期：Relay 骨架单测作为阻断项（零依赖，Node 24）。
+      - name: P1 Relay 冒烟测试
+        run: node --test p1/relay/test/*.test.mjs

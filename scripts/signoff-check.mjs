@@ -11,6 +11,10 @@
  * 判定边界：**只报告，不代替签字，也不代替 P1 前置裁定**。会签是人的动作，
  * 脚本永远不因为「没签字」而返回非 0；CI 里作为记录步骤使用。
  * 读的是**入库的本机证据**，不是当前 CI 环境——两者不要混。
+ *
+ * 2026-11-10：发起人豁免开发期会签（SIGNOFF-WAIVER.md）。此时 verdict 为
+ * DEV_PROCEED_WAIVED，**不是** SIGNED_OFF；GA 前仍须按
+ * SIGN-OFF-PROCEDURE.md 补签。豁免不改写签署栏、不改写 ADR 状态。
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -36,6 +40,8 @@ const signoff = read('SIGN-OFF.md') ?? ''
 const security = read('SECURITY-REVIEW.md') ?? ''
 const reference = read('WORKBUDDY-REFERENCE.md')
 const proposal = read('P1-PREREQUISITES.md')
+const waiver = read('SIGNOFF-WAIVER.md')
+const waiverActive = Boolean(waiver) && /^> 状态：\*\*生效中\*\*/m.test(waiver)
 
 // ADR 状态：按 ### ADR-xxx 分块，取块内「- **状态**：」
 const adrs = []
@@ -59,17 +65,20 @@ const envOk = env.verdict === 'READY'
 const proposalReady = Boolean(proposal) && p1Prereqs === p1PrereqKeys.length
 
 const engineeringReady = automatedOk && snapshotOk && envOk && Boolean(reference) && securityItem5 && proposalReady
-const verdict = pendingSignatures === 0 && pendingAdrs.length === 0
+const signedOff = pendingSignatures === 0 && pendingAdrs.length === 0
+const verdict = signedOff
   ? 'SIGNED_OFF'
-  : engineeringReady
-    ? 'READY_FOR_SIGNOFF'
-    : 'ENGINEERING_NOT_READY'
+  : !engineeringReady
+    ? 'ENGINEERING_NOT_READY'
+    : waiverActive
+      ? 'DEV_PROCEED_WAIVED'
+      : 'READY_FOR_SIGNOFF'
 
 const result = {
-  schema: 'wbsync-signoff-readiness/2',
+  schema: 'wbsync-signoff-readiness/3',
   capturedAt: new Date().toISOString(),
   verdict,
-  note: 'SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；P1 前置四项须由 ARC / 安全 Owner 裁定。脚本不代签、不代裁定，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境',
+  note: 'SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；P1 前置四项须由 ARC / 安全 Owner 裁定。DEV_PROCEED_WAIVED 只表示发起人豁免了开发期会签，设计冻结未完成、GA 前必须补签。脚本不代签、不代裁定，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境',
   engineering: {
     currentHead: git('rev-parse', 'HEAD'),
     worktreeClean: (git('status', '--porcelain') ?? '').length === 0,
@@ -86,6 +95,13 @@ const result = {
     securityReviewItem5: securityItem5,
     workbuddyReference: Boolean(reference),
     p1ProposalReady: proposalReady,
+  },
+  waiver: {
+    active: waiverActive,
+    document: waiver ? 'SIGNOFF-WAIVER.md' : null,
+    scope: waiverActive ? 'W3–W6 内部开发' : null,
+    gaBlocked: waiverActive,
+    note: waiverActive ? '一票否决权依然有效；任一 Owner 提出异议即暂停 P1' : null,
   },
   signatures: {
     pending: pendingSignatures,
@@ -105,13 +121,17 @@ const result = {
       '#5b Cursor 双真源',
     ],
     proposalDocument: proposal ? 'P1-PREREQUISITES.md' : null,
-    note: '裁定权属于会签后的 ARC / 安全 Owner；会签时须在签署栏写明裁定结论与 W3 前截止时点，结论回写 ADR 或 04',
+    note: waiverActive
+      ? '未经会签；当前按推荐方案作默认实现口径（SIGNOFF-WAIVER.md §5），可回滚'
+      : '裁定权属于会签后的 ARC / 安全 Owner；会签时须写明裁定结论与 W3 前截止时点，结论回写 ADR 或 04',
   },
-  nextStep: verdict === 'READY_FOR_SIGNOFF'
-    ? '一次会签：先看 SECURITY-REVIEW.md 五项并签 ADR-007~010，再裁定 P1-PREREQUISITES.md 四项；签完按 SIGN-OFF.md §七 收尾'
-    : verdict === 'SIGNED_OFF'
-      ? '先裁定 P1 开工前置四项并回写契约，再按 05 W3 进入编码'
-      : '先修复未达标的自动项 / 快照 / 构建链 / 会签材料',
+  nextStep: verdict === 'SIGNED_OFF'
+    ? '先裁定 P1 开工前置四项并回写契约，再按 05 W3 进入编码'
+    : verdict === 'DEV_PROCEED_WAIVED'
+      ? '继续 W3 开发（Relay WS 帧代理 / CP / Host 插件 / PWA）；GA 前按 SIGN-OFF-PROCEDURE.md 补签，P3 W10 出网审计照旧'
+      : verdict === 'READY_FOR_SIGNOFF'
+        ? '一次会签：先看 SECURITY-REVIEW.md 五项并签 ADR-007~010，再裁定 P1-PREREQUISITES.md 四项；签完按 SIGN-OFF.md §七 收尾'
+        : '先修复未达标的自动项 / 快照 / 构建链 / 会签材料',
 }
 
 const out = join(ROOT, 'spike', 'evidence', 'signoff-readiness.json')
@@ -123,6 +143,7 @@ console.log(`  自动项 ${result.engineering.automated} ${automatedOk ? 'PASS' 
 console.log(`  M6b ${result.engineering.envPassed} ${result.engineering.envVerdict}${result.engineering.envToolchain ? ` (Node ${result.engineering.envToolchain.node} / pnpm ${result.engineering.envToolchain.pnpm})` : ''}`)
 console.log(`  ADR 共 ${adrs.length} 个，待接受 ${pendingAdrs.length} 个：${pendingAdrs.map((a) => a.id).join(', ') || '无'}`)
 console.log(`  四方会签：${pendingSignatures} 行「待签」 | 安全一页纸第 5 项 ${securityItem5 ? '存在' : '缺失'} | 对标复核 ${reference ? '存在' : '缺失'}`)
+console.log(`  发起人豁免：${waiverActive ? '生效中（仅开发期，GA 前必须补签；一票否决权仍有效）' : '无'}`)
 console.log(`  P1 前置提案：${p1Prereqs}/${p1PrereqKeys.length} 项已登记，白皮书 ${proposal ? '存在' : '缺失'}（待裁定，不代签）`)
 console.log(`  结论：${verdict} —— ${result.nextStep}`)
 if (!process.argv.includes('--no-write')) console.log('  证据:', out)

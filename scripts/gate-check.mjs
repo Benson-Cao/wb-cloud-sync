@@ -124,6 +124,7 @@ const fingerprints = {
     'SECURITY-REVIEW.md': sha256('SECURITY-REVIEW.md'),
     'SIGN-OFF.md': sha256('SIGN-OFF.md'),
     'SIGN-OFF-PROCEDURE.md': sha256('SIGN-OFF-PROCEDURE.md'),
+    'SIGNOFF-WAIVER.md': sha256('SIGNOFF-WAIVER.md'),
     '01-charter.md': sha256('docs/01_项目章程.md'),
     'P1-PREREQUISITES.md': sha256('P1-PREREQUISITES.md'),
     'WORKBUDDY-REFERENCE.md': sha256('WORKBUDDY-REFERENCE.md'),

@@ -145,6 +145,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 ├─ SECURITY-REVIEW.md           # 安全 Owner 一页纸（5 行核对）
 ├─ SIGN-OFF.md                  # P0 会签包：自动项 9/9、待签 M1~M7、签署栏
 ├─ SIGN-OFF-PROCEDURE.md       # 人的会签操作卡（顺序 / 勾选 / 回写清单）
+├─ SIGNOFF-WAIVER.md           # 发起人豁免记录（开发期跳过会签，GA 前补签）
 ├─ pinned-commit.txt            # DSH 锁定基线 66491b0…（dsh-v0.2.2-rc.1）
 ├─ docs/                        # 设计冻结包（11 份，含 ADR-007~010）
 ├─ scripts/
@@ -168,6 +169,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 │  ├─ probe-plugin.mjs          # 探针的离线可测副本
 │  ├─ lib/                      # ASAR 读取器 / 多帧 zstd 解码器
 │  └─ evidence/                 # 脱敏后的证据 JSON
+├─ p1/                          # P1 开发代码（W3 Relay 骨架，不进探针 tarball）
 └─ LICENSE (MIT)
 ```
 

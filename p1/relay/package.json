@@ -1,0 +1,14 @@
+{
+  "name": "@wbsync/relay-dev",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "W3 development skeleton: pairing, device registry, allowlist, offline 409 and an HTTP polling bridge standing in for the WSS frame proxy.",
+  "main": "src/server.js",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=24.9"
+  }
+}

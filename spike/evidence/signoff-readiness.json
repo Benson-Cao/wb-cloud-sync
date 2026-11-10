@@ -1,16 +1,16 @@
 {
-  "schema": "wbsync-signoff-readiness/2",
-  "capturedAt": "2026-11-10T01:19:10.672Z",
-  "verdict": "READY_FOR_SIGNOFF",
-  "note": "SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；P1 前置四项须由 ARC / 安全 Owner 裁定。脚本不代签、不代裁定，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境",
+  "schema": "wbsync-signoff-readiness/3",
+  "capturedAt": "2026-11-10T01:34:12.380Z",
+  "verdict": "DEV_PROCEED_WAIVED",
+  "note": "SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；P1 前置四项须由 ARC / 安全 Owner 裁定。DEV_PROCEED_WAIVED 只表示发起人豁免了开发期会签，设计冻结未完成、GA 前必须补签。脚本不代签、不代裁定，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境",
   "engineering": {
-    "currentHead": "870063a8fd10a1cc822b7f0fec8dcf6ef6d69f2c",
+    "currentHead": "82781808331783e064148640f7026801f708d3d0",
     "worktreeClean": false,
     "automated": "9/9",
     "automatedOk": true,
     "snapshotStatus": "CURRENT",
-    "snapshotCapturedAt": "2026-11-10T01:19:09.433Z",
-    "snapshotGitHead": "870063a8fd10a1cc822b7f0fec8dcf6ef6d69f2c",
+    "snapshotCapturedAt": "2026-11-10T01:34:11.798Z",
+    "snapshotGitHead": "82781808331783e064148640f7026801f708d3d0",
     "snapshotOk": true,
     "envVerdict": "READY",
     "envPassed": "5/5",
@@ -22,6 +22,13 @@
     "securityReviewItem5": true,
     "workbuddyReference": true,
     "p1ProposalReady": true
+  },
+  "waiver": {
+    "active": true,
+    "document": "SIGNOFF-WAIVER.md",
+    "scope": "W3–W6 内部开发",
+    "gaBlocked": true,
+    "note": "一票否决权依然有效；任一 Owner 提出异议即暂停 P1"
   },
   "signatures": {
     "pending": 4,
@@ -102,7 +109,7 @@
       "#5b Cursor 双真源"
     ],
     "proposalDocument": "P1-PREREQUISITES.md",
-    "note": "裁定权属于会签后的 ARC / 安全 Owner；会签时须在签署栏写明裁定结论与 W3 前截止时点，结论回写 ADR 或 04"
+    "note": "未经会签；当前按推荐方案作默认实现口径（SIGNOFF-WAIVER.md §5），可回滚"
   },
-  "nextStep": "一次会签：先看 SECURITY-REVIEW.md 五项并签 ADR-007~010，再裁定 P1-PREREQUISITES.md 四项；签完按 SIGN-OFF.md §七 收尾"
+  "nextStep": "继续 W3 开发（Relay WS 帧代理 / CP / Host 插件 / PWA）；GA 前按 SIGN-OFF-PROCEDURE.md 补签，P3 W10 出网审计照旧"
 }
