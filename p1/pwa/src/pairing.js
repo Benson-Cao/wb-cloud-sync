@@ -10,18 +10,37 @@
  *      `POST /pair/verify` → 用 pairSecret 对 challenge 做 HMAC-SHA256，
  *      通过后换得 deviceToken（服务端只存 SHA-256 摘要，单活跃令牌）。
  *
- * HMAC 用 WebCrypto（`crypto.subtle`）：浏览器原生可用，Node ≥19 的全局
- * `globalThis.crypto` 也是同一套接口，测试不用引 node:crypto 进实现。
+ * HMAC 优先用 WebCrypto（`crypto.subtle`：HTTPS / localhost 安全上下文，Node ≥19
+ * 全局 crypto 同接口）；**真机是局域网明文 HTTP**（如 `http://192.168.0.106:8787`），
+ * 此时浏览器不给 `subtle`，自动回退 `hmac-sha256.js` 的纯 JS 实现。两条路径产出
+ * 同一份标准 HMAC-SHA256 hex，与 Relay 侧 node:crypto 逐字节一致。
+ * 这个缺口只有真机跑得出来——Node 测试里 subtle 永远存在，必须显式传
+ * `subtle: null` 才能覆盖回退路径（见 pairing.test.mjs）。
  *
  * 注意：配对码是一次性的——`/pair` 成功即消费；输错码 / 复用旧码会得到
  * `PAIR_CODE_INVALID`，界面上应引导用户回 PC 重新生成。
  */
+
+import { hmacSha256Hex } from './hmac-sha256.js'
 
 const hexOf = (buffer) => [...new Uint8Array(buffer)]
   .map((b) => b.toString(16).padStart(2, '0'))
   .join('')
 
 const fail = (code, message) => Object.assign(new Error(message), { code })
+
+/** 原生 WebCrypto 可用则用之，否则纯 JS 回退（HTTP 局域网真机）。 */
+const signHmac = async (subtle, secret, message) => {
+  if (subtle?.importKey && subtle?.sign) {
+    const encoder = new TextEncoder()
+    const key = await subtle.importKey(
+      'raw', encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+    )
+    return hexOf(await subtle.sign('HMAC', key, encoder.encode(message)))
+  }
+  return hmacSha256Hex(secret, message)
+}
 
 export async function pairWithRelay({
   baseUrl,
@@ -31,9 +50,6 @@ export async function pairWithRelay({
 } = {}) {
   if (!baseUrl || !code) throw fail('INVALID_PARAM', '需要 baseUrl 与 6 位配对码')
   if (typeof fetchImpl !== 'function') throw fail('INVALID_PARAM', 'fetchImpl 必须是函数')
-  if (!subtle?.importKey || !subtle?.sign) {
-    throw fail('NO_WEBCRYPTO', '当前环境没有 WebCrypto（crypto.subtle），无法计算配对签名')
-  }
 
   const base = String(baseUrl).replace(/\/$/, '')
   const post = async (path, body) => {
@@ -60,12 +76,7 @@ export async function pairWithRelay({
   if (!challenge?.challenge || !challenge?.pairSecret) {
     throw fail('INVALID_RESPONSE', '配对响应缺少 challenge / pairSecret')
   }
-  const encoder = new TextEncoder()
-  const key = await subtle.importKey(
-    'raw', encoder.encode(challenge.pairSecret),
-    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
-  )
-  const sig = hexOf(await subtle.sign('HMAC', key, encoder.encode(challenge.challenge)))
+  const sig = await signHmac(subtle, challenge.pairSecret, challenge.challenge)
 
   const done = await post('/pair/verify', { challenge: challenge.challenge, sig })
   if (!done?.deviceToken) throw fail('INVALID_RESPONSE', '配对响应缺少 deviceToken')

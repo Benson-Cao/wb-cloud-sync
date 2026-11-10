@@ -4,6 +4,17 @@
 
 ---
 
+## [P1 W3 续 14] · 2026-11-10 13:2x · 非协议变更
+
+- **真机第二个缺口：手机配对报「当前环境没有 WebCrypto（crypto.subtle）」**。`crypto.subtle` 只在**安全上下文**（HTTPS / localhost / 127.0.0.1）暴露；真机走 `http://192.168.0.106:8787/app`（局域网 IP + 明文 HTTP，截图地址栏黄色三角），浏览器里 `globalThis.crypto` 存在但 `subtle` 是 undefined → 原实现抛 `NO_WEBCRYPTO`，配对全链路断。Node ≥19 的全局 crypto 永远带 subtle，**测试环境跑不出这个差异**，属设计层环境盲区。
+- **修法**：新增 `p1/pwa/src/hmac-sha256.js`（FIPS 180-4 SHA-256 + RFC 2104 HMAC，零依赖纯 JS）；`pairing.js` **优先原生 WebCrypto、缺失时回退纯 JS**，两条路径产出同一份标准 hex，与 Relay 侧 `node:crypto.createHmac` 逐字节一致。不改协议、不改配对码/挑战/令牌语义。安全边界：HMAC 只对一次性 challenge 算一次、pairSecret 短命，纯 JS 不降密码学强度；GA 前按 M5 交安全 Owner 复核。
+- **正确性三层证据**：RFC 4231 向量（case 1–4/6/7）+ SHA-256 标准向量、与 `node:crypto` 交叉验证（UTF-8/emoji/长 key/随机二进制）、与原生 WebCrypto 交叉验证（两路径等价）、显式 `subtle: null` 端到端配对成功。
+- **SW 更新缺口一并补齐**：新增 src 模块必须进 `SHELL_ASSETS`（`wbsync-shell-v3`），壳 HTML 改**网络优先**（失败回退缓存）；`static.test.mjs` S6 校验清单覆盖页面引用与 src 模块传递 import，防止再漏。真机从 v2 升 v3 需刷新两次（旧 SW 接管期第一次仍发旧壳），无痕窗口可一步跳过。
+- **部署**：Relay 静态服务实时读盘，无需重启；已验证运行中的 8787 能取到 `/src/hmac-sha256.js`（200）与新 pairing/sw。
+- 测试 123 → **130**（pwa 19 → 25，relay static 5 → 6，hmac 4 + pairing +2 + static +1）。
+
+---
+
 ## [P1 W3 续 13] · 2026-11-10 13:1x · 非协议变更
 
 - **真机联调取证 + 出码路由修错**：用户开 `http://127.0.0.1:3080/__wbsync/pair` 得 ERR_CONNECTION_REFUSED——取证确认 **3080 是手机端 DSH 的 web 端口**，PC 端 DSH web 端口是**动态**的（本次 60413；`netstat -ano` 按 DSH 进程 PID 查 LISTENING），9230 是另一内部服务不是 web server。

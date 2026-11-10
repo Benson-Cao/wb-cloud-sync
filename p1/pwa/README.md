@@ -8,16 +8,26 @@
 ```
 p1/pwa/
 ├─ src/client.js      # 纯逻辑核心（零依赖，Node 里可对着真 Relay 跑端到端）
-├─ src/pairing.js     # 配对向导：6 位码 → challenge/pairSecret → HMAC(WebCrypto) → deviceToken
+├─ src/pairing.js     # 配对向导：6 位码 → challenge/pairSecret → HMAC → deviceToken
+├─ src/hmac-sha256.js # 纯 JS SHA-256 / HMAC-SHA256：无 crypto.subtle 时的回退
 ├─ public/index.html  # 最小 PWA 壳：配对向导 + 会话列表 + 事件流渲染
 ├─ public/sw.js       # 只缓存应用外壳，业务请求（/api/*、/d/*）网络直连
 ├─ public/manifest.webmanifest / icon.svg
-└─ test/              # 19 用例（client 8 + pairing 6 + create 5），真实 createRelay() 端到端
+└─ test/              # 25 用例（client 8 + pairing 8 + create 5 + hmac 4），真实 createRelay() 端到端
 ```
 
 `src/client.js` 与 UI 框架无关，`fetchImpl` / `WebSocketImpl` / `now` 全部可注入；
-换 Vue/React 时只换 `public/index.html`，逻辑核心不动。配对签名用 WebCrypto
-（`crypto.subtle`），浏览器与 Node ≥19 同接口，实现零依赖、测试零 mock。
+换 Vue/React 时只换 `public/index.html`，逻辑核心不动。
+
+**配对签名的环境缺口（真机取证 2026-11-10）**：`crypto.subtle` 只在**安全上下文**
+（HTTPS / localhost / 127.0.0.1）可用；真机是 `http://<局域网IP>:8787/app` 这种明文
+HTTP，浏览器里 `globalThis.crypto` 存在但 `subtle` 是 `undefined`，原实现会抛
+`NO_WEBCRYPTO` 让整条配对链路断掉。Node 测试跑不出这个差异（Node ≥19 的全局 crypto
+永远带 subtle）。现在 `pairing.js` **优先原生 WebCrypto，缺失时回退纯 JS**
+（`hmac-sha256.js`，FIPS 180-4 / RFC 2104，零依赖），两条路径产出同一份标准
+HMAC-SHA256 hex，与 Relay 侧 `node:crypto.createHmac` 逐字节一致。覆盖证据：
+RFC 4231 向量、与 node:crypto / WebCrypto 交叉验证、显式 `subtle: null` 端到端配对。
+HMAC 只对一次性 challenge 算一次，纯 JS 实现不降密码学强度；GA 前仍按 M5 交安全 Owner 复核。
 
 ## 通信面
 
@@ -70,9 +80,11 @@ node --test p1/pwa/test/*.test.mjs       # 或 pnpm --dir p1/pwa test
 - **`PATCH /api/sessions/:id`（置顶）未接**：手机端本就 403（协议 §4），属 PC 侧功能。
 - **附件上行未做**：`attachments/*` 是 P2 端点（WAIVER §5 默认口径）。
 - **sw.js 不缓存业务响应**：离线看到旧会话流比空页面更容易误判，数据永远网络优先。
+- **壳更新要刷两次**：SW 缓存名随清单变更递增（`wbsync-shell-v3`）；旧 SW 接管期间第一次刷新仍返回旧壳，后台装好新 SW 并清掉旧缓存后，第二次刷新才拿到新壳。真机联调期如卡住，用无痕窗口或清除站点数据可一步跳过。壳 HTML 已改网络优先，新增模块不会再被旧缓存拖住；`static.test.mjs` S6 会校验清单覆盖页面与 src 模块的传递 import，防止漏缓存。
 
-## 测试（19 用例，真实 Relay 端到端）
+## 测试（25 用例，真实 Relay 端到端）
 
 - `test/pwa.test.mjs`（8 个）：A1 `/api/sessions` 无令牌 / 错令牌 401；A2 配对令牌读索引 + `pinned` 过滤；A3 `/host/indexes` 配置 `adminToken` 后加锁；B1 列表刷新 + 实时事件按序；B2 断线重连带 `lastSeq` 补 dropped 窗口；B3 缓冲起点高于客户端位置 → gap → `session/follow` 回 Host 补齐 → 重订阅续流；B4 Host 硬缺口如实停 `gap`、补齐请求去重有界；B5 `unfollow` / `stop` 清理干净。
-- `test/pairing.test.mjs`（6 个）：正常配对换得可用令牌、错码 `PAIR_CODE_INVALID`、签名篡改 401、challenge 复用拒绝、配对码一次性、**重配对作废旧令牌**（单活跃令牌）。
+- `test/pairing.test.mjs`（8 个）：正常配对换得可用令牌、错码 `PAIR_CODE_INVALID`、签名篡改 401、challenge 复用拒绝、配对码一次性、**无 WebCrypto 回退路径端到端配对**（`subtle: null` 模拟真机 HTTP 局域网）、回退签名与 `node:crypto` 等价且换得可用令牌、重配对作废旧令牌。
 - `test/create.test.mjs`（5 个）：POST `/api/sessions` 鉴权 401、创建成功后 CP 立即可见引导行（`state:'awaiting'`）、适配器 409 透传且不出幽灵会话、Host 离线（推时钟过 45s 窗口）`HOST_OFFLINE`、客户端 `createSession()` 全链路。
+- `test/hmac.test.mjs`（4 个）：SHA-256 标准向量、RFC 4231 HMAC 向量（case 1–4/6/7）、与 `node:crypto` 交叉验证（UTF-8 / emoji / 长 key / 随机二进制）、与原生 WebCrypto 交叉验证（两条签名路径等价）。

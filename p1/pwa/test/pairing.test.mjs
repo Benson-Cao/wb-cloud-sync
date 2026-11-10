@@ -1,8 +1,9 @@
 /**
  * 配对流程 · 端到端测试
- * 真实 createRelay()；HMAC 走 WebCrypto（globalThis.crypto.subtle，Node ≥19
- * 与浏览器同接口，即客户端在浏览器里的真实路径）。
- * 覆盖：正常配对换得可用令牌、错码、签名被篡改、challenge 复用、码一次性。
+ * 真实 createRelay()；签名走 WebCrypto（安全上下文）或纯 JS 回退
+ * （`subtle: null` 模拟真机的 HTTP 局域网非安全上下文）。
+ * 覆盖：正常配对换得可用令牌、错码、签名被篡改、challenge 复用、码一次性、
+ * 无 WebCrypto 也能配对、两条路径等价。
  */
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
@@ -88,7 +89,31 @@ test('P5 配对码一次性：/pair 消费后重放同一码 → PAIR_CODE_INVAL
   )
 })
 
-test('P6 重新配对作废旧令牌（单活跃令牌），新令牌可用、旧令牌失效', async () => {
+test('P6 无 WebCrypto（真机 HTTP 局域网）→ 纯 JS 回退仍能配对成功', async () => {
+  const g = await call('/pair/generate', { method: 'POST', body: { deviceId: 'pc-http' } })
+  const r = await pairWithRelay({ baseUrl: base, code: g.json.data.code, subtle: null })
+  assert.equal(r.deviceId, 'pc-http')
+  assert.ok(/^[0-9a-f]{64}$/.test(r.deviceToken))
+  const list = await call(`/api/sessions?deviceId=${r.deviceId}`, { token: r.deviceToken })
+  assert.equal(list.status, 200)
+})
+
+test('P7 回退路径签名与 node:crypto 等价（Relay 侧算法一致）', async () => {
+  // 走一遍无 subtle 的 /pair 拿 challenge，手工用纯 JS 签名后交给 Relay 验
+  const { hmacSha256Hex } = await import('../src/hmac-sha256.js')
+  const g = await call('/pair/generate', { method: 'POST', body: { deviceId: 'pc-equiv' } })
+  const c = await call('/pair', { method: 'POST', body: { code: g.json.data.code } })
+  const { pairSecret, challenge } = c.json.data
+  const sig = hmacSha256Hex(pairSecret, challenge)
+  assert.equal(sig, createHmac('sha256', pairSecret).update(challenge).digest('hex'))
+  const v = await call('/pair/verify', { method: 'POST', body: { challenge, sig } })
+  assert.equal(v.status, 200)
+  assert.ok(/^[0-9a-f]{64}$/.test(v.json.data.deviceToken))
+  const bound = await call('/api/sessions?deviceId=pc-equiv', { token: v.json.data.deviceToken })
+  assert.equal(bound.status, 200, '纯 JS 签名换得的令牌应绑定配对码登记的设备')
+})
+
+test('P8 重新配对作废旧令牌（单活跃令牌），新令牌可用、旧令牌失效', async () => {
   const g1 = await call('/pair/generate', { method: 'POST', body: { deviceId: 'pc-re' } })
   const old = await pairWithRelay({ baseUrl: base, code: g1.json.data.code })
   assert.ok(old.deviceToken)

@@ -87,3 +87,29 @@ test('S5 壳页面引用的资源都能从 /app 页面解析路径取到（自�
     assert.equal(r.status, 200, `引用资源应可取：${ref} → ${resolved}`)
   }
 })
+
+test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () => {
+  const sw = await get(port, '/app/sw.js')
+  const assets = sw.text.match(/SHELL_ASSETS\s*=\s*\[([\s\S]*?)\]/)?.[1] ?? ''
+  const listed = [...assets.matchAll(/["']([^"']+)["']/g)].map((m) => m[1])
+
+  const listedPaths = new Set(listed.map((a) => new URL(a, 'http://x/app/').pathname))
+  // 页面引用的相对资源必须都在清单里（按 /app/ 解析，与清单项同一基准）
+  const page = (await get(port, '/app/')).text
+  const pageRefs = [...page.matchAll(/(?:\bfrom|href|src)\s*=?\s*["'](\.[^"']+)["']/g)].map((m) => m[1])
+  for (const ref of pageRefs) {
+    const resolved = new URL(ref, 'http://x/app/').pathname
+    assert.ok(listedPaths.has(resolved), `SW 缓存清单缺少页面引用：${ref}`)
+  }
+
+  // src 模块间的相对 import 也必须在清单里（新增配对依赖漏缓存会导致离线加载失败）
+  for (const name of ['client.js', 'pairing.js', 'hmac-sha256.js']) {
+    const src = (await get(port, `/src/${name}`)).text
+    for (const m of src.matchAll(/\bfrom\s*["'](\.\/[^"']+)["']/g)) {
+      const dep = m[1].replace(/^\.\//, '')
+      assert.ok(listed.includes(`../src/${dep}`), `SW 缓存清单缺少模块依赖：${name} → ${dep}`)
+      assert.equal((await get(port, `/src/${dep}`)).status, 200, `依赖应可从 /src/ 取到：${dep}`)
+    }
+  }
+  assert.match(sw.text, /wbsync-shell-v3/, '缓存名应随清单变化递增')
+})
