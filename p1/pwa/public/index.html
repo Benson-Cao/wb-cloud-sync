@@ -61,12 +61,13 @@
   </header>
   <div id="setup">
     <input id="relayBase" placeholder="Relay 地址，如 http://192.168.x.x:8787" />
-    <input id="deviceId" placeholder="Host 设备 ID，如 pc-1" style="max-width:120px" />
-    <input id="deviceToken" placeholder="设备令牌（配对获得）" />
-    <button id="save">连接</button>
+    <input id="pairCode" placeholder="6 位配对码" maxlength="6" inputmode="numeric"
+           style="max-width:110px" autocomplete="one-time-code" />
+    <button id="save">配对</button>
   </div>
   <main>
-    <div id="list" class="hint">填入 Relay 地址与设备令牌后点「连接」。</div>
+    <div id="status" class="hint" hidden></div>
+    <div id="list" class="hint">填入 Relay 地址，再输入 PC 端（宿主插件本地页 /__wbsync/pair）生成的 6 位配对码。</div>
     <div id="stream" hidden>
       <h2 id="streamTitle">事件流</h2>
       <div id="events"></div>
@@ -75,16 +76,23 @@
 
   <script type="module">
     import { createPwaClient } from '../src/client.js'
+    import { pairWithRelay } from '../src/pairing.js'
 
     const $ = (id) => document.getElementById(id)
     let client = null
     let activeSession = null
     const seenSeq = new Map()   // sessionId -> 已渲染的最大 seq（幂等渲染）
 
-    // 开发期凭据存 localStorage 仅图方便；正式版接配对流程后不再长期持有明文令牌
     $('relayBase').value = localStorage.getItem('wbsync.base') ?? ''
-    $('deviceId').value = localStorage.getItem('wbsync.deviceId') ?? ''
-    $('deviceToken').value = localStorage.getItem('wbsync.token') ?? ''
+    // 已配对过（localStorage 有令牌）就不再展示配对码输入，避免误触重新配对
+    if (localStorage.getItem('wbsync.token')) $('pairCode').placeholder = '已配对（留空直接连接）'
+
+    const say = (text, isError = false) => {
+      const el = $('status')
+      el.hidden = false
+      el.textContent = text
+      el.style.color = isError ? '#e07a7a' : '#7fd18c'
+    }
 
     const connState = (snap) => {
       if (!snap) return '未连接'
@@ -122,14 +130,7 @@
       $('events').appendChild(div)
     }
 
-    const connect = () => {
-      const base = $('relayBase').value.trim().replace(/\/$/, '')
-      const deviceId = $('deviceId').value.trim()
-      const token = $('deviceToken').value.trim()
-      if (!base || !deviceId || !token) { $('list').textContent = '需要 Relay 地址、设备 ID 与设备令牌。'; return }
-      localStorage.setItem('wbsync.base', base)
-      localStorage.setItem('wbsync.deviceId', deviceId)
-      localStorage.setItem('wbsync.token', token)
+    const openClient = (base, deviceId, token) => {
       client?.stop()
       seenSeq.clear()
       client = createPwaClient({
@@ -141,8 +142,38 @@
         onStateChange: (snap) => { $('conn').textContent = connState(snap) },
       })
       client.refreshSessions()
-        .then((rows) => { renderList(rows); $('list').classList.remove('hint') })
-        .catch((e) => { $('list').textContent = `连接失败：${e.message}` })
+        .then((rows) => { renderList(rows); $('list').classList.remove('hint'); $('status').hidden = true })
+        .catch((e) => say(`连接失败：${e.message}`, true))
+    }
+
+    /** 有码走配对，没码用已存令牌直连（刷新 / 回访场景）。 */
+    const connect = async () => {
+      const base = $('relayBase').value.trim().replace(/\/$/, '')
+      const code = $('pairCode').value.trim()
+      if (!base) { say('需要 Relay 地址。', true); return }
+      let token = localStorage.getItem('wbsync.token')
+      let deviceId = localStorage.getItem('wbsync.deviceId')
+      if (code) {
+        say('配对中…')
+        try {
+          const r = await pairWithRelay({ baseUrl: base, code })
+          token = r.deviceToken
+          deviceId = r.deviceId
+          localStorage.setItem('wbsync.base', base)
+          localStorage.setItem('wbsync.deviceId', deviceId)
+          localStorage.setItem('wbsync.token', token)
+          $('pairCode').value = ''
+          $('pairCode').placeholder = '已配对（留空直接连接）'
+          say(`已配对：${deviceId}`)
+        } catch (e) {
+          // 配对码是一次性的：/pair 成功即消费，输错码要回 PC 重新生成
+          say(`配对失败：${e.message}（配对码一次性，请回 PC 重新生成）`, true)
+          return
+        }
+      }
+      if (!token || !deviceId) { say('输入 PC 端生成的 6 位配对码完成配对。', true); return }
+      localStorage.setItem('wbsync.base', base)
+      openClient(base, deviceId, token)
     }
 
     const openStream = async (sessionId) => {
@@ -155,8 +186,8 @@
       $('conn').textContent = connState(client.snapshot())
     }
 
-    $('save').addEventListener('click', connect)
-    $('refresh').addEventListener('click', () => client?.refreshSessions().catch((e) => { $('list').textContent = `刷新失败：${e.message}` }))
+    $('save').addEventListener('click', () => { void connect() })
+    $('refresh').addEventListener('click', () => client?.refreshSessions().catch((e) => say(`刷新失败：${e.message}`, true)))
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {})
   </script>
 </body>

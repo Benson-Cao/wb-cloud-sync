@@ -3,8 +3,8 @@
  * 事件与会话列表永远是网络优先——离线时看到旧会话流比看到空页面更容易误判，
  * 所以数据请求直接放行网络，失败就让它失败（UI 有错误提示）。
  */
-const SHELL_CACHE = 'wbsync-shell-v1'
-const SHELL_ASSETS = ['./index.html', './manifest.webmanifest', './icon.svg', '../src/client.js']
+const SHELL_CACHE = 'wbsync-shell-v2'
+const SHELL_ASSETS = ['./index.html', './manifest.webmanifest', './icon.svg', '../src/client.js', '../src/pairing.js']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

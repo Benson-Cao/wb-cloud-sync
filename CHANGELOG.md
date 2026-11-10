@@ -4,6 +4,17 @@
 
 ---
 
+## [P1 W3 续 8] · 2026-11-10 11:4x · 非协议变更
+
+- **配对向导落地**：新增 `p1/pwa/src/pairing.js` + 壳页面改造——手机侧不再手填令牌，正式走「PC 宿主插件本地页 `/__wbsync/pair` 出 6 位码 → 手机输码 → `POST /pair` 换一次性 challenge + per-challenge pairSecret → HMAC-SHA256 → `POST /pair/verify` 换 deviceToken」。HMAC 用 **WebCrypto（`crypto.subtle`）**：浏览器与 Node ≥19 全局 `crypto` 同接口，实现零依赖、测试零 mock（跑的就是浏览器里的真实路径）。
+- **码一次性语义透出到 UI**：配对码被 `/pair` 消费后重放即 `PAIR_CODE_INVALID`，界面提示「回 PC 重新生成」；已配对设备回访自动用已存令牌直连（配对码输入框转为「留空直接连接」），避免误触重配对把旧令牌作废。
+- 配对后令牌仍存 localStorage 便于回访——边界写清：单活跃令牌机制兜底（PC 侧重配对即作废旧令牌），主动吊销 UI 属后续。
+- 测试 100 → **106**（`test/pairing.test.mjs` 6 个，真实 Relay 端到端：正常配对换得可用令牌、错码、签名篡改 401、challenge 复用拒绝、码一次性、**重配对作废旧令牌**）。sw 外壳缓存版本升 v2 纳入 `pairing.js`。
+
+**边界未变**：`POST /api/sessions`（新建会话）与 `PATCH`（置顶）未接；附件上行未做；PC 侧主动吊销 UI 未做；多手机选择器属后续。
+
+---
+
 ## [P1 W3 续 7] · 2026-11-10 11:2x · 非协议变更
 
 - **PWA 骨架落地**：新增 `p1/pwa/`（`@wbsync/pwa-dev`，零依赖）。手机侧三件事补齐——鉴权会话列表、事件订阅、断线重连补拉——W3「PWA 骨架：设备选择、会话列表、`sinceSeq` 补齐渲染」首次可跑通端到端。`src/client.js` 是框架无关的纯逻辑核心（`fetchImpl` / `WebSocketImpl` / `now` 全可注入，Node 里对着真 Relay 跑端到端）；`public/` 是最小 PWA 壳（会话列表 + 事件流渲染 + 只缓存外壳的 sw.js，业务请求网络直连）。
