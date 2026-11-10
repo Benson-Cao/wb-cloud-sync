@@ -1,43 +1,41 @@
 {
   "schema": "wbsync-gate-check/3",
-  "capturedAt": "2026-11-10T00:57:44.029Z",
+  "capturedAt": "2026-11-10T01:06:03.947Z",
   "git": {
-    "head": "d4f02cba8384cbca96bf676134a33c6520510c84",
+    "head": "8153316c848ec75b2abfe52c718abc724db1d352",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [
-      "check-plugin.json"
-    ],
+    "dataChanged": [],
     "artifactChanged": [
       "dist-tarball"
     ],
     "narrativeChanged": [
-      "REPORT.md"
+      "REPORT.md",
+      "PROTOCOL.md"
     ],
     "notes": [
       "发布物已重建（仅记录，不影响判定）：dist-tarball"
     ],
-    "previousCapturedAt": "2026-11-10T00:41:25.969Z",
-    "previousGitHead": "b5bebacb0777f1d1716633b5cae28890b119bcb1",
+    "previousCapturedAt": "2026-11-10T00:57:44.029Z",
+    "previousGitHead": "d4f02cba8384cbca96bf676134a33c6520510c84",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "STALE",
-      "previousReason": "运行代码/证据已变化（阻断）：check-plugin.json",
-      "capturedAt": "2026-11-10T00:41:25.969Z",
-      "gitHead": "b5bebacb0777f1d1716633b5cae28890b119bcb1",
-      "dataChanged": [
-        "check-plugin.json"
-      ],
+      "previousStatus": "DRIFTED",
+      "previousReason": "描述文字变化（不阻断）：REPORT.md, PROTOCOL.md",
+      "capturedAt": "2026-11-10T00:57:44.029Z",
+      "gitHead": "d4f02cba8384cbca96bf676134a33c6520510c84",
+      "dataChanged": [],
       "artifactChanged": [
         "dist-tarball"
       ],
       "narrativeChanged": [
-        "REPORT.md"
+        "REPORT.md",
+        "PROTOCOL.md"
       ]
     }
   },
@@ -50,11 +48,11 @@
       "check-plugin.json": "dd51f55c91dd8367a8d7db588e192e9e06f54d232594a676997c504866c12f75"
     },
     "artifact": {
-      "dist-tarball": "8cbfc21e4a6b7703321555b9dac3abd909500d9bc0055b4ff30b6368bb27ddb5"
+      "dist-tarball": "ba85bf5cf555ee44a7f9644e0187594e4a4b04dcaecda66f6b98a4332cc4920d"
     },
     "narrative": {
-      "REPORT.md": "95231ecbbaa5dc390fe124d0a4b45687022bb0d25d9b94d0da8c6533f55c9eba",
-      "PROTOCOL.md": "eb3af57492c02fa4d0bb0aef7862186763261f559da2833c5201d5150d89571e"
+      "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
+      "PROTOCOL.md": "9bd79939c4043f4a1a0e95e4aaeb92c93aeb2e3aa6a43a0a6bf43d1a35abdc9d"
     }
   },
   "tarballFiles": [

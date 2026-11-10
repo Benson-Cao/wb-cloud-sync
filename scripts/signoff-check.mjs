@@ -2,14 +2,14 @@
 /**
  * 会签就绪终检（P0 · 一条命令出签字清单）
  * ---------------------------------------------------------------
- * 目的：把「四方会签」从「翻 11 份文档 + 3 个证据 JSON」压成一条命令。
+ * 目的：把「四方会签」从「翻 11 份文档 + 4 个证据 JSON」压成一条命令。
  * 只读、不写业务文件；输出 spike/evidence/signoff-readiness.json 作会签附件。
  *
  *   node scripts/signoff-check.mjs              # 打印 + 写会签附件
  *   node scripts/signoff-check.mjs --no-write   # CI：只打印，不产生脏 diff
  *
- * 判定边界：**只报告，不代替签字**。会签是人的动作，脚本永远不因为
- * 「没签字」而返回非 0；CI 里作为记录步骤使用。
+ * 判定边界：**只报告，不代替签字，也不代替 P1 前置裁定**。会签是人的动作，
+ * 脚本永远不因为「没签字」而返回非 0；CI 里作为记录步骤使用。
  * 读的是**入库的本机证据**，不是当前 CI 环境——两者不要混。
  */
 import { execFileSync } from 'node:child_process'
@@ -35,6 +35,7 @@ const charter = read('docs/01_项目章程.md') ?? ''
 const signoff = read('SIGN-OFF.md') ?? ''
 const security = read('SECURITY-REVIEW.md') ?? ''
 const reference = read('WORKBUDDY-REFERENCE.md')
+const proposal = read('P1-PREREQUISITES.md')
 
 // ADR 状态：按 ### ADR-xxx 分块，取块内「- **状态**：」
 const adrs = []
@@ -48,14 +49,16 @@ for (let i = 1; i < blocks.length; i += 2) {
 const pendingAdrs = adrs.filter((a) => !a.accepted)
 
 const pendingSignatures = (charter.match(/\| 待签 \|/g) ?? []).length
-const p1Prereqs = ['| #2 |', '| #3 |', '| #4 |'].filter((k) => signoff.includes(k)).length
+const p1PrereqKeys = ['| #2 |', '| #3 |', '| #4 |', '| #5b |']
+const p1Prereqs = p1PrereqKeys.filter((k) => signoff.includes(k)).length
 const securityItem5 = /\| 5 \| 自托管 Relay/.test(security)
 const gateStatus = gate.freshness?.status ?? 'UNKNOWN'
 const automatedOk = gate.automatedPassed === gate.automatedTotal && gate.automatedTotal > 0
 const snapshotOk = gateStatus === 'CURRENT' || gateStatus === 'DRIFTED'
 const envOk = env.verdict === 'READY'
+const proposalReady = Boolean(proposal) && p1Prereqs === p1PrereqKeys.length
 
-const engineeringReady = automatedOk && snapshotOk && envOk && Boolean(reference) && securityItem5
+const engineeringReady = automatedOk && snapshotOk && envOk && Boolean(reference) && securityItem5 && proposalReady
 const verdict = pendingSignatures === 0 && pendingAdrs.length === 0
   ? 'SIGNED_OFF'
   : engineeringReady
@@ -63,10 +66,10 @@ const verdict = pendingSignatures === 0 && pendingAdrs.length === 0
     : 'ENGINEERING_NOT_READY'
 
 const result = {
-  schema: 'wbsync-signoff-readiness/1',
+  schema: 'wbsync-signoff-readiness/2',
   capturedAt: new Date().toISOString(),
   verdict,
-  note: 'SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；脚本不代签，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境',
+  note: 'SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；P1 前置四项须由 ARC / 安全 Owner 裁定。脚本不代签、不代裁定，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境',
   engineering: {
     currentHead: git('rev-parse', 'HEAD'),
     worktreeClean: (git('status', '--porcelain') ?? '').length === 0,
@@ -82,6 +85,7 @@ const result = {
     envOk,
     securityReviewItem5: securityItem5,
     workbuddyReference: Boolean(reference),
+    p1ProposalReady: proposalReady,
   },
   signatures: {
     pending: pendingSignatures,
@@ -92,15 +96,22 @@ const result = {
   pendingAdrs: pendingAdrs.map((a) => a.id),
   p1Prereqs: {
     count: p1Prereqs,
-    source: 'SIGN-OFF.md §二 · P1 开工前置清单',
-    items: ['#2 pairSecret 生成/分发/账号绑定', '#3 配对状态三处权威归属', '#4 allowedEndpoints 覆盖 FR-6/FR-7'],
-    note: '裁定权属于会签后的 ARC / 安全 Owner；会签时须在签署栏写明裁定人与 W3 前截止时点',
+    expected: p1PrereqKeys.length,
+    source: 'SIGN-OFF.md §二 · P1 开工前置清单 / P1-PREREQUISITES.md',
+    items: [
+      '#2 pairSecret 生成/分发/账号绑定',
+      '#3 配对状态三处权威归属',
+      '#4 allowedEndpoints 覆盖 FR-6/FR-7',
+      '#5b Cursor 双真源',
+    ],
+    proposalDocument: proposal ? 'P1-PREREQUISITES.md' : null,
+    note: '裁定权属于会签后的 ARC / 安全 Owner；会签时须在签署栏写明裁定结论与 W3 前截止时点，结论回写 ADR 或 04',
   },
   nextStep: verdict === 'READY_FOR_SIGNOFF'
-    ? '四方会签（一次会议即可）：先看 SECURITY-REVIEW.md 五项，再签 ADR-007~010；签完按 SIGN-OFF.md §七 收尾'
+    ? '一次会签：先看 SECURITY-REVIEW.md 五项并签 ADR-007~010，再裁定 P1-PREREQUISITES.md 四项；签完按 SIGN-OFF.md §七 收尾'
     : verdict === 'SIGNED_OFF'
-      ? '先裁定 P1 开工前置三项，再按 05 W3 进入编码'
-      : '先修复未达标的自动项 / 快照 / 构建链',
+      ? '先裁定 P1 开工前置四项并回写契约，再按 05 W3 进入编码'
+      : '先修复未达标的自动项 / 快照 / 构建链 / 会签材料',
 }
 
 const out = join(ROOT, 'spike', 'evidence', 'signoff-readiness.json')
@@ -112,6 +123,6 @@ console.log(`  自动项 ${result.engineering.automated} ${automatedOk ? 'PASS' 
 console.log(`  M6b ${result.engineering.envPassed} ${result.engineering.envVerdict}${result.engineering.envToolchain ? ` (Node ${result.engineering.envToolchain.node} / pnpm ${result.engineering.envToolchain.pnpm})` : ''}`)
 console.log(`  ADR 共 ${adrs.length} 个，待接受 ${pendingAdrs.length} 个：${pendingAdrs.map((a) => a.id).join(', ') || '无'}`)
 console.log(`  四方会签：${pendingSignatures} 行「待签」 | 安全一页纸第 5 项 ${securityItem5 ? '存在' : '缺失'} | 对标复核 ${reference ? '存在' : '缺失'}`)
-console.log(`  P1 开工前置：${p1Prereqs} 项已登记，裁定人会签时填写`)
+console.log(`  P1 前置提案：${p1Prereqs}/${p1PrereqKeys.length} 项已登记，白皮书 ${proposal ? '存在' : '缺失'}（待裁定，不代签）`)
 console.log(`  结论：${verdict} —— ${result.nextStep}`)
 if (!process.argv.includes('--no-write')) console.log('  证据:', out)

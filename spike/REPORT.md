@@ -168,14 +168,14 @@ curl --noproxy '*' -s http://127.0.0.1:50973/__wbsync/spike | grep -A4 eventShap
 | 上轮编号 | 进展 |
 |---|---|
 | #1 Spike 门禁口径不一致 | **已修复**：01 A1 / 02 §7 补齐三问口径，与 05 W1 / 09 R-02 统一 |
-| #2 `pairSecret` 未定义 | **仍未解决**（属配对协议，非 Spike 范围）：`pairSecret` 的生成 / 分发与 OAuth 主体绑定需 ARC 补 |
-| #3 配对状态三处归属 | **仍未解决**（CP / Relay / Host 本地三处），需定权威表与时序 |
-| #4 白名单 vs FR-6/FR-7 | **仍未解决**：`allowedEndpoints` 只有 `session/*`、`$events/*`，附件 / 产物 / 定时任务端点无归属 |
-| #5 幂等表 / RouteLease / Cursor | **已修复（ADR-008 提议中）**：Host 侧去重归宿主 `requestId`，CP 侧 `Idempotency` 降级为路由审计；Cursor 双真源仍待定 |
+| #2 `pairSecret` 未定义 | **提案已就绪，待会签裁定**（`P1-PREREQUISITES.md` §1）：推荐 per-challenge 一次性随机数 + 五条边界；带外长密钥列为 v2 加固候选 |
+| #3 配对状态三处归属 | **提案已就绪，待会签裁定**（`P1-PREREQUISITES.md` §2）：CP 管档案 / Relay 管令牌 / Host 仅缓存，含两帧时序与失败回滚 |
+| #4 白名单 vs FR-6/FR-7 | **提案已就绪，待会签裁定**（`P1-PREREQUISITES.md` §3）：分阶段开放 `artifacts/*`（P1）、`attachments/*` + `schedule/*`（P2）；附件写能力须安全 Owner 单独确认 |
+| #5 幂等表 / RouteLease / Cursor | **已修复（ADR-008 提议中）**：Host 侧去重归宿主 `requestId`，CP 侧 `Idempotency` 降级为路由审计；**#5b Cursor 双真源提案已就绪**（`P1-PREREQUISITES.md` §4）：客户端 `sinceSeq` 唯一权威，CP `Cursor` 降为可观测性快照 |
 | #6 PROTOCOL.md 唯一性 | **已修复（ADR-009 提议中）**：根 `PROTOCOL.md` 为 04 的单向同步发布副本，`sync-protocol.mjs --check` 供 CI 校验 |
 
 > 另新增 D-07（`surfaceOp` / `sourceEventSeqs` 真实语义）已写入 04 §3 与 ADR-007。
-> **#2 / #3 / #4 的裁定权属于会签后的 ARC 与安全 Owner**（配对密钥涉及信任边界、白名单涉及 `08` §5 权限评审），本阶段不代签、不擅自改契约；三项已提升为 `SIGN-OFF.md` §二的「P1 开工前置清单」，会签时须显式确认由谁在 W3 前裁定。
+> **#2 / #3 / #4 / #5b 的裁定权属于会签后的 ARC 与安全 Owner**（配对密钥涉及信任边界、白名单涉及 `08` §5 权限评审），本阶段不代签、不擅自改契约。`P1-PREREQUISITES.md` 已把四项整理成带方案、权衡、推荐与契约影响清单的会签输入，`SIGN-OFF.md` §二保留「P1 开工前置清单」，会签时须显式确认裁定人与 W3 前截止时点。
 
 ---
 
@@ -188,7 +188,7 @@ curl --noproxy '*' -s http://127.0.0.1:50973/__wbsync/spike | grep -A4 eventShap
 1. **P1 待办 · 卸载后证据文件清理**：TC-4.10 真机已 PASS（§4.1.3），但 `~/.dsh/wbsync-spike/probe.json` 未随卸载删除；产品插件需在 disposer 中定义保留 / 清理策略。不阻塞当前门禁。
 2. **ADR-007~010 会签 + 四方文档会签**（01 §9）：协议字段变更需 ARC 会签，安全项一票否决；ADR-010 属信任边界，安全 Owner 必看 `SECURITY-REVIEW.md` 第 5 项。
 3. ~~补构建链环境并接 CI~~ **已完成**：CI 接入 `sync-protocol --check` / `gate-check --check --assert-fresh` / `check-plugin` / `npm pack --dry-run`（M6a）；本地隔离工具链 Node 24.22.2 + pnpm 11.28.11 实跑全链通过，`check-env.mjs --check` 5/5 `READY`（M6b）。桌面版无独立 `dsh` CLI，E5 已按真机 GUI 安装证据判据修正。
-4. **解决上表 #2 / #3 / #4**：配对密钥与账号绑定、配对状态权威归属、白名单端点覆盖。
+4. **裁定上表 #2 / #3 / #4 / #5b**：`P1-PREREQUISITES.md` 已备好方案、权衡、推荐与契约影响清单；会签时一次性裁定，结论回写 ADR 或 `04`，之后才按 `05` W3 进入编码。
 5. 之后才按 05 W3 进入 P1 编码。
 
 ---

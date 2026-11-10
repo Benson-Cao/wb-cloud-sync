@@ -8,19 +8,20 @@
 **自动项 9/9 PASS；P0 唯一剩余硬阻塞是「会签」。** 会签完成前不得进入 P1 编码（`01` §9 / `05` W1）。
 当前门禁状态：`BLOCKED_BY_SIGNOFF`。
 
-## 零、剩余工作盘点（2026-11-10 08:5x 复核）
+## 零、剩余工作盘点（2026-11-10 09:0x 复核）
 
-**仓库状态**（2026-11-10 复核）：工作区干净；门禁快照 `CURRENT`（9/9 PASS）、`wbsync/1 r2` 已推送 `d4f02cb`、CI 绿灯。本轮（r2 后续）清掉了旧口径残留、闭环 M6b、新增会签就绪终检；详见 `WORKBUDDY-REFERENCE.md`、`CHANGELOG.md` 与 `scripts/signoff-check.mjs`。
+**仓库状态**（2026-11-10 复核）：工作区干净；门禁快照 `CURRENT`（9/9 PASS）、`wbsync/1 r2` 已推送、CI 绿灯。已完成 r2 对标复核、旧口径清理、M6b 闭环与 `P1-PREREQUISITES.md` 提案白皮书；详见 `WORKBUDDY-REFERENCE.md`、`CHANGELOG.md` 与 `scripts/signoff-check.mjs`。
 
 | 层级 | 已完成 | 剩余 | 阻塞性质 |
 |---|---|---|---|
 | **P0 自动项** | **9/9 PASS**（G1~G9，含 G9 解包比对） | **0** | — |
 | **P0 人工项** | M6a CI 接入 MET、**M6b 本地构建链 5/5 READY** | **M1 四方会签 + M2~M4 / M7 四个 ADR + M5 安全一票否决**（本质是**一次会签**） | 人签字 |
+| **P1 开工前置** | **4 项提案白皮书已就绪**（`P1-PREREQUISITES.md`） | 会签时一次性裁定，结论回写 ADR 或 `04`（预计 `wbsync/1 r3`） | 人的决策 |
 | **P1 MVP（W3–W6）** | 0 | **全部**：Relay 骨架、CP、配对、事件透传、幂等 prompt、队列、PWA 骨架、M1 验收 | 会签前**禁止启动**（01 §9 / 05 W1） |
 | **P2（W7–W9）** | 0 | 全部 | 同上 |
 | **P3（W10–W12）** | 0 | 全部 | 同上 |
 
-**量化结论**：P0 的技术验证、文档链路、CI 闸门与本机构建链 **100% 完成**；P0 只剩 **1 次会签**（四方 + ADR-007~010）；P1–P3 共 **10 周工作量一行代码未动，且按规程不得提前动**。11-10 对标复核在会签前新增 ADR-010，会签项由 3 个 ADR 增至 4 个，仍属同一次会签。
+**量化结论**：P0 的技术验证、文档链路、CI 闸门与本机构建链 **100% 完成**；P0 只剩 **1 次会签**（四方 + ADR-007~010）；P1–P3 共 **10 周工作量一行代码未动，且按规程不得提前动**。11-10 对标复核在会签前新增 ADR-010，会签项由 3 个 ADR 增至 4 个，仍属同一次会签。P1 开工前置四项已备好提案，可并入同一次会签裁定，不增加会议次数。
 
 **M6b 现状**：`node scripts/check-env.mjs --check` → **5/5 `READY`，exit 0**（证据 `spike/evidence/env-check.json`，schema `wbsync-env-check/2`）。
 
@@ -69,17 +70,18 @@
 > M6a 已完成：CI 用 Node 24，跑 `sync-protocol --check` → `gate-check --check --assert-fresh` → `check-plugin` → `npm pack --dry-run`；`d4f02cb` 的 run `42730257252` 共 11 步全 success。
 > M6b 已完成：隔离工具链 5/5 READY，不阻塞 P1 本地构建。会签终检命令：`node scripts/signoff-check.mjs`。
 
-### P1 开工前置清单（本阶段不代签，会签时须显式确认裁定人）
+### P1 开工前置清单（本阶段不代签，会签时一次性裁定）
 
-`spike/REPORT.md` §6 标为「仍未解决」的三项，裁定权属于会签后的 ARC / 安全 Owner，**不属 P0 自动项**，也不由本轮擅自改契约：
+`spike/REPORT.md` §6 登记的四项契约空白，裁定权属于会签后的 ARC / 安全 Owner，**不属 P0 自动项**，也不由本轮擅自改契约。完整方案、权衡、推荐与契约影响清单见 **[`P1-PREREQUISITES.md`](P1-PREREQUISITES.md)**：
 
-| 编号 | 缺口 | 为何 P0 不定 | 建议裁定人 / 时点 |
+| 编号 | 缺口 | 推荐裁定 | 裁定人 / 时点 |
 |---|---|---|---|
-| #2 | `pairSecret` 的生成、分发与账号绑定未定义（`04` §5.1 时序里凭空出现） | 涉及信任边界与密钥分发，须安全 Owner 参与；贸然写死会锁死实现 | ARC + 安全 Owner · W3 详细设计前 |
-| #3 | 配对状态在 CP / Relay / Host 本地三处归属未定权威 | 决定鉴权真源，属架构决策，需 ADR | ARC · W3 详细设计前 |
-| #4 | `allowedEndpoints` 只有 `session/*`、`$events/*`，FR-6 附件/产物与 FR-7 定时任务端点无归属 | `08` §5 规定新增端点必须走 ADR + 白名单评审，且附件上传是写能力 | ARC + 安全 Owner · W3 详细设计前 |
+| #2 | `pairSecret` 的生成 / 分发 / 账号绑定未定义（`04` §5.1 时序里凭空出现） | per-challenge 一次性随机数 + 五条边界；带外长密钥列 v2 加固 | ARC + 安全 Owner · W3 前 |
+| #3 | 配对状态在 CP / Relay / Host 本地三处无权威 | CP 管档案 / Relay 管令牌 / Host 仅缓存，补两帧时序与失败回滚 | ARC · W3 前 |
+| #4 | `allowedEndpoints` 未覆盖 FR-6 附件/产物与 FR-7 定时任务 | 分阶段开放 `artifacts/*`（P1）、`attachments/*` + `schedule/*`（P2）；附件写能力单独确认 | ARC + 安全 Owner · W3 前 |
+| #5b | `Cursor` 双真源（CP 表 vs 客户端 `sinceSeq`）未定 | 客户端 `sinceSeq` 唯一权威，CP `Cursor` 降为可观测性快照 | ARC · W3 前 |
 
-> 这三项**不阻塞 P0 会签，但阻塞 W3 编码**；会签时请在签署栏备注写明裁定人与截止时点，避免「签完就开工」时才发现契约空白。
+> 这四项**不阻塞 P0 会签，但阻塞 W3 编码**；会签时请在签署栏备注写明裁定结论与截止时点，结论必须回写 ADR 或 `04`（`05` §4）。若四项全部采纳，预计产生 `wbsync/1 r3`，需 `PROTOCOL.md` 单向同步 + `CHANGELOG.md` 记一条。
 
 ## 三、会签依据索引
 

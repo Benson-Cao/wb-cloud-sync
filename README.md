@@ -141,6 +141,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 ├─ PROTOCOL.md                  # 04 的发布副本（sync-protocol.mjs 单向生成）
 ├─ CHANGELOG.md                 # 契约变更记录（wbsync/1 r2）
 ├─ WORKBUDDY-REFERENCE.md       # WorkBuddy 手机/电脑端对标复核（r2 修订依据）
+├─ P1-PREREQUISITES.md          # P1 开工前置四项提案（提议中，待会签裁定）
 ├─ SECURITY-REVIEW.md           # 安全 Owner 一页纸（5 行核对）
 ├─ SIGN-OFF.md                  # P0 会签包：自动项 9/9、待签 M1~M7、签署栏
 ├─ pinned-commit.txt            # DSH 锁定基线 66491b0…（dsh-v0.2.2-rc.1）
@@ -177,7 +178,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 | Q2 不经写句柄提交用户消息 | PASS | 宿主 `dsh-api-session-controller.prompt(request)` + `requestId` 原生幂等 + `SessionAlreadyOwnedError` 单写者 |
 | Q3 枚举与只读回放 | PASS | `list()` / `open(id,access)` / `persistContiguous`；`sinceSeq=400` 补齐 266/266 |
 
-**P0 门禁**：三问离线 PASS、真机加载 + 运行时事件闭环 8/8 PASS、上游 commit 锁定（`66491b0…`）、`04` 已修订至 `wbsync/1 r2`（含 WorkBuddy 对标复核）、自动项 9/9、快照 `CURRENT`、M6b 构建链 5/5 `READY`。**唯一剩余硬阻塞是四方会签**（ADR-007~010 均为「提议中」），完成前不得进入 P1 编码。详见 `SIGN-OFF.md` 与 `spike/REPORT.md` §5。
+**P0 门禁**：三问离线 PASS、真机加载 + 运行时事件闭环 8/8 PASS、上游 commit 锁定（`66491b0…`）、`04` 已修订至 `wbsync/1 r2`（含 WorkBuddy 对标复核）、自动项 9/9、快照 `CURRENT`、M6b 构建链 5/5 `READY`。**唯一剩余硬阻塞是四方会签**（ADR-007~010 均为「提议中」），完成前不得进入 P1 编码。P1 开工前置四项已有提案白皮书 `P1-PREREQUISITES.md`，可并入同一次会签裁定。详见 `SIGN-OFF.md` 与 `spike/REPORT.md` §5。
 
 `docs/` 是设计冻结包的发布副本（含 v1.1 Spike 实测修订与 `wbsync/1 r2` 对标复核），唯一契约源是 `docs/04`；根 `PROTOCOL.md` 由脚本单向生成，字段变更须在同一 PR 同时改 `04` + `PROTOCOL.md` + `CHANGELOG.md`（06 §9 / ADR-009）。对标偏差与依据见 `WORKBUDDY-REFERENCE.md`。
 

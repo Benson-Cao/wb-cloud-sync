@@ -1,16 +1,16 @@
 {
-  "schema": "wbsync-signoff-readiness/1",
-  "capturedAt": "2026-11-10T00:57:44.616Z",
+  "schema": "wbsync-signoff-readiness/2",
+  "capturedAt": "2026-11-10T01:06:04.542Z",
   "verdict": "READY_FOR_SIGNOFF",
-  "note": "SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；脚本不代签，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境",
+  "note": "SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；P1 前置四项须由 ARC / 安全 Owner 裁定。脚本不代签、不代裁定，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境",
   "engineering": {
-    "currentHead": "d4f02cba8384cbca96bf676134a33c6520510c84",
+    "currentHead": "8153316c848ec75b2abfe52c718abc724db1d352",
     "worktreeClean": false,
     "automated": "9/9",
     "automatedOk": true,
     "snapshotStatus": "CURRENT",
-    "snapshotCapturedAt": "2026-11-10T00:57:44.029Z",
-    "snapshotGitHead": "d4f02cba8384cbca96bf676134a33c6520510c84",
+    "snapshotCapturedAt": "2026-11-10T01:06:03.947Z",
+    "snapshotGitHead": "8153316c848ec75b2abfe52c718abc724db1d352",
     "snapshotOk": true,
     "envVerdict": "READY",
     "envPassed": "5/5",
@@ -20,7 +20,8 @@
     },
     "envOk": true,
     "securityReviewItem5": true,
-    "workbuddyReference": true
+    "workbuddyReference": true,
+    "p1ProposalReady": true
   },
   "signatures": {
     "pending": 4,
@@ -91,14 +92,17 @@
     "ADR-010"
   ],
   "p1Prereqs": {
-    "count": 3,
-    "source": "SIGN-OFF.md §二 · P1 开工前置清单",
+    "count": 4,
+    "expected": 4,
+    "source": "SIGN-OFF.md §二 · P1 开工前置清单 / P1-PREREQUISITES.md",
     "items": [
       "#2 pairSecret 生成/分发/账号绑定",
       "#3 配对状态三处权威归属",
-      "#4 allowedEndpoints 覆盖 FR-6/FR-7"
+      "#4 allowedEndpoints 覆盖 FR-6/FR-7",
+      "#5b Cursor 双真源"
     ],
-    "note": "裁定权属于会签后的 ARC / 安全 Owner；会签时须在签署栏写明裁定人与 W3 前截止时点"
+    "proposalDocument": "P1-PREREQUISITES.md",
+    "note": "裁定权属于会签后的 ARC / 安全 Owner；会签时须在签署栏写明裁定结论与 W3 前截止时点，结论回写 ADR 或 04"
   },
-  "nextStep": "四方会签（一次会议即可）：先看 SECURITY-REVIEW.md 五项，再签 ADR-007~010；签完按 SIGN-OFF.md §七 收尾"
+  "nextStep": "一次会签：先看 SECURITY-REVIEW.md 五项并签 ADR-007~010，再裁定 P1-PREREQUISITES.md 四项；签完按 SIGN-OFF.md §七 收尾"
 }
