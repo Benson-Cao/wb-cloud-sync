@@ -10,7 +10,7 @@ source scripts/toolchain-env.sh          # 仓库根执行，启用隔离 Node 2
 pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.mjs
 ```
 
-`createRelay(options)` 返回未监听的 `http.Server` + 内存 `state`，注入 `now()` / `randomBytes()` 可让时间与随机性确定，规则判定不靠运行时猜测。`node --test` 共 **27 个用例**：HTTP 9、Host WS 7、手机事件订阅 7、跨实例共享 CP 4。
+`createRelay(options)` 返回未监听的 `http.Server` + 内存 `state`，注入 `now()` / `randomBytes()` 可让时间与随机性确定，规则判定不靠运行时猜测。`node --test` 共 **32 个用例**：HTTP 9、Host WS 7、手机事件订阅 7、跨实例共享 CP 4、静态壳服务 5。
 
 ## 传输形态
 
@@ -22,6 +22,7 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 | 手机新建会话 | **`POST /api/sessions`**（body 带 `deviceId`） | `Bearer <deviceToken>`；Host 离线 409 `HOST_OFFLINE`（入口置灰）；桥接白名单内 `session/create` → Host `createSession` 适配器；未注入适配器 409 透传。成功后 Relay 把**引导行**（`state:'awaiting'`）写进 CP，Host 下一次全量上报校正 |
 | 手机发指令 | HTTP（`/d/<deviceId>/session/*`） | 走白名单 + 桥接成 `http/request` 帧 |
 | 手机请求 → Host | `http/request` 帧 | 同一连接按发送顺序到达，**帧序即流序** |
+| 手机打开壳页面 | **`GET /app`**（及 `/app/*`、`/src/*`） | 无鉴权静态（PWA 必需，docs/04）；`/app` → `p1/pwa/public`，`/src` → `p1/pwa/src`（页面里 `../src/client.js` 的解析目标）；单层文件名 + 解码后校验拒绝路径遍历；`staticDir: null` 关闭 |
 | 降级 | `GET /host/poll` + `POST /host/respond` | 设备没有活跃 WS 时使用，便于旧 Host 与单测 |
 
 `src/ws.js` 是零依赖 RFC 6455 子集：握手、单帧文本 / 关闭 / 心跳、客户端 mask 校验、1 MiB 上限；不做分片与扩展协商。换成 `ws` 或 uWebSockets 时只替换该文件。
@@ -61,6 +62,7 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 
 - **配对后的 45s 活跃窗口**：`/pair/verify` 把设备记为「最近活跃」（`lastSeenAt=now`），窗口内没有 Host WS 时，桥接请求会在降级通道里等到 10s 超时回 504 `NO_PROGRESS`（不会误投帧）。现实中 PC 能出配对码即意味着宿主在跑；真机上表现为极短暂的「配对完就发消息可能转一下」。
 - **CP 尚未分离**：配对码登记、设备档案、会话索引暂由 Relay 单机内存承担，不落盘、重启即清空。
+- **静态壳是同步阻塞读**（`readFileSync`，开发期骨架够用）：文件都是 KB 级平铺小文件；换生产再改流式 + 缓存头策略。
 - **不持久化事件**：缓冲只在内存，进程重启即丢；`~/.dsh` 日志仍是唯一真源（`03` P1），重启补齐要回 Host 读日志——属下一步。
 - **不解析事件正文**：Relay 只按 `seq` 排队转发，不看 `ev.data`（ADR-010 / `04` §5.4）。端到端加密属 `wbsync/2`。
 - **P0 快照不覆盖 `p1/`**：`gate-check` 的 `data` 组只含探针插件与 P0 证据，P1 代码由 CI 的「P1 骨架冒烟测试」阻断把关（`node --test p1/relay/test/*.test.mjs p1/host-plugin/test/*.test.mjs`）。

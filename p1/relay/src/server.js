@@ -25,6 +25,8 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
+import { existsSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { createControlPlane } from '../../cp/src/index.js'
 import { createEventHub } from './events.js'
 import { upgradeToWebSocket } from './ws.js'
@@ -51,6 +53,74 @@ const isAllowed = (endpoint, allowlist = ALLOWED_ENDPOINTS) =>
   allowlist.some((rule) => rule.endsWith('/*')
     ? endpoint.startsWith(rule.slice(0, -1))
     : endpoint === rule)
+
+/* ------------------------------------------------------------ 静态壳服务 */
+
+const STATIC_MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.css': 'text/css; charset=utf-8',
+}
+
+/**
+ * 解析静态根目录对：createRelay 不传 `staticDir` → 自动探测 `p1/pwa/public`
+ * （仓库内相对定位，存在才挂）；传 `null` 显式关闭；传字符串用给定目录
+ * （public 与 src 约定为兄弟目录）。
+ * 真机部署时 Relay 与 p1/ 同树分发，自动探测即命中。
+ */
+const resolveStaticRoots = (staticDir) => {
+  if (staticDir === null) return null
+  let base
+  if (typeof staticDir === 'string') {
+    base = staticDir.replace(/[\\/]+$/, '')
+  } else {
+    base = fileURLToPath(new URL('../../pwa/public/', import.meta.url))
+    if (!existsSync(base)) return null
+    base = base.replace(/[\\/]+$/, '')
+  }
+  // `/app/*` → public（壳），`/src/*` → 兄弟目录 src（client.js / pairing.js，
+  // 页面里的 `../src/x.js` 从 /app/ 解析为 /src/x.js）
+  return { publicRoot: base, srcRoot: `${base}/../src` }
+}
+
+/**
+ * 静态文件读取：只允许**单层文件名**（两个根目录都约定平铺）。
+ * 先 decodeURIComponent 再校验——编码形态的遍历（`%2e%2e`、`%2f`）解码后
+ * 必然带 `..` / 路径分隔符，一样被拒；从根上排除路径遍历，不依赖 URL 归一化行为。
+ */
+const readStaticFile = (root, rawName) => {
+  if (!root) return { status: 404, code: 'ENDPOINT_NOT_ALLOWED', message: '未启用静态壳服务' }
+  let name = rawName
+  try { name = decodeURIComponent(String(rawName)) } catch {
+    return { status: 400, code: 'INVALID_JSON', message: '静态路径解码失败' }
+  }
+  if (!name || name.endsWith('/')) name += 'index.html'
+  if (/[/\\]|\.\./.test(name)) return { status: 403, code: 'ENDPOINT_NOT_ALLOWED', message: '非法静态路径' }
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0) return { status: 404, code: 'ENDPOINT_NOT_ALLOWED', message: '未知静态文件' }
+  const mime = STATIC_MIME[name.slice(dot)]
+  if (!mime) return { status: 404, code: 'ENDPOINT_NOT_ALLOWED', message: '不支持的静态类型' }
+  try {
+    return { status: 200, body: readFileSync(`${root}/${name}`), mime }
+  } catch {
+    return { status: 404, code: 'ENDPOINT_NOT_ALLOWED', message: `静态文件不存在：${name}` }
+  }
+}
+
+const sendStatic = (res, result) => {
+  if (result.status !== 200) return fail(res, result.status, result.code, result.message)
+  res.writeHead(200, {
+    'Content-Type': result.mime,
+    'Content-Length': result.body.length,
+    // 壳页面无鉴权是 PWA 必需（docs/04）；内容变更靠 sw 版本号 + no-cache 兜底
+    'Cache-Control': 'no-cache',
+    'X-Protocol-Version': PROTOCOL,
+  })
+  res.end(result.body)
+}
 
 const reply = (res, status, payload, extraHeaders = {}) => {
   const body = JSON.stringify(payload)
@@ -90,6 +160,8 @@ export function createRelay(options = {}) {
   const allowlist = cfg.allowedEndpoints ?? ALLOWED_ENDPOINTS
   // 元数据全在 CP；Relay 不再自己存设备表 / 索引 / 位点
   const cp = cfg.controlPlane ?? createControlPlane({ now, offlineAfterMs: cfg.heartbeatTimeoutMs })
+  // PWA 壳静态根（/app → public/，/src → pwa/src）；null 关闭
+  const staticRoots = resolveStaticRoots(cfg.staticDir)
 
   const state = {
     codes: new Map(),        // code -> { deviceId, expiresAt }（配对短时态，P2 迁 CP）
@@ -367,6 +439,16 @@ export function createRelay(options = {}) {
           transport: state.sockets.get(d.deviceId)?.isOpen() ? 'ws' : 'http-poll',
         }))
         return ok(res, { rows })
+      }
+
+      // PWA 壳：/app → p1/pwa/public，/src → p1/pwa/src（页面里 `../src/client.js`
+      // 从 /app/ 解析为 /src/client.js）。无鉴权静态（PWA 必需，docs/04）；
+      // 业务数据仍全走鉴权端点。
+      if (method === 'GET' && (path === '/app' || path.startsWith('/app/'))) {
+        return sendStatic(res, readStaticFile(staticRoots?.publicRoot, path.replace(/^\/app\/?/, '')))
+      }
+      if (method === 'GET' && path.startsWith('/src/')) {
+        return sendStatic(res, readStaticFile(staticRoots?.srcRoot, path.replace(/^\/src\//, '')))
       }
 
       // 手机侧端点：/d/<deviceId>/<endpoint>

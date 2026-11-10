@@ -54,11 +54,11 @@ p1/pwa/
 
 ```bash
 node --test p1/pwa/test/*.test.mjs       # 或 pnpm --dir p1/pwa test
-# 壳页面（开发期）：任选静态服务器指向 p1/pwa/public 的父目录，例如
-# python3 -m http.server 8088 --directory p1/pwa
-# 然后手机浏览器打开 http://<电脑IP>:8088/public/：
-#   1. 填 Relay 地址；2. 在 PC 端打开宿主插件本地页 /__wbsync/pair 生成 6 位码；
-#   3. 手机输码点「配对」→ 自动换取令牌并进入会话列表。
+# 壳页面已挂在 Relay 上：启动 Relay 后手机浏览器直接打开
+#   http://<Relay地址>/app
+# 1. 填 Relay 地址；2. 在 PC 端打开宿主插件本地页 /__wbsync/pair 生成 6 位码；
+# 3. 手机输码点「配对」→ 自动换取令牌并进入会话列表。
+# （不再需要另起静态服务器；静态服务测试见 p1/relay/test/static.test.mjs）
 ```
 
 ## 明确的边界

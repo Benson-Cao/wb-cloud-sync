@@ -4,6 +4,18 @@
 
 ---
 
+## [P1 W3 续 10] · 2026-11-10 12:0x · 非协议变更
+
+- **PWA 壳挂上 Relay**（真机联调前置）：Relay 新增零依赖静态服务——`GET /app`（及 `/app/*`）服务 `p1/pwa/public`（壳页面），`GET /src/*` 服务 `p1/pwa/src`（页面里 `../src/client.js` 从 `/app/` 的解析目标，两个根约定为兄弟目录）。手机浏览器直接打开 `http://<Relay地址>/app`，**不再需要另起静态服务器**。`staticDir: null` 显式关闭；不传时自动探测仓库内相对路径，存在才挂。
+- **路径遍历从根上排除**：只允许单层文件名（两个目录约定平铺），且**先 `decodeURIComponent` 再校验**——编码形态的遍历（`%2e%2e`、`%2f`、反斜杠）解码后必带 `..` / 分隔符，一律 403。无扩展名 / 未知 MIME 404。
+- **写测试抓到自己三个错**：① `readStaticFile` 漏解码——编码遍历路径落到 404 而非 403（把遍历尝试伪装成了文件不存在，语义错误）；② `/src/*` 分支最初也指向 public 根（client.js 在 src 目录，404）；③ 测试正则没匹配 ES 模块的 `from '...'` 语法（`import` 关键字后没有 `=`，`from` 与引号间是空格）。
+- 无鉴权静态是 PWA 必需（docs/04），业务数据仍全走鉴权端点；`Cache-Control: no-cache` 兜底，内容更新靠 sw 版本号。
+- 测试 112 → **117**（`p1/relay/test/static.test.mjs` 5 个：双路径形态、MIME、三种遍历形态拒绝、`staticDir:null` 关闭、**页面引用资源自洽检查**——壳页面里每个相对引用从 `/app/` 解析后都必须可取）。
+
+**边界未变**：静态读取是 `readFileSync` 同步阻塞（KB 级平铺小文件，开发期够用，已在 relay README 边界写明）；sw 缓存仍是壳专用。
+
+---
+
 ## [P1 W3 续 9] · 2026-11-10 11:5x · 非协议变更
 
 - **新建会话链路打通**（W3 收尾项）：手机 `POST /api/sessions`（body 带 `deviceId`，Bearer 鉴权）→ Relay 桥接白名单内的 `session/create` → Host 插件新适配器 `createSession({text, cwd, clientId})`（正式实现接宿主新建会话入口）。创建成功后 Relay 通过桥接响应钩子把**引导行**（`state:'awaiting'`）写进 CP——手机不必等 Host 下一个 60s 索引刷新周期即可见；Host 全量上报随后校正 `state` / `lastSeq`。

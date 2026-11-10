@@ -171,7 +171,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 │  └─ evidence/                 # 脱敏后的证据 JSON
 ├─ p1/                          # P1 开发代码（不进探针 tarball）
 │  ├─ cp/                       # W3 控制面：设备 / 会话索引 / 写句柄租约 / 位点四张表（18 用例）
-│  ├─ relay/                    # W3 Relay：配对 / Host WS 长连 / 手机事件订阅 / 跨实例共享 CP（27 用例）
+│  ├─ relay/                    # W3 Relay：配对 / Host WS 长连 / 手机事件订阅 / 壳静态服务 / 跨实例共享 CP（32 用例）
 │  ├─ host-plugin/              # W3 Host 插件：上行 / 下行分派 / 历史补齐 / 会话索引 / 可逆卸载（48 用例）
 │  └─ pwa/                      # W3 手机侧：配对向导 + 会话列表 / 新建 + 事件订阅 + 断线重连补拉（19 用例）
 └─ LICENSE (MIT)
