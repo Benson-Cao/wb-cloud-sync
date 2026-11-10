@@ -1,10 +1,10 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-10T14:46:02.729Z",
+  "capturedAt": "2026-11-10T14:58:40.319Z",
   "git": {
-    "head": "49c81af109fe6333b1522e3fd06036bf15472641",
+    "head": "df0c6e1eb84ccc438eb9bab7854065d822896b38",
     "branch": "main",
-    "worktreeClean": false
+    "worktreeClean": true
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
@@ -14,23 +14,27 @@
       "SIGN-OFF.md"
     ],
     "artifactChanged": [],
-    "narrativeChanged": [],
+    "narrativeChanged": [
+      "PROTOCOL.md"
+    ],
     "notes": [],
-    "previousCapturedAt": "2026-11-10T14:44:04.146Z",
-    "previousGitHead": "1b8f9642c071c2fb06b964985c907dabef58b39c",
+    "previousCapturedAt": "2026-11-10T14:46:02.729Z",
+    "previousGitHead": "49c81af109fe6333b1522e3fd06036bf15472641",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
       "previousReason": "已变化（阻断）：会签材料：SIGN-OFF.md",
-      "capturedAt": "2026-11-10T14:44:04.146Z",
-      "gitHead": "1b8f9642c071c2fb06b964985c907dabef58b39c",
+      "capturedAt": "2026-11-10T14:46:02.729Z",
+      "gitHead": "49c81af109fe6333b1522e3fd06036bf15472641",
       "dataChanged": [],
       "signoffChanged": [
         "SIGN-OFF.md"
       ],
       "artifactChanged": [],
-      "narrativeChanged": []
+      "narrativeChanged": [
+        "PROTOCOL.md"
+      ]
     }
   },
   "fingerprints": {
@@ -47,7 +51,7 @@
     },
     "signoff": {
       "SECURITY-REVIEW.md": "654740fe43c975e8a6fe2ee4dd2205b14e79c0641fa4874947fc0ce6acd529c0",
-      "SIGN-OFF.md": "b6931976ae4a0c527364d606e14c6c7e2bb02b94f62279904eb581648dfeb482",
+      "SIGN-OFF.md": "fbc5097a8245bef29ab8cec89847549b60c0578dbdc23a0287c4c9f9b7ec9fd3",
       "SIGN-OFF-PROCEDURE.md": "2c279eb54b44ff3b5fab18c121c53b68b8f3f23da27e0f98fdf18abbb17fd1df",
       "SIGNOFF-WAIVER.md": "920af35df5a96b39d83d401e99d01957d558479b3ad52df1e0cafa12d7c60336",
       "01-charter.md": "3740d12f8192aa94945b9f4de6a7b4a0ecc18a4c3fcd174bd054df45a98d83df",
@@ -59,11 +63,11 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "083faaefa9f7a29f4a329827a705f47f3a38d5e7c3caac23bdf61b94c5d9b317"
+      "PROTOCOL.md": "846452350cdf57c2bbea844bf0e9e617e46d97818320cb1cbbcc84b4e06cd8de"
     }
   },
   "secretScan": {
-    "filesScanned": 105,
+    "filesScanned": 108,
     "patterns": [
       "github-classic",
       "github-fine-grained",
