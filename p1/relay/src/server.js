@@ -1,24 +1,26 @@
 /**
  * W3 开发骨架 · Relay（零依赖，Node >= 24.9）
  * ---------------------------------------------------------------
- * 范围（05 W3 第一项）：配对、设备注册、心跳与离线判定、白名单、
- * Host 离线立即 409，以及一个 HTTP 轮询桥。
+ * 范围（05 W3）：配对、设备注册、心跳与离线判定、白名单、Host 离线立即 409、
+ * **Host 主动 WebSocket 长连与帧保序**，以及会话索引上报。
  *
- * 与正式契约的关系：**WS 帧代理尚未实现**。正式设计是 Host 主动 WSS 外连
- * Relay（docs/04 §5.2 / docs/03 §3.3）；本骨架用
- *   GET  /host/poll?deviceId=   （取待转发帧）
- *   POST /host/respond          （回响应）
- * 作为开发期等价物，帧字段与 docs/04 §5.3 一致。W3 下一提交替换为 WSS
- * 时，只替换传输层，配对 / 鉴权 / 白名单 / 离线判定逻辑不变。
+ * 传输分工：
+ *   - Host → Relay：`WS /ws/host` 长连（正式设计，docs/04 §5.2）。
+ *   - 手机 → Relay：HTTP（W3 骨架；PWA 侧的 SSE/WS 属后续提交）。
+ *   - 手机 HTTP 请求经 `http/request` 帧转给 Host，Host 用 `http/response` 回，
+ *     帧字段与 docs/04 §5.3 一致；**同一连接的帧按发送顺序到达**（帧序即流序）。
+ *   - HTTP 轮询桥（`GET /host/poll` + `POST /host/respond`）保留为**降级通道**：
+ *     当设备没有活跃 WS 连接时使用，便于旧 Host 与单测。
  *
  * 四项 P1 前置按 SIGNOFF-WAIVER.md §5 的**默认口径**实现（未经会签）：
  *   #2 pairSecret = per-challenge 一次性随机数，不落盘、不参与令牌派生；
- *   #3 单机期 Relay 内存表为活跃令牌与在线状态权威；
+ *   #3 单机期 Relay 内存表为活跃令牌、在线状态与会话索引的权威；
  *   #4 只开放 session/* 与 $events/*，其余端点默认拒绝；
  *   #5b 客户端 sinceSeq 唯一权威，服务端 Cursor 仅作可观测性快照。
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
+import { upgradeToWebSocket } from './ws.js'
 
 export const PROTOCOL = 'wbsync/1'
 export const ALLOWED_ENDPOINTS = ['session/*', '$events/*']
@@ -86,9 +88,11 @@ export function createRelay(options = {}) {
     challenges: new Map(),   // challenge -> { code, deviceId, pairSecret, expiresAt }
     devices: new Map(),      // deviceId -> { state, lastSeenAt, tokenDigest, tombstone, caps }
     rateHits: new Map(),     // `${deviceId}|${ip}` -> number[] (ms)
-    queue: new Map(),        // deviceId -> 待转发的 http/request 帧
+    queue: new Map(),        // deviceId -> 待转发帧（无 WS 时的降级通道）
     pending: new Map(),      // reqId -> { resolve, timer }
-    cursors: new Map(),      // 仅可观测性：clientId -> sinceSeq（不参与补齐决策）
+    sockets: new Map(),      // deviceId -> WS 连接（正式通道）
+    indexes: new Map(),      // deviceId -> SessionIndex[]（Host 上报的快照）
+    cursors: new Map(),      // 仅可观测性：`clientId|deviceId` -> sinceSeq
   }
 
   const sixDigitCode = () => String(rand(4).readUInt32BE(0) % 1_000_000).padStart(6, '0')
@@ -103,9 +107,12 @@ export function createRelay(options = {}) {
     return hits.length > cfg.rateLimitPerMin
   }
 
+  /** 有活跃 WS 连接即在线；WS 关闭后显式标离线；HTTP 心跳设备按时间窗判定。 */
   const isOnline = (deviceId) => {
+    const conn = state.sockets.get(deviceId)
+    if (conn?.isOpen()) return true
     const d = state.devices.get(deviceId)
-    if (!d || d.tombstone) return false
+    if (!d || d.tombstone || d.state === 'offline') return false
     return now() - d.lastSeenAt <= cfg.heartbeatTimeoutMs
   }
 
@@ -113,9 +120,14 @@ export function createRelay(options = {}) {
   const bridge = (req, res, deviceId, endpoint, body) => {
     const reqId = hex(16)
     const frame = { t: 'http/request', reqId, method: req.method, endpoint, body, sinceSeq: body?.sinceSeq ?? null }
-    const frames = state.queue.get(deviceId) ?? []
-    frames.push(frame)
-    state.queue.set(deviceId, frames)
+    const conn = state.sockets.get(deviceId)
+    if (conn?.isOpen()) {
+      conn.sendJson(frame)                 // 正式通道：WS 长连，帧序即流序
+    } else {
+      const frames = state.queue.get(deviceId) ?? []
+      frames.push(frame)                   // 降级通道：HTTP 轮询
+      state.queue.set(deviceId, frames)
+    }
 
     const timer = setTimeout(() => {
       const p = state.pending.get(reqId)
@@ -133,6 +145,34 @@ export function createRelay(options = {}) {
     })
   }
 
+  /** 处理 Host 通过 WS 发来的帧。 */
+  const handleHostFrame = (deviceId, text, conn) => {
+    let msg
+    try { msg = JSON.parse(text) } catch { return conn.close(1003, 'invalid json') }
+    if (msg.t === 'host/heartbeat') {
+      const d = state.devices.get(deviceId)
+      if (d) { d.lastSeenAt = now(); d.state = 'online' }
+      return conn.sendJson({ t: 'host/heartbeat/ack', ts: now() })
+    }
+    if (msg.t === 'host/sessions') {
+      state.indexes.set(deviceId, Array.isArray(msg.rows) ? msg.rows : [])
+      return conn.sendJson({ t: 'host/sessions/ack', count: (msg.rows ?? []).length })
+    }
+    if (msg.t === 'http/response') {
+      const p = state.pending.get(String(msg.reqId ?? ''))
+      if (!p) return conn.sendJson({ t: 'ack', ref: msg.reqId, status: 'rejected' })
+      state.pending.delete(String(msg.reqId))
+      p.resolve({ status: msg.status ?? 200, body: msg.body ?? {} })
+      return conn.sendJson({ t: 'ack', ref: msg.reqId, status: 'accepted' })
+    }
+    if (msg.t === 'session/event') {
+      // Host → 手机的上行事件：W3 骨架里只做入队计数，客户端订阅属后续提交
+      state.indexes.set(deviceId, state.indexes.get(deviceId) ?? [])
+      return
+    }
+    return conn.sendJson({ t: 'ack', ref: msg.t ?? null, status: 'ignored' })
+  }
+
   const handler = async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const path = url.pathname
@@ -141,7 +181,11 @@ export function createRelay(options = {}) {
 
     try {
       if (method === 'GET' && path === '/health') {
-        return ok(res, { protocol: PROTOCOL, online: [...state.devices.keys()].filter(isOnline).length })
+        return ok(res, {
+          protocol: PROTOCOL,
+          online: [...state.devices.keys()].filter(isOnline).length,
+          sockets: [...state.sockets.entries()].filter(([, c]) => c.isOpen()).length,
+        })
       }
 
       // PC 侧登记配对码（正式设计由 CP 承担，单机开发期由 Relay 兼任）
@@ -193,7 +237,7 @@ export function createRelay(options = {}) {
         return ok(res, { deviceToken, protocol: PROTOCOL, relayUrl: cfg.publicBaseUrl ?? 'http://127.0.0.1' })
       }
 
-      // Host 注册 / 心跳（开发期 HTTP 模拟 WS 帧）
+      // Host 注册 / 心跳 / 索引（HTTP 降级通道；正式走 WS）
       if (method === 'POST' && path === '/host/register') {
         const body = await readBody(req, cfg.maxBodyBytes)
         if (cfg.hostToken && body.hostToken !== cfg.hostToken) return fail(res, 401, 'UNAUTHORIZED', 'HOST_TOKEN 不匹配')
@@ -214,8 +258,19 @@ export function createRelay(options = {}) {
         d.state = 'online'
         return ok(res, { deviceId: body.deviceId, lastSeenAt: d.lastSeenAt })
       }
+      if (method === 'POST' && path === '/host/sessions') {
+        const body = await readBody(req, cfg.maxBodyBytes)
+        const d = state.devices.get(body.deviceId)
+        if (!d || d.tombstone) return fail(res, 409, 'HOST_OFFLINE', '设备未注册或已吊销', true)
+        state.indexes.set(body.deviceId, Array.isArray(body.rows) ? body.rows : [])
+        return ok(res, { count: (body.rows ?? []).length })
+      }
+      if (method === 'GET' && path === '/host/indexes') {
+        const deviceId = url.searchParams.get('deviceId') ?? ''
+        return ok(res, { deviceId, rows: state.indexes.get(deviceId) ?? [] })
+      }
 
-      // 轮询桥：Host 取待转发帧 / 回响应
+      // 降级通道：轮询取帧 / 回响应
       if (method === 'GET' && path === '/host/poll') {
         const deviceId = url.searchParams.get('deviceId') ?? ''
         const frames = state.queue.get(deviceId) ?? []
@@ -239,6 +294,7 @@ export function createRelay(options = {}) {
         const rows = [...state.devices.entries()].map(([deviceId, d]) => ({
           deviceId, state: isOnline(deviceId) ? 'online' : 'offline',
           lastSeenAt: d.lastSeenAt, tokenDigest: d.tokenDigest, tombstone: d.tombstone,
+          transport: state.sockets.get(deviceId)?.isOpen() ? 'ws' : 'http-poll',
         }))
         return ok(res, { rows })
       }
@@ -283,12 +339,53 @@ export function createRelay(options = {}) {
   }
 
   const server = createServer(handler)
+
+  // Host 主动长连：/ws/host → 注册帧 → 帧保序双向透传
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    if (url.pathname !== '/ws/host') { socket.destroy(); return }
+
+    let deviceId = null
+    const conn = upgradeToWebSocket(req, socket, head, {
+      onMessage(text) {
+        if (deviceId === null) {
+          let msg
+          try { msg = JSON.parse(text) } catch { return conn.close(1003, 'invalid json') }
+          if (msg.t !== 'host/register') return conn.close(1008, 'register first')
+          if (cfg.hostToken && msg.hostToken !== cfg.hostToken) return conn.close(1008, 'bad host token')
+          if (!msg.deviceId) return conn.close(1008, 'deviceId required')
+          deviceId = String(msg.deviceId)
+          const prev = state.devices.get(deviceId)
+          if (prev?.tombstone) return conn.close(1008, 'device revoked')
+          state.sockets.set(deviceId, conn)
+          state.devices.set(deviceId, {
+            state: 'online', lastSeenAt: now(),
+            tokenDigest: prev?.tokenDigest ?? null, tombstone: false,
+            caps: msg.caps ?? [],
+          })
+          return conn.sendJson({ t: 'host/registered', deviceId, protocol: PROTOCOL })
+        }
+        return handleHostFrame(deviceId, text, conn)
+      },
+      onClose() {
+        if (deviceId === null) return
+        if (state.sockets.get(deviceId) === conn) state.sockets.delete(deviceId)
+        const d = state.devices.get(deviceId)
+        // WS 断开即视为离线，不等 45s 心跳窗口；HTTP 心跳可把状态再拉回 online
+        if (d) d.state = 'offline'
+      },
+    })
+    if (!conn) socket.destroy()
+  })
+
   const start = (port = 0) => new Promise((resolve) => {
     server.listen(port, '127.0.0.1', () => resolve(server.address().port))
   })
   const stop = () => new Promise((resolve) => {
     for (const p of state.pending.values()) clearTimeout(p.timer)
     state.pending.clear()
+    for (const conn of state.sockets.values()) conn.close(1001, 'server stopping')
+    state.sockets.clear()
     server.close(() => resolve())
   })
 

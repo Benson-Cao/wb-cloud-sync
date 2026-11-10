@@ -17,7 +17,7 @@
 | **P0 自动项** | **9/9 PASS**（G1~G9，含 G9 解包比对） | **0** | — |
 | **P0 人工项** | M6a CI 接入 MET、**M6b 本地构建链 5/5 READY** | **M1 四方会签 + M2~M4 / M7 四个 ADR + M5 安全一票否决**；**发起人已豁免开发期**（`SIGNOFF-WAIVER.md`），签署栏与 ADR 状态未改 | 人签字（GA 阻塞） |
 | **P1 开工前置** | **4 项提案白皮书已就绪**（`P1-PREREQUISITES.md`） | 会签时一次性裁定，结论回写 ADR 或 `04`（预计 `wbsync/1 r3`） | 人的决策 |
-| **P1 MVP（W3–W6）** | **W3 Relay 骨架 + 9/9 单测**（`p1/relay/`） | CP / WS 帧代理 / Host 插件 / PWA / 队列 / M1 验收 | 发起人豁免开发期；GA 前仍须补签 |
+| **P1 MVP（W3–W6）** | **W3 Relay 骨架 + Host WS 长连 + 16/16 单测**（`p1/relay/`） | 手机侧事件流 / CP 分离 / Host 插件 / PWA / 队列 / M1 验收 | 发起人豁免开发期；GA 前仍须补签 |
 | **P2（W7–W9）** | 0 | 全部 | 同上 |
 | **P3（W10–W12）** | 0 | 全部 | 同上 |
 
@@ -136,6 +136,8 @@ Get-NetTCPConnection -State Listen | Where-Object {
 - 一句话：**改错别字不拦人，重新打包不误报，运行代码、实测证据或会签材料一变就拦死。**
 - ✅ 「发布物与源码是否一致」由 **G9 解包比对**覆盖：不比 tgz 本身（不可复现），而是解包后逐文件比 sha256，5/5 一致才 PASS。实测：改 `index.js` 但不 repack → G9 FAIL、自动项 8/9、exit 1。因此**保留 `dist/*.tgz` 在仓库、继续走 GitHub 分发**是安全的。
 - **G8 加固**：由「只扫已跟踪文件的 `ghp_`」改为遍历工作区（含未跟踪文件）+ 4 类形态（GitHub classic / 细粒度 PAT / `sk-` 型 / 私钥头）；命中只记录路径、行号与形态，不把匹配内容写进证据。
+- **P1 代码（`p1/`）不在 P0 快照内**：`data` 组只含探针插件与 P0 证据；P1 代码由 CI 的「P1 Relay 冒烟测试」阻断把关，避免每次开发都让 P0 快照失效。
+
 - 会签时请抄下 `capturedAt` / `git.head` / `fingerprints.data` / `fingerprints.signoff` 摘要写进签署栏备注，事后可复核。
 
 ## 五、签署栏
