@@ -172,7 +172,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 ├─ p1/                          # P1 开发代码（不进探针 tarball）
 │  ├─ cp/                       # W3 控制面：设备 / 会话索引（含增量 diff）/ 写句柄租约 / 位点四张表（20 用例）
 │  ├─ relay/                    # W3 Relay：配对 / Host WS 长连 / 手机事件订阅 / 壳静态服务 / 设备管理台 / 跨实例共享 CP（40 用例，run.mjs 真机启动器）
-│  ├─ host-plugin/              # W3 Host 插件：上行 / 下行分派 / 宿主新建会话 / 取消 / 附件上行 / 稳定 deviceId / 增量索引 / 历史补齐 / 可逆卸载（78 用例，bundle/ 可安装包）
+│  ├─ host-plugin/              # W3 Host 插件：上行 / 下行分派 / 宿主新建会话 / 取消 / 附件上行 / 稳定 deviceId / 增量索引 / 历史补齐 / 可逆卸载（79 用例，bundle/ 可安装包）
 │  └─ pwa/                      # W3 手机侧：配对向导 + 会话列表 / 新建 / 发消息 / 附件 / 取消 + 事件订阅 + 断线重连补拉（30 用例）
 └─ LICENSE (MIT)
 ```

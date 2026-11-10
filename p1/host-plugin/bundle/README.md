@@ -4,7 +4,7 @@
 
 ## 安装
 
-DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.7.tgz`（由本目录 `npm pack` 产出）。
+DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.9.tgz`（由本目录 `npm pack` 产出）。
 
 ## 配置（缺省即可本机试跑）
 
@@ -48,6 +48,15 @@ PC 浏览器地址栏打开 `http://127.0.0.1:<DSH端口>/__wbsync/pair` 生成 
 真机自检：PC 浏览器打开 `http://127.0.0.1:<DSH端口>/__wbsync/status`，看 `writer` / `messenger` /
 `canceller` 与 `writer.probe`（含 `boot` 启动期快照、`lateBound` 晚到服务、逐服务 `methods` / `errors`）。
 手机端新建 / 取消失败时会把宿主异常原文一并显示，不再只有一个错误码。
+
+**附件上行（0.1.8 / 协议 r3）**：`fileUploads/upload` 下行 → 适配器 `uploadAttachment`。
+优先 `fileUploads.upload(agent, { data(base64), name? }, signal)`（第一参是 **Agent 对象**，由 `agents.get(sessionId)` 取），
+回退 `uploadStream({ sessionId, data: AsyncIterable<Uint8Array>, name? })`；返回 `{ receiptId, file }`。
+`receiptId` 只在接收 Agent 作用域内有效，须与同一会话的 `session/prompt` 一起用。
+
+> **接线注意（0.1.9 修复的真机缺陷）**：`src/index.js` 的 `adapters` 是手写转发对象，
+> 不是 `createHostAdapters()` 的返回值本身。新增适配器方法必须同时在该对象里加一行
+> `cfg.X ?? hostAdapters.X`，否则 `capabilities()` 显示可选、下行分派却拿到 `undefined`。
 
 ## 铁律（与源码一致）
 

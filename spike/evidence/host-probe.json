@@ -1,7 +1,7 @@
 {
   "schema": "wbsync-spike/1",
   "env": {
-    "capturedAt": "2026-11-10T12:45:34.443Z",
+    "capturedAt": "2026-11-10T13:12:27.127Z",
     "platform": "win32",
     "arch": "x64",
     "nodeVersion": "22.22.2",
@@ -91,7 +91,7 @@
         "zstdFrames": 1311,
         "records": 2336,
         "decodeErrors": 0,
-        "totalSessionLogs": 16,
+        "totalSessionLogs": 18,
         "surfaceOps": {
           "append": 590
         },

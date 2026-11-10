@@ -838,6 +838,8 @@ function __apply(ctx, config = {}) {
     submitPrompt: cfg.submitPrompt ?? hostAdapters.submitPrompt,
     cancelTurn: cfg.cancelTurn ?? hostAdapters.cancelTurn,
     createSession: cfg.createSession ?? hostAdapters.createSession,
+    // 适配器返回对象上的方法必须在包装层逐个转发，否则下行分派拿到 undefined
+    uploadAttachment: cfg.uploadAttachment ?? hostAdapters.uploadAttachment,
     replay: cfg.replay ?? (openSession
       ? createReplayAdapter({ openSession, pageSize: cfg.replayPageSize })
       : async () => ({

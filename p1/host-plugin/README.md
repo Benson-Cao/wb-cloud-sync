@@ -25,6 +25,8 @@ P0 Spike Q2 已取证：手机投递必须走宿主 `dsh-api-session-controller.
 
 `/__wbsync/status` 的 `writer:{controller,create,prompt,cancel,writer,messenger,probe}` 用于真机自检——装包后先看它，就能区分「服务没探测到」与「调用失败」；`probe` 含 `hasGet / hasInject / hasRoot / keys / boot`（启动期快照）、`lateBound`（晚到服务）、逐服务 `via / methods / errors`。手机端新建失败时会把宿主异常原文一起显示，不再只有一个 `HOST_ADAPTER_ERROR`。
 
+**0.1.9 真机教训（接线层）**：`src/index.js` 的 `adapters` 是**手写转发对象**（`cfg.X ?? hostAdapters.X` 逐个列出），不是 `createHostAdapters()` 的返回值本身。新增适配器方法时**必须同时在包装层加一行转发**，否则下行分派拿到 `undefined`，而 `capabilities()` 仍显示 `true`（它直接调 `createHostAdapters()`）——真机表现为「探测正常但调用报 `xxx is not a function`」。`plugin.test.mjs` 的 `fileUploads/upload` 用例即为此设的回归闸门。
+
 **部分成功语义**：`create` 已建出会话但第一句话 `prompt` 失败时，会话已经客观存在，适配器返回**成功**并附 `prompted:false / promptError`——否则手机会以为没建、重复点「新建」造出第二个会话。
 
 宿主入口形状（asar 字节级取证 2026-11-10）：`SessionController.create(request)` 入参 `{workspaceId?, cwd?, sessionId?, agentPreset?}`（前两者互斥）、返回 `{sessionId, agentPreset?}`；内部 `SessionCommandController.create` 调 `agents.createSession({cwd, reusable})`，最终 `ctx.agents.create({sessionId, meta:{cwd}, agentOptions, setup})`。`session/prompt` 的 required 为 `{requestId, sessionId, mode:'queue'|'steer', content:[{type:'text',text}]}`，第二参是 `AbortSignal`。
@@ -132,7 +134,7 @@ Relay 的事件缓冲在内存里，进程一重启就空；手机断线重连�
 4. **丢弃窗口靠 follow 兜底，但没人自动触发**：`dropped` 只计数，重连后主动补拉要等手机侧（PWA）发起。
 5. **索引里没有 `title`**：宿主会话头里确实没有标题字段（实测只有 `version/id/createdAt/cwd/isSeeded/delegationDepth/agentPreset`），标题要由 PC 侧会话管理器补，此处给 `null` 而不是从 `cwd` 编一个。
 
-## 九、测试（75 个用例，`node --test`）
+## 九、测试（79 个用例，`node --test`）
 
 ```bash
 node --test p1/host-plugin/test/*.test.mjs
@@ -152,7 +154,7 @@ node --test p1/host-plugin/test/*.test.mjs
 | 断线与卸载 | 退避重连并重新注册；卸载后路由注销、监听移除、不再上行、**不在背后重连** |
 | 端到端（真 Relay） | 配对 → Host WS 注册 → 手机 HTTP 投递 → 适配器 → 响应回程 → 卸载后 Relay 判离线 |
 | **可安装 bundle（3 个）** | 单文件 `bundle/index.js` 独立外连真 Relay、`/__wbsync/status` 如实上报（无 `sessionPersistence` 时 `indexReady:false`）、pair 路由代理真 Relay 出码、wrapper 配置链（默认 ← 文件 ← 环境变量） |
-| **宿主入口适配器（22 个）** | `create` / `prompt` 参数映射、幂等 `requestId`、部分成功语义、服务软探测与缺失 409、**Proxy 抛错回归**、**官方入口优先级 / 服务晚到 / 内部同义入口 / 底层兜底 / 错误原文**、**`cancel` 官方入口 / 同义入口 / 兜底 / 缺参与抛错**、真 Relay 端到端新建会话（src + **bundle 产物**各一例） |
+| **宿主入口适配器（25 个）** | `create` / `prompt` 参数映射、幂等 `requestId`、部分成功语义、服务软探测与缺失 409、**Proxy 抛错回归**、**官方入口优先级 / 服务晚到 / 内部同义入口 / 底层兜底 / 错误原文**、**`cancel` 官方入口 / 同义入口 / 兜底 / 缺参与抛错**、**`uploadAttachment` 的 upload / uploadStream / 未挂载 / 缺参**、真 Relay 端到端新建会话（src + **bundle 产物**各一例） |
 
 宿主侧用两个替身：`createMockCtx()`（只实现三个能力 + 记录装载/拆除）和 `startFakeRelay()`（复用手写的 `upgradeToWebSocket`，可逐帧观察并可主动下发）；回放用假句柄（`read` / `close`）。端到端用例用**真 `createRelay()`**，跑真实配对与鉴权，不用 mock 绕过。
 

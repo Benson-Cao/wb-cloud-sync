@@ -4,6 +4,16 @@
 
 ---
 
+## [P1 W3 续 24] · 2026-11-10 21:1x · 真机缺陷修复：适配器包装层漏转发
+
+- **真机报错**：手机上选文件发送 → `发送失败：上传失败：NO_PROGRESS · Host 处理异常：adapters.uploadAttachment is not a function`，而 `/__wbsync/status` 同时报 `upload:true`、`uploader:"fileUploads.upload"`。
+- **根因**：`src/index.js` 的 `adapters` 是**手写转发对象**（`cfg.X ?? hostAdapters.X` 逐个列出），不是 `createHostAdapters()` 的返回值本身。0.1.8 只在适配器返回对象上加了 `uploadAttachment`，包装层没有对应键 → 下行分派拿到 `undefined`；而 `capabilities()` 直接调 `createHostAdapters()`，所以探测显示正常。**适配器单测通过 ≠ 插件层接线正确**。
+- **修复**：`adapters` 增 `uploadAttachment: cfg.uploadAttachment ?? hostAdapters.uploadAttachment`；新增 `plugin.test.mjs` 用例走 `fileUploads/upload` 下行分派（用 `cfg.uploadAttachment` 覆盖，可同时验证包装层转发）。测试 168 → **169**。
+- 版本 **0.1.9**（`dist/dsh-wb-cloud-sync-host-0.1.9.tgz`）；`build-bundle.mjs --check` 通过；门禁自动项 9/9、`gate: PASS`、快照 `CURRENT`。
+- **部署**：重装 0.1.9 + 重启 DSH 即可；Relay / CP 本轮无改动，**不必重启 Relay、手机也无需重新配对**。
+
+---
+
 ## [P1 W3 续 23] · 2026-11-10 20:5x · 协议 **r3**：附件上行
 
 - **宿主取证**：`fileUploads` 是 cordis 服务（`super(ctx,"fileUploads")`，inject `agents/attachments/commands/connection`），可用入口两条：`upload(agent, {data(base64),name?}, signal)`（第一参是 **Agent 对象**，`@Remote` 由 Typert 解析）与 `uploadStream({sessionId, data: AsyncIterable<Uint8Array>, name?})`。返回 `{receiptId, file:{attachmentId,name,bytes}}`，`receiptId` 只在接收 Agent 作用域内有效。

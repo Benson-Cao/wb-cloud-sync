@@ -331,6 +331,31 @@ test('未注入适配器：回 409 WRITER_UNAVAILABLE，绝不自己追加日志
   }
 })
 
+test('fileUploads/upload 分派到 uploadAttachment 适配器并回 http/response', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  const calls = []
+  try {
+    const plugin = apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true,
+      uploadAttachment: async (args) => { calls.push(args); return { ok: true, value: { receiptId: 'rc-1' } } },
+    })
+    await waitFor(() => plugin.state.connected, '已连接')
+
+    relay.send({
+      t: 'http/request', reqId: 'r-up', method: 'POST',
+      endpoint: 'fileUploads/upload', body: { sessionId: 's-1', data: 'YWJj', name: 'a.txt' },
+    })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '一条回响应')
+    const f = framesOf(relay, 'http/response')[0]
+    assert.deepEqual(f.body.data, { receiptId: 'rc-1' })
+    assert.deepEqual(calls, [{ sessionId: 's-1', data: 'YWJj', name: 'a.txt' }])
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
 test('session/follow 与 session/cancel 分派到各自适配器', async () => {
   const relay = await startFakeRelay()
   const ctx = createMockCtx()
