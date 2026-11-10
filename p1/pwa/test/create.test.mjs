@@ -145,6 +145,29 @@ test('C4 Host 离线（心跳窗口过后）→ 409 HOST_OFFLINE（retryable）'
   assert.equal(r.json.error.retryable, true)
 })
 
+test('C6 客户端 createSession()：宿主异常原文透传，真机不用只靠 code 猜', async () => {
+  const token = await pair('pc-c6')
+  const hostMessage = 'sessions.create: entry already exists'
+  await registerHost('pc-c6', async () => ({
+    status: 409,
+    body: { ok: false, error: { code: 'HOST_ADAPTER_ERROR', message: hostMessage, retryable: false } },
+  }))
+  const client = createPwaClient({ baseUrl: base, deviceId: 'pc-c6', token, reconnectBaseMs: 40 })
+  try {
+    await assert.rejects(
+      () => client.createSession({ text: '' }),
+      (e) => {
+        assert.equal(e.code, 'HOST_ADAPTER_ERROR')
+        assert.equal(e.detail, hostMessage)
+        assert.match(e.message, /entry already exists/)
+        return true
+      },
+    )
+  } finally {
+    client.stop()
+  }
+})
+
 test('C5 客户端 createSession()：返回 sessionId 且列表立刻可见', async () => {
   const token = await pair('pc-c5')
   let createCalls = []

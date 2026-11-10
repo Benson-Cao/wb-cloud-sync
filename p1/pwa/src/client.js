@@ -296,7 +296,13 @@ export function createPwaClient({
     const payload = await r.json().catch(() => null)
     if (!r.ok || payload?.ok !== true) {
       const code = payload?.error?.code ?? `HTTP_${r.status}`
-      throw Object.assign(new Error(`新建会话失败：${code}`), { code })
+      // 宿主适配器的 message 会经 Host http/response → Relay bridge 原样带回。
+      // 真机排障全靠它（0.1.4 只显示 code，HOST_ADAPTER_ERROR 看不出根因）。
+      const detail = typeof payload?.error?.message === 'string' ? payload.error.message : ''
+      throw Object.assign(
+        new Error(`新建会话失败：${code}${detail && detail !== code ? ` · ${detail}` : ''}`),
+        { code, detail },
+      )
     }
     await refreshSessions()
     return payload.data   // { sessionId, ... }

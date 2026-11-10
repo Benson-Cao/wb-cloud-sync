@@ -13,7 +13,7 @@ p1/pwa/
 ├─ public/index.html  # 最小 PWA 壳：配对向导 + 会话列表 + 事件流渲染
 ├─ public/sw.js       # 只缓存应用外壳，业务请求（/api/*、/d/*）网络直连
 ├─ public/manifest.webmanifest / icon.svg
-└─ test/              # 25 用例（client 8 + pairing 8 + create 5 + hmac 4），真实 createRelay() 端到端
+└─ test/              # 26 用例（client 8 + pairing 8 + create 6 + hmac 4），真实 createRelay() 端到端
 ```
 
 `src/client.js` 与 UI 框架无关，`fetchImpl` / `WebSocketImpl` / `now` 全部可注入；
@@ -82,9 +82,9 @@ node --test p1/pwa/test/*.test.mjs       # 或 pnpm --dir p1/pwa test
 - **sw.js 不缓存业务响应**：离线看到旧会话流比空页面更容易误判，数据永远网络优先。
 - **壳更新要刷两次**：SW 缓存名随清单变更递增（`wbsync-shell-v3`）；旧 SW 接管期间第一次刷新仍返回旧壳，后台装好新 SW 并清掉旧缓存后，第二次刷新才拿到新壳。真机联调期如卡住，用无痕窗口或清除站点数据可一步跳过。壳 HTML 已改网络优先，新增模块不会再被旧缓存拖住；`static.test.mjs` S6 会校验清单覆盖页面与 src 模块的传递 import，防止漏缓存。
 
-## 测试（25 用例，真实 Relay 端到端）
+## 测试（26 用例，真实 Relay 端到端）
 
 - `test/pwa.test.mjs`（8 个）：A1 `/api/sessions` 无令牌 / 错令牌 401；A2 配对令牌读索引 + `pinned` 过滤；A3 `/host/indexes` 配置 `adminToken` 后加锁；B1 列表刷新 + 实时事件按序；B2 断线重连带 `lastSeq` 补 dropped 窗口；B3 缓冲起点高于客户端位置 → gap → `session/follow` 回 Host 补齐 → 重订阅续流；B4 Host 硬缺口如实停 `gap`、补齐请求去重有界；B5 `unfollow` / `stop` 清理干净。
 - `test/pairing.test.mjs`（8 个）：正常配对换得可用令牌、错码 `PAIR_CODE_INVALID`、签名篡改 401、challenge 复用拒绝、配对码一次性、**无 WebCrypto 回退路径端到端配对**（`subtle: null` 模拟真机 HTTP 局域网）、回退签名与 `node:crypto` 等价且换得可用令牌、重配对作废旧令牌。
-- `test/create.test.mjs`（5 个）：POST `/api/sessions` 鉴权 401、创建成功后 CP 立即可见引导行（`state:'awaiting'`）、适配器 409 透传且不出幽灵会话、Host 离线（推时钟过 45s 窗口）`HOST_OFFLINE`、客户端 `createSession()` 全链路。
+- `test/create.test.mjs`（6 个）：POST `/api/sessions` 鉴权 401、创建成功后 CP 立即可见引导行（`state:'awaiting'`）、适配器 409 透传且不出幽灵会话、Host 离线（推时钟过 45s 窗口）`HOST_OFFLINE`、**宿主异常原文透传**（`error.code` + `error.message` 都进 `Error`，真机不再只有一个 `HOST_ADAPTER_ERROR`）、客户端 `createSession()` 全链路。
 - `test/hmac.test.mjs`（4 个）：SHA-256 标准向量、RFC 4231 HMAC 向量（case 1–4/6/7）、与 `node:crypto` 交叉验证（UTF-8 / emoji / 长 key / 随机二进制）、与原生 WebCrypto 交叉验证（两条签名路径等价）。

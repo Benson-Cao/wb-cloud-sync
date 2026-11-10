@@ -4,6 +4,17 @@
 
 ---
 
+## [P1 W3 续 18] · 2026-11-10 17:xx · 非协议变更
+
+- **真机 0.1.4 定案**：手机点「新建会话」→ `新建失败：新建会话失败：HOST_ADAPTER_ERROR`；`/__wbsync/status` 的 `downlinks:2` 证明下行帧已到 Host，是适配器里 `sessions.create({cwd})` 抛异常。
+- **续 17 的结论被 asar 取证推翻**：host 侧确有 `SessionController extends Service`，构造 `super(ctx, "sessionController", { namespace: "session" })`；续 17 枚举的是 **client 侧** `reflect.provide`，不能据此断言服务不存在。真机 `sessionController:false` 更可能是它 `static inject` 了 13 个依赖、**注册晚于插件 apply**，而 0.1.4 恰好只在 apply 时做一次性静态快照。
+- **官方新建会话链路（asar 取证）**：`SessionController.create(request) → commands.create → SessionCommandController.create → agents.createSession({cwd, reusable}) → ApiSessionAgentController.createMinted → ctx.agents.create({ sessionId:'session-<uuid>', meta:{cwd}, agentOptions, setup })`，返回 `{sessionId}`。`session/prompt` 的 required 为 `requestId / sessionId / mode / content`，第二参是 signal。`sessions` 其实是 host 侧 **SessionRegistry**（`store / enter / announce / liveEntryFor / fork`），`create` 只建 entry——这就是 0.1.4 抛错的根因；`agents` 是 **AgentRegistry**（`super(ctx,"agents")`），其 `create(options)` 注释即「constructs the agent and its session」。
+- **0.1.5 修法**：① 服务探测改为**每次调用惰性重探**（晚到依赖自动接上）；② 候选按「官方完整语义 → 内部同义 → 底层兜底」排序，`sessions.create` 降末位；③ 返回值归一化支持 `sessionId / agent.id / id`；④ 错误带入口名与返回结构；⑤ status 增报 `probe.boot` / `probe.lateBound`；⑥ PWA 把 `error.message` 透传到屏幕（`client.js` 原先只取 `code`，真机看不到宿主原文）。
+- 新增 7 例（官方入口优先、服务晚到、commands/agents 同义入口、AgentRegistry 底层兜底、错误原文、prompt 优先级、PWA 错误透传）；测试 143 → **150**，版本 **0.1.5**（`dist/dsh-wb-cloud-sync-host-0.1.5.tgz`）。
+- **教训**：静态枚举一个运行时的**局部**服务表，不等于证明全局没有该服务；启动期快照对晚注册依赖是致命的，能力探测必须放到调用点。
+
+---
+
 ## [P1 W3 续 17] · 2026-11-10 16:5x · 非协议变更
 
 - **0.1.3 真机诊断到位但仍 409**：`probe` 报 `hasGet/hasInject/hasRoot:true`、`keys:["fiber"]`，`controller` 仍 false。

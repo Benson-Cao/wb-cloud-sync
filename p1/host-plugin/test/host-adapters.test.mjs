@@ -155,6 +155,90 @@ test('HA12 capabilities 列出整张服务表（真机排查用）', async () =>
   assert.equal(caps.writer, 'sessionController.create')
 })
 
+test('HA13 真机 0.1.4 回归：sessionController 与 sessions 同时在时必须选官方入口', async () => {
+  const calls = []
+  const ctx = {
+    sessionController: {
+      create: async (r) => { calls.push(['controller', r]); return { sessionId: 'session-official' } },
+    },
+    sessions: {
+      create: async () => { calls.push(['sessions']); throw new Error('SessionRegistry entry 不接受这个 request') },
+    },
+    agents: {
+      create: async () => { calls.push(['agents']); return { agent: { id: 'x' } } },
+    },
+  }
+  const adapters = createHostAdapters(ctx)
+  assert.equal(adapters.capabilities().writer, 'sessionController.create')
+  const r = await adapters.createSession({ cwd: 'D:/pwa' })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.sessionId, 'session-official')
+  assert.deepEqual(calls, [['controller', { cwd: 'D:/pwa' }]], '绝不能落到低层 sessions.create')
+})
+
+test('HA14 惰性探测：apply 时缺席、晚到的服务也能接上', async () => {
+  const late = {}
+  const adapters = createHostAdapters(late)
+  assert.equal(adapters.capabilities().controller, false)
+  late.sessionController = { create: async () => ({ sessionId: 'session-late' }) }
+  const caps = adapters.capabilities()
+  assert.equal(caps.controller, true)
+  assert.equal(caps.writer, 'sessionController.create')
+  assert.deepEqual(caps.probe.lateBound, ['sessionController'])
+  assert.equal(caps.probe.boot.sessionController, false)
+  assert.equal((await adapters.createSession({})).value.sessionId, 'session-late')
+})
+
+test('HA15 sessionController 内部同义入口：commands.create / agents.createSession', async () => {
+  const viaCommands = createHostAdapters({ sessionController: {
+    commands: { create: async (r) => ({ sessionId: `session-${r.cwd ?? 'default'}` }) },
+  } })
+  assert.equal(viaCommands.capabilities().writer, 'sessionController.commands.create')
+  assert.equal((await viaCommands.createSession({ cwd: 'D:/c' })).value.sessionId, 'session-D:/c')
+
+  const viaAgents = createHostAdapters({ sessionController: {
+    agents: { createSession: async (o) => ({ agent: { id: 'session-inner' }, agentPreset: o.agentPreset }) },
+  } })
+  assert.equal(viaAgents.capabilities().writer, 'sessionController.agents.createSession')
+  assert.equal((await viaAgents.createSession({})).value.sessionId, 'session-inner')
+})
+
+test('HA16 AgentRegistry.create 底层兜底：自铸 session-<uuid> + meta.cwd', async () => {
+  const calls = []
+  const ctx = { agents: {
+    create: async (o) => { calls.push(o); return { agent: { id: o.sessionId } } },
+  } }
+  const adapters = createHostAdapters(ctx, { randomId: () => 'fixed-uuid' })
+  assert.equal(adapters.capabilities().writer, 'agents.create')
+  const r = await adapters.createSession({ cwd: 'D:/w' })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.sessionId, 'session-fixed-uuid')
+  assert.equal(calls[0].sessionId, 'session-fixed-uuid')
+  assert.equal(calls[0].meta.cwd, 'D:/w')
+})
+
+test('HA17 只剩低层 sessions 时也不静默：错误带入口名与宿主原文', async () => {
+  const ctx = { sessions: { create: async () => { throw new Error('entry already exists') } } }
+  const r = await createHostAdapters(ctx).createSession({})
+  assert.equal(r.code, 'HOST_ADAPTER_ERROR')
+  assert.match(r.message, /sessions\.create/)
+  assert.match(r.message, /entry already exists/)
+  const noId = await createHostAdapters({ sessions: { create: async () => ({ foo: 1 }) } }).createSession({})
+  assert.match(noId.message, /未返回 sessionId/)
+  assert.match(noId.message, /foo/, '把返回结构带回来，真机不用再猜一轮')
+})
+
+test('HA18 官方 prompt 优先于 agents.followup', async () => {
+  const calls = []
+  const ctx = {
+    sessionController: { prompt: async () => { calls.push('official'); return { accepted: true } } },
+    agents: { get: () => ({ followup: () => { calls.push('followup') } }) },
+  }
+  const r = await createHostAdapters(ctx).submitPrompt({ sessionId: 's', text: 'hi' })
+  assert.equal(r.ok, true)
+  assert.deepEqual(calls, ['official'])
+})
+
 test('HA6 create 抛错 / 未返回 sessionId → HOST_ADAPTER_ERROR', async () => {
   const thrown = createHostAdapters({ sessionController: { create: async () => { throw new Error('workspace gone') } } })
   const a = await thrown.createSession({})

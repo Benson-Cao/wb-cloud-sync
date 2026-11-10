@@ -4,7 +4,7 @@
 
 ## 安装
 
-DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.4.tgz`（由本目录 `npm pack` 产出）。
+DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.5.tgz`（由本目录 `npm pack` 产出）。
 
 ## 配置（缺省即可本机试跑）
 
@@ -20,11 +20,24 @@ PC 浏览器地址栏打开 `http://127.0.0.1:<DSH端口>/__wbsync/pair` 生成 
 端口是动态的，用 `netstat -ano | findstr <DSH进程PID>` 查 LISTENING 行），手机在
 `http://<局域网IP>:8787/app` 输码配对。
 
-## 宿主入口（0.1.2 起）
+## 宿主入口（0.1.5 定案）
 
-插件软探测 `sessionController`：`create()` 负责新建会话、`prompt()` 负责发第一句话与后续投递
-（`clientMsgId` → `requestId`，宿主原生幂等）。**绝不 `open(id,'write')`**。服务缺失时相关操作
-如实回 409 `WRITER_UNAVAILABLE`；取消入口未取证，暂保持 409。
+每次调用**惰性重探**宿主服务（0.1.4 的启动期静态快照会漏掉晚注册依赖），按官方完整语义排序：
+
+1. `sessionController.create({cwd})` —— `SessionController extends Service`，
+   `super(ctx,"sessionController")`，官方「新建会话 + 侧栏可见」入口；
+2. `sessionController.commands.create` / `sessionController.agents.createSession` —— 同义内部入口；
+3. `agents.create({ sessionId, meta:{cwd} })` —— `AgentRegistry` 底层兜底，自铸 `session-<uuid>`；
+4. `sessions.create` —— host 侧 **SessionRegistry** 的低层 entry 创建，末位；真机 0.1.4 已证实会抛
+   `HOST_ADAPTER_ERROR`，保留只为如实报错。
+
+`sessionController.prompt(request, signal)` 负责发第一句话与后续投递（`clientMsgId` →
+`requestId`，宿主原生幂等）。**绝不 `open(id,'write')`**。服务缺失时相关操作如实回 409
+`WRITER_UNAVAILABLE`；取消入口未取证，暂保持 409。
+
+真机自检：PC 浏览器打开 `http://127.0.0.1:<DSH端口>/__wbsync/status`，看 `writer` / `messenger`
+与 `writer.probe`（含 `boot` 启动期快照、`lateBound` 晚到服务、逐服务 `methods` / `errors`）。
+手机端新建失败时会把宿主异常原文一并显示，不再只有一个 `HOST_ADAPTER_ERROR`。
 
 ## 铁律（与源码一致）
 
