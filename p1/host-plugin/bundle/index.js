@@ -500,11 +500,14 @@ const cancelEntry = (services) => {
  */
 const uploadEntry = (services) => {
   const f = services.fileUploads
-  if (typeof f?.upload === 'function' && typeof services.agents?.get === 'function') {
-    return { svc: f, name: 'fileUploads', kind: 'upload' }
-  }
+  // 优先 uploadStream：它吃 sessionId，内部用 SessionController 注册的 resolver 解析**冷会话**；
+  // upload(agent, …) 要求调用方自己给出已挂载的 live Agent，空会话 `agents.get()` 会是 undefined
+  // （真机 0.1.9 实测：新建的空会话上传报 `会话未挂载`）。
   if (typeof f?.uploadStream === 'function') {
     return { svc: f, name: 'fileUploads', kind: 'uploadStream' }
+  }
+  if (typeof f?.upload === 'function' && typeof services.agents?.get === 'function') {
+    return { svc: f, name: 'fileUploads', kind: 'upload' }
   }
   return null
 }

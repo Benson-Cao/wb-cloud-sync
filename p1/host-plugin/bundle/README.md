@@ -4,7 +4,7 @@
 
 ## 安装
 
-DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.9.tgz`（由本目录 `npm pack` 产出）。
+DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.10.tgz`（由本目录 `npm pack` 产出）。
 
 ## 配置（缺省即可本机试跑）
 
@@ -49,9 +49,10 @@ PC 浏览器地址栏打开 `http://127.0.0.1:<DSH端口>/__wbsync/pair` 生成 
 `canceller` 与 `writer.probe`（含 `boot` 启动期快照、`lateBound` 晚到服务、逐服务 `methods` / `errors`）。
 手机端新建 / 取消失败时会把宿主异常原文一并显示，不再只有一个错误码。
 
-**附件上行（0.1.8 / 协议 r3）**：`fileUploads/upload` 下行 → 适配器 `uploadAttachment`。
-优先 `fileUploads.upload(agent, { data(base64), name? }, signal)`（第一参是 **Agent 对象**，由 `agents.get(sessionId)` 取），
-回退 `uploadStream({ sessionId, data: AsyncIterable<Uint8Array>, name? })`；返回 `{ receiptId, file }`。
+**附件上行（0.1.8 / 协议 r3，0.1.10 修入口顺序）**：`fileUploads/upload` 下行 → 适配器 `uploadAttachment`。
+**优先 `fileUploads.uploadStream({ sessionId, data: AsyncIterable<Uint8Array>, name? })`**——它吃 sessionId，
+内部用 `SessionController` 注册的 resolver 解析**冷会话**；`upload(agent, { data, name? }, signal)` 第一参是
+**Agent 对象**，只在 `uploadStream` 缺失时作为次选（空会话 `agents.get()` 会是 `undefined`）。返回 `{ receiptId, file }`。
 `receiptId` 只在接收 Agent 作用域内有效，须与同一会话的 `session/prompt` 一起用。
 
 > **接线注意（0.1.9 修复的真机缺陷）**：`src/index.js` 的 `adapters` 是手写转发对象，

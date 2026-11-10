@@ -4,6 +4,16 @@
 
 ---
 
+## [P1 W3 续 25] · 2026-11-10 21:1x · 真机缺陷修复：优先 uploadStream 解冷会话
+
+- **真机报错（装 0.1.9 之后）**：`发送失败：上传失败：HOST_ADAPTER_ERROR · 会话未挂载，无法上传：session-8d339315-…`（21:10 创建的空会话）。
+- **根因**：0.1.9 把 `fileUploads.upload` 排在首位，而 `upload(agent, request, signal)` 的**第一参要求调用方给出已挂载的 live Agent**；空会话 `agents.get(sessionId)` 返回 `undefined`。宿主的 `uploadStream({sessionId, …})` 正是为冷会话设计——内部 `resolveAgent` 走 `SessionController` 注册的 resolver。
+- **修复**：`uploadEntry` 改为**优先 `uploadStream`**，`upload(agent, …)` 降为次选（仅当 `uploadStream` 缺失）；`capabilities.uploader` 真机应显示 `fileUploads.uploadStream`。新增 HA25（两入口都在、且 `agents.get()` 为 `undefined` 时必须仍能成功）。
+- 测试 169 → **170**；版本 **0.1.10**；`build-bundle.mjs --check` 通过；门禁自动项 9/9、`gate: PASS`、快照 `CURRENT`。
+- **部署**：重装 0.1.10 + 重启 DSH；Relay / CP 无改动，不需重启 Relay、手机无需重新配对。
+
+---
+
 ## [P1 W3 续 24] · 2026-11-10 21:1x · 真机缺陷修复：适配器包装层漏转发
 
 - **真机报错**：手机上选文件发送 → `发送失败：上传失败：NO_PROGRESS · Host 处理异常：adapters.uploadAttachment is not a function`，而 `/__wbsync/status` 同时报 `upload:true`、`uploader:"fileUploads.upload"`。

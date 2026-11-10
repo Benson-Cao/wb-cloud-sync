@@ -345,6 +345,22 @@ test('HA24 submitPrompt 带 attachments：content 里出现 file receiptId', asy
   assert.match((await createHostAdapters(ctx).submitPrompt({ sessionId: 's-24' })).message, /缺 text/)
 })
 
+test('HA25 两个入口都在时优先 uploadStream：冷会话由宿主自行 resolve', async () => {
+  const seen = []
+  const adapters = createHostAdapters({
+    fileUploads: {
+      upload: async () => { throw new Error('不应走到 upload(agent)：空会话没有 live Agent') },
+      uploadStream: async (req) => { seen.push(req.sessionId); return { receiptId: 'rc-25', file: { bytes: 1 } } },
+    },
+    agents: { get: () => undefined },   // 冷会话：agents.get() 拿不到
+  })
+  assert.equal(adapters.capabilities().uploader, 'fileUploads.uploadStream')
+  const r = await adapters.uploadAttachment({ sessionId: 'cold-1', data: 'YWJj' })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.receiptId, 'rc-25')
+  assert.deepEqual(seen, ['cold-1'])
+})
+
 test('HA6 create 抛错 / 未返回 sessionId → HOST_ADAPTER_ERROR', async () => {
   const thrown = createHostAdapters({ sessionController: { create: async () => { throw new Error('workspace gone') } } })
   const a = await thrown.createSession({})
