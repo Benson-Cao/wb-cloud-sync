@@ -149,8 +149,9 @@ console.log(a.fileCount, a.dataStart);
 console.log(a.list(/remote|connect|pair|device|mobile/i).filter(f=>/\.js$/.test(f.path)).length);
 "
 
-# 本轮文档修订复跑（带「每处恰好 1 次命中」断言 + 原文备份）
-node scripts/apply-workbuddy-revisions.mjs --dry-run
+# 本轮修订脚本为一次性执行（已落盘），再跑会因命中 0 次而 ABORT；改动用提交或备份目录复核
+git show --stat d4f02cb
+ls .revisions-backup-workbuddy/repo/
 
 # 协议单向同步与门禁
 node scripts/sync-protocol.mjs

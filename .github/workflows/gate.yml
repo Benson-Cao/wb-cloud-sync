@@ -49,3 +49,7 @@ jobs:
       # 不应让 CI 因开发者机器差异而失败。
       - name: 构建链环境自检（记录，不阻断）
         run: node scripts/check-env.mjs
+
+      # 会签就绪终检：输出待签清单与 P1 前置，报告型，不阻断 CI。
+      - name: 会签就绪终检（记录，不阻断）
+        run: node scripts/signoff-check.mjs --no-write

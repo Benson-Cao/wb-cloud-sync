@@ -8,31 +8,34 @@
 **自动项 9/9 PASS；P0 唯一剩余硬阻塞是「会签」。** 会签完成前不得进入 P1 编码（`01` §9 / `05` W1）。
 当前门禁状态：`BLOCKED_BY_SIGNOFF`。
 
-## 零、剩余工作盘点（2026-11-10 08:1x 复核）
+## 零、剩余工作盘点（2026-11-10 08:5x 复核）
 
-**仓库状态**（2026-11-10 复核）：工作区干净；门禁快照按 `PROTOCOL.md` 变更重算为 `CURRENT`。本轮新增 WorkBuddy 对标复核与 `wbsync/1 r2` 修订（新增 ADR-010），详见 `WORKBUDDY-REFERENCE.md` 与 `CHANGELOG.md`。
+**仓库状态**（2026-11-10 复核）：工作区干净；门禁快照 `CURRENT`（9/9 PASS）、`wbsync/1 r2` 已推送 `d4f02cb`、CI 绿灯。本轮（r2 后续）清掉了旧口径残留、闭环 M6b、新增会签就绪终检；详见 `WORKBUDDY-REFERENCE.md`、`CHANGELOG.md` 与 `scripts/signoff-check.mjs`。
 
 | 层级 | 已完成 | 剩余 | 阻塞性质 |
 |---|---|---|---|
 | **P0 自动项** | **9/9 PASS**（G1~G9，含 G9 解包比对） | **0** | — |
-| **P0 人工项** | M6a CI 接入 MET | **M1 四方会签 + M2~M4 / M7 四个 ADR + M5 安全一票否决**（本质是**一次会签**）、**M6b 本地构建链** | 人签字 / 本机环境 |
+| **P0 人工项** | M6a CI 接入 MET、**M6b 本地构建链 5/5 READY** | **M1 四方会签 + M2~M4 / M7 四个 ADR + M5 安全一票否决**（本质是**一次会签**） | 人签字 |
 | **P1 MVP（W3–W6）** | 0 | **全部**：Relay 骨架、CP、配对、事件透传、幂等 prompt、队列、PWA 骨架、M1 验收 | 会签前**禁止启动**（01 §9 / 05 W1） |
 | **P2（W7–W9）** | 0 | 全部 | 同上 |
 | **P3（W10–W12）** | 0 | 全部 | 同上 |
 
-**量化结论**：P0 的技术验证、文档链路与 CI 闸门 **100% 完成**；P0 只剩 **1 次会签 + 1 项本机环境**；P1–P3 共 **10 周工作量一行代码未动，且按规程不得提前动**。本轮（11-10 对标复核）在会签前新增 ADR-010，会签项由 3 个 ADR 增至 4 个，仍属同一次会签。
+**量化结论**：P0 的技术验证、文档链路、CI 闸门与本机构建链 **100% 完成**；P0 只剩 **1 次会签**（四方 + ADR-007~010）；P1–P3 共 **10 周工作量一行代码未动，且按规程不得提前动**。11-10 对标复核在会签前新增 ADR-010，会签项由 3 个 ADR 增至 4 个，仍属同一次会签。
 
-**M6b 现状**（`node scripts/check-env.mjs`，只读自检，**2/5**）：
+**M6b 现状**：`node scripts/check-env.mjs --check` → **5/5 `READY`，exit 0**（证据 `spike/evidence/env-check.json`，schema `wbsync-env-check/2`）。
 
-| 检查 | 结果 |
-|---|---|
-| E1 构建链 Node ≥24.9 | **FAIL** · v22.22.2 |
-| E2 pnpm 11.x | **FAIL** · 未装 |
-| E3 Corepack | **PASS** · shim 存在（沙箱内读不到版本，Bash 侧实测 0.34.6） |
-| E4 `NODE_OPTIONS` 无 strip-types 守卫 | **PASS** |
-| E5 `dsh` CLI 在 PATH | **FAIL** |
+| 检查 | 结果 | 依据 |
+|---|---|---|
+| E1 构建链 Node ≥24.9 | **PASS** | 隔离工具链 **v24.22.2**（当前进程仍是 WorkBuddy 自带的 22.22.2） |
+| E2 pnpm 11.x | **PASS** | 隔离工具链 **11.28.11** |
+| E3 Corepack | **PASS** | PATH shim 存在（0.34.6） |
+| E4 `NODE_OPTIONS` 无 strip-types 守卫 | **PASS** | 当前环境变量 |
+| E5 DSH 插件安装通道 | **PASS** | 桌面版 GUI 插件管理器 + 11-07 真机加载快照 `errors=[]` |
 
-> 注意区分：**DSH 宿主进程内 Node 是 24.21.0**（11-07 真机探针证据），未达标的是**命令行构建链**；CI 已用 Node 24。两者不是一回事。
+- 工具链位置 `../.wbsync-tools/`（**仓库外、不入库**），Node 24 LTS 的 SHA256 与官方 `SHASUMS256.txt` 核对一致；**未覆盖系统 Node、未改全局 PATH**。`source scripts/toolchain-env.sh` 只在当前 shell 前置 PATH。
+- 已用 Node 24 实跑整条链：`sync-protocol --check`、`gate-check --check --assert-fresh`（9/9）、`check-plugin`（PASS）、`npm pack --dry-run`、`check-env --check`（5/5）全绿。
+- **E5 判据修正**：桌面版 DSH 没有独立 `dsh` CLI，真机插件经 GUI 插件管理器安装并成功加载；原「dsh CLI 在 PATH」判据过窄，改为「插件安装通道可用」，以真机加载快照作通道证据（历史证据，仅证明链路存在，不证明当前仍装着我们这个插件）。依据写进 `env-check.json` 的 `basis` 字段，可复核。
+- 三分注意区分：当前进程 Node 22.22.2 / 隔离构建链 24.22.2 / DSH 宿主进程 24.21.0（11-07 历史证据），三者不是一回事。
 
 ## 一、自动核查（可复跑，无需人工判断）
 
@@ -59,12 +62,24 @@
 | M3 | ADR-008 幂等与写入权归宿主 | 提议中，待会签 | ARC + PM |
 | M4 | ADR-009 `PROTOCOL.md` 为唯一契约源 | 提议中，待会签 | ARC |
 | M5 | 安全项一票否决权行使（`08` / `01` §6，见 §六） | 待安全 Owner · 只看 `SECURITY-REVIEW.md` | 安全 Owner |
-| M6a | CI 闸门接入（GitHub Actions · `gate.yml`） | **MET** · run `42366496926` success | HE-A + BE-RL |
-| M6b | 本地构建链 Node ≥24.9 + pnpm 11 | **NOT MET · 2/5**（详见 §零） | HE-A + BE-RL |
+| M6a | CI 闸门接入（GitHub Actions · `gate.yml`） | **MET** · `d4f02cb` run `42730257252` success | HE-A + BE-RL |
+| M6b | 本地构建链 Node ≥24.9 + pnpm 11 | **MET · 5/5 READY**（详见 §零） | HE-A + BE-RL |
 | M7 | ADR-010 正文可见性边界（信任边界，安全 Owner 必看） | 提议中，待会签 | ARC + 安全 Owner |
 
-> M6a 已完成：CI 用 Node 24，跑 `sync-protocol --check` → `gate-check --check --assert-fresh` → `check-plugin` → `npm pack --dry-run`，commit `bcefdf5` 首次绿灯（5 秒）。
-> M6b 不阻塞会签，但阻塞 P1 本地构建。注意 **DSH 进程内 Node 已是 24.21.0**，未达标的是命令行构建链，两者不要混。
+> M6a 已完成：CI 用 Node 24，跑 `sync-protocol --check` → `gate-check --check --assert-fresh` → `check-plugin` → `npm pack --dry-run`；`d4f02cb` 的 run `42730257252` 共 11 步全 success。
+> M6b 已完成：隔离工具链 5/5 READY，不阻塞 P1 本地构建。会签终检命令：`node scripts/signoff-check.mjs`。
+
+### P1 开工前置清单（本阶段不代签，会签时须显式确认裁定人）
+
+`spike/REPORT.md` §6 标为「仍未解决」的三项，裁定权属于会签后的 ARC / 安全 Owner，**不属 P0 自动项**，也不由本轮擅自改契约：
+
+| 编号 | 缺口 | 为何 P0 不定 | 建议裁定人 / 时点 |
+|---|---|---|---|
+| #2 | `pairSecret` 的生成、分发与账号绑定未定义（`04` §5.1 时序里凭空出现） | 涉及信任边界与密钥分发，须安全 Owner 参与；贸然写死会锁死实现 | ARC + 安全 Owner · W3 详细设计前 |
+| #3 | 配对状态在 CP / Relay / Host 本地三处归属未定权威 | 决定鉴权真源，属架构决策，需 ADR | ARC · W3 详细设计前 |
+| #4 | `allowedEndpoints` 只有 `session/*`、`$events/*`，FR-6 附件/产物与 FR-7 定时任务端点无归属 | `08` §5 规定新增端点必须走 ADR + 白名单评审，且附件上传是写能力 | ARC + 安全 Owner · W3 详细设计前 |
+
+> 这三项**不阻塞 P0 会签，但阻塞 W3 编码**；会签时请在签署栏备注写明裁定人与截止时点，避免「签完就开工」时才发现契约空白。
 
 ## 三、会签依据索引
 
@@ -146,5 +161,5 @@ Get-NetTCPConnection -State Listen | Where-Object {
 
 - 协议字段变更必须 **ARC 会签**；安全争议由 **安全 Owner 一票否决**（`01` §6 / `05` RACI）。
 - **结论必须回写 ADR 或协议文档**，只在大群里说不算决策（`05` §4）。
-- 会签后：把 `01` §9 的四行「待签」改为签署状态 → 四个 ADR（007~010）状态改为「已接受」→ `CHANGELOG.md` 记一条 → 重跑 `node scripts/gate-check.mjs` 留档。
+- 会签后：把 `01` §9 的四行「待签」改为签署状态 → 四个 ADR（007~010）状态改为「已接受」→ `CHANGELOG.md` 记一条 → 跑 `node scripts/signoff-check.mjs` 与 `node scripts/gate-check.mjs` 留档 → 先裁定上表 #2/#3/#4，才按 `05` W3 进入 P1 编码。
 - 全部完成后才按 `05` W3 进入 P1 编码。

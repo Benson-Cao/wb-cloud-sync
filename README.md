@@ -147,10 +147,13 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 ├─ docs/                        # 设计冻结包（11 份，含 ADR-007~010）
 ├─ scripts/
 │  ├─ gate-check.mjs            # P0 门禁自动核查（--check 供 CI，输出证据快照）
-│  ├─ check-env.mjs             # 构建链环境自检（只读，M6b）
+│  ├─ check-env.mjs             # M6b 构建链自检（含隔离工具链探测）
 │  ├─ lib/tar.mjs               # 零依赖 tar 解析（G9 解包比对）
 │  ├─ sync-protocol.mjs         # ADR-009：生成 PROTOCOL.md + --check CI 校验
 │  ├─ apply-workbuddy-revisions.mjs # r2 对标复核修订（带断言与备份）
+│  ├─ apply-r2-followups.mjs    # r2 遗留口径与 M6b 结论收口（带断言）
+│  ├─ toolchain-env.sh          # source 后前置隔离 Node 24 / pnpm 11
+│  ├─ signoff-check.mjs         # 会签就绪终检（一条命令出签字清单）
 │  ├─ apply-spike-revisions.mjs # v1.0→v1.1 文档修订（带断言与原文备份）
 │  └─ apply-realdevice-updates.mjs # 真机结论回填（3 处，带断言）
 ├─ spike/
@@ -174,9 +177,9 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 | Q2 不经写句柄提交用户消息 | PASS | 宿主 `dsh-api-session-controller.prompt(request)` + `requestId` 原生幂等 + `SessionAlreadyOwnedError` 单写者 |
 | Q3 枚举与只读回放 | PASS | `list()` / `open(id,access)` / `persistContiguous`；`sinceSeq=400` 补齐 266/266 |
 
-**P0 门禁**：三问离线 PASS、上游 commit 已锁定（`66491b0…`）、`04` 已按 D-01~D-07 修订为 `wbsync/1 r1`；**仍待真机加载验证 + 四方会签**（ADR-007~009 均为「提议中」），完成前不得进入 P1 编码。详见 `spike/REPORT.md` §5。
+**P0 门禁**：三问离线 PASS、真机加载 + 运行时事件闭环 8/8 PASS、上游 commit 锁定（`66491b0…`）、`04` 已修订至 `wbsync/1 r2`（含 WorkBuddy 对标复核）、自动项 9/9、快照 `CURRENT`、M6b 构建链 5/5 `READY`。**唯一剩余硬阻塞是四方会签**（ADR-007~010 均为「提议中」），完成前不得进入 P1 编码。详见 `SIGN-OFF.md` 与 `spike/REPORT.md` §5。
 
-`docs/` 是设计冻结包 v1.1 的发布副本，唯一契约源是 `docs/04`；根 `PROTOCOL.md` 由脚本单向生成，字段变更须在同一 PR 同时改 `04` + `PROTOCOL.md` + `CHANGELOG.md`（06 §9 / ADR-009）。
+`docs/` 是设计冻结包的发布副本（含 v1.1 Spike 实测修订与 `wbsync/1 r2` 对标复核），唯一契约源是 `docs/04`；根 `PROTOCOL.md` 由脚本单向生成，字段变更须在同一 PR 同时改 `04` + `PROTOCOL.md` + `CHANGELOG.md`（06 §9 / ADR-009）。对标偏差与依据见 `WORKBUDDY-REFERENCE.md`。
 
 ---
 
@@ -188,6 +191,17 @@ node spike/check-plugin.mjs    # 隔离临时 DSH_HOME，不碰真实 ~/.dsh
 ```
 
 `probe-host.mjs` 只读本机 Electron 发行包与真实会话日志，**不写入任何会话数据**。所有输出只含结构元数据，不含事件正文、文件内容或令牌。
+
+### 本地构建链（M6b，已 READY）
+
+```bash
+source scripts/toolchain-env.sh   # 只在当前 shell 前置 PATH，不改系统环境变量
+node -v                          # v24.22.2
+pnpm -v                         # 11.28.11
+node scripts/check-env.mjs --check   # 5/5 READY，exit 0
+```
+
+工具链装在工作区级 `../.wbsync-tools/`（仓库外、不入库），Node 24 LTS 的 SHA256 已与官方 `SHASUMS256.txt` 核对一致；**不覆盖系统 Node、不改全局 PATH**。CI 另用 `actions/setup-node` 24，不依赖本机工具链。
 
 ---
 

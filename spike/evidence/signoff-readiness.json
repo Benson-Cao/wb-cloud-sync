@@ -1,0 +1,104 @@
+{
+  "schema": "wbsync-signoff-readiness/1",
+  "capturedAt": "2026-11-10T00:57:44.616Z",
+  "verdict": "READY_FOR_SIGNOFF",
+  "note": "SIGNED_OFF 需人工把 01 §9 与四个 ADR 状态改为已接受；脚本不代签，也不因未签字返回非 0。engineering 字段读自入库的本机证据，不代表当前 CI 环境",
+  "engineering": {
+    "currentHead": "d4f02cba8384cbca96bf676134a33c6520510c84",
+    "worktreeClean": false,
+    "automated": "9/9",
+    "automatedOk": true,
+    "snapshotStatus": "CURRENT",
+    "snapshotCapturedAt": "2026-11-10T00:57:44.029Z",
+    "snapshotGitHead": "d4f02cba8384cbca96bf676134a33c6520510c84",
+    "snapshotOk": true,
+    "envVerdict": "READY",
+    "envPassed": "5/5",
+    "envToolchain": {
+      "node": "v24.22.2",
+      "pnpm": "11.28.11"
+    },
+    "envOk": true,
+    "securityReviewItem5": true,
+    "workbuddyReference": true
+  },
+  "signatures": {
+    "pending": 4,
+    "roles": [
+      "发起人 / PM",
+      "架构师",
+      "安全 Owner",
+      "QA Owner"
+    ],
+    "source": "docs/01_项目章程.md §9"
+  },
+  "adrs": [
+    {
+      "id": "ADR-001",
+      "status": "已接受",
+      "accepted": true
+    },
+    {
+      "id": "ADR-002",
+      "status": "已接受",
+      "accepted": true
+    },
+    {
+      "id": "ADR-003",
+      "status": "已接受",
+      "accepted": true
+    },
+    {
+      "id": "ADR-004",
+      "status": "已接受",
+      "accepted": true
+    },
+    {
+      "id": "ADR-005",
+      "status": "已接受",
+      "accepted": true
+    },
+    {
+      "id": "ADR-006",
+      "status": "已接受（v1）",
+      "accepted": true
+    },
+    {
+      "id": "ADR-007",
+      "status": "提议中（待 ARC + PM 会签）",
+      "accepted": false
+    },
+    {
+      "id": "ADR-008",
+      "status": "提议中（待 ARC + PM 会签）",
+      "accepted": false
+    },
+    {
+      "id": "ADR-009",
+      "status": "提议中（待 ARC 会签）",
+      "accepted": false
+    },
+    {
+      "id": "ADR-010",
+      "status": "提议中（待 ARC + 安全 Owner 会签）",
+      "accepted": false
+    }
+  ],
+  "pendingAdrs": [
+    "ADR-007",
+    "ADR-008",
+    "ADR-009",
+    "ADR-010"
+  ],
+  "p1Prereqs": {
+    "count": 3,
+    "source": "SIGN-OFF.md §二 · P1 开工前置清单",
+    "items": [
+      "#2 pairSecret 生成/分发/账号绑定",
+      "#3 配对状态三处权威归属",
+      "#4 allowedEndpoints 覆盖 FR-6/FR-7"
+    ],
+    "note": "裁定权属于会签后的 ARC / 安全 Owner；会签时须在签署栏写明裁定人与 W3 前截止时点"
+  },
+  "nextStep": "四方会签（一次会议即可）：先看 SECURITY-REVIEW.md 五项，再签 ADR-007~010；签完按 SIGN-OFF.md §七 收尾"
+}

@@ -10,7 +10,7 @@
 ## 0. 一句话结论
 
 **「手机发的那句话能不能交给宿主 owner」——能，而且宿主已经把幂等和单写者都做好了。**
-三问离线取证全 PASS；据 D-01~D-07 已完成设计冻结包 v1.1 修订（10 份文档 / 34 处 + ADR-007~009）、上游 commit 锁定、可安装 bundle 发布。**P0 门禁仍差真机加载验证与四方会签**，完成前不得进入 P1 编码（详见 §5、§7）。
+三问离线取证全 PASS；据 D-01~D-07 已完成设计冻结包 v1.1 修订（10 份文档 / 34 处 + ADR-007~009）、上游 commit 锁定、可安装 bundle 发布；**真机加载、运行时事件闭环与卸载残留均已 PASS**（§4.1.2 / §4.1.3）。2026-11-10 追加 `wbsync/1 r2` 对标复核与 ADR-010（`WORKBUDDY-REFERENCE.md`）。**P0 门禁只剩四方会签**，完成前不得进入 P1 编码（详见 §5、§7 与 `SIGN-OFF.md`）。
 
 ---
 
@@ -154,10 +154,10 @@ curl --noproxy '*' -s http://127.0.0.1:50973/__wbsync/spike | grep -A4 eventShap
 
 | 门禁项 | 判定 | 说明 |
 |---|---|---|
-| 文档会签完成 | **NOT MET** | `01` §9 会签表四方均「待签」；v1.1 修订稿 + ADR-007~009（「提议中」）待会签 |
+| 文档会签完成 | **NOT MET** | `01` §9 会签表四方均「待签」；v1.1 修订稿 + `wbsync/1 r2` + ADR-007~010（均「提议中」）待会签 |
 | W1 Spike 通过 | **PASS** | 三问离线取证 + 真机加载 + **运行时事件闭环**全 PASS（§4.1 / §4.1.2）；卸载后 404 转入 M1 验收 TC-4.10 |
 | pinned commit 锁定 | **MET** | `upstream_commit=66491b05…`（tag `dsh-v0.2.2-rc.1`），tag / commit / package.json 三重交叉验证；另保留 asar SHA256 作二进制指纹 |
-| 协议冻结 | **待会签** | 04 已按 D-01~D-07 修订为 `wbsync/1 r1`，`PROTOCOL.md` 单向同步 + CHANGELOG 齐备；ADR-007~009 仍为「提议中」 |
+| 协议冻结 | **待会签** | 04 已修订至 `wbsync/1 r2`（r1 按 D-01~D-07 实测澄清，r2 按 WorkBuddy 对标补状态枚举与正文可见性边界），`PROTOCOL.md` 单向同步 + CHANGELOG 齐备；ADR-007~010 仍为「提议中」 |
 
 > **结论：W1 Spike 三问 PASS，TC-4.10 真机卸载残留亦 PASS（§4.1.3）**，P0 只剩「四方会签 + ADR 会签」一项硬阻塞。按 01 §9，会签完成前仍不得进入 P1 编码。
 
@@ -175,18 +175,19 @@ curl --noproxy '*' -s http://127.0.0.1:50973/__wbsync/spike | grep -A4 eventShap
 | #6 PROTOCOL.md 唯一性 | **已修复（ADR-009 提议中）**：根 `PROTOCOL.md` 为 04 的单向同步发布副本，`sync-protocol.mjs --check` 供 CI 校验 |
 
 > 另新增 D-07（`surfaceOp` / `sourceEventSeqs` 真实语义）已写入 04 §3 与 ADR-007。
+> **#2 / #3 / #4 的裁定权属于会签后的 ARC 与安全 Owner**（配对密钥涉及信任边界、白名单涉及 `08` §5 权限评审），本阶段不代签、不擅自改契约；三项已提升为 `SIGN-OFF.md` §二的「P1 开工前置清单」，会签时须显式确认由谁在 W3 前裁定。
 
 ---
 
 ## 7. 下一步（按优先级）
 
-**已完成**：① 按 D-01~D-07 修订 10 份文档、新增 ADR-007~009；② 统一 01/02 的 Spike 三问口径；③ 上游 commit SHA 锁定；④ 发布可安装 bundle 与 `PROTOCOL.md` / `CHANGELOG.md` 同步链；⑤ **Git 仓库直装 + 真机加载 PASS + 运行时事件闭环 8/8 PASS**（§4.1 / §4.1.2）。**W1 Spike 三问已判 PASS。**
+**已完成**：① 按 D-01~D-07 修订 10 份文档、新增 ADR-007~009；② 统一 01/02 的 Spike 三问口径；③ 上游 commit SHA 锁定；④ 发布可安装 bundle 与 `PROTOCOL.md` / `CHANGELOG.md` 同步链；⑤ **Git 仓库直装 + 真机加载 PASS + 运行时事件闭环 8/8 PASS**（§4.1 / §4.1.2）；⑥ `wbsync/1 r2` 对标复核与 ADR-010；⑦ CI 闸门接入（M6a）；⑧ 本地构建链隔离工具链 5/5 READY（M6b）。**W1 Spike 三问已判 PASS。**
 
 剩余：
 
 1. **P1 待办 · 卸载后证据文件清理**：TC-4.10 真机已 PASS（§4.1.3），但 `~/.dsh/wbsync-spike/probe.json` 未随卸载删除；产品插件需在 disposer 中定义保留 / 清理策略。不阻塞当前门禁。
-2. **ADR-007~009 会签 + 四方文档会签**（01 §9）：协议字段变更需 ARC 会签，安全项一票否决。
-3. **补构建链环境并接 CI**：命令行 Node ≥ 24.9 + pnpm 11、`dsh` CLI 加 PATH（注意 DSH 进程内已是 24.21.0，两者不同）；CI 接入 `sync-protocol.mjs --check`、`check-plugin.mjs`、pinned commit 校验。
+2. **ADR-007~010 会签 + 四方文档会签**（01 §9）：协议字段变更需 ARC 会签，安全项一票否决；ADR-010 属信任边界，安全 Owner 必看 `SECURITY-REVIEW.md` 第 5 项。
+3. ~~补构建链环境并接 CI~~ **已完成**：CI 接入 `sync-protocol --check` / `gate-check --check --assert-fresh` / `check-plugin` / `npm pack --dry-run`（M6a）；本地隔离工具链 Node 24.22.2 + pnpm 11.28.11 实跑全链通过，`check-env.mjs --check` 5/5 `READY`（M6b）。桌面版无独立 `dsh` CLI，E5 已按真机 GUI 安装证据判据修正。
 4. **解决上表 #2 / #3 / #4**：配对密钥与账号绑定、配对状态权威归属、白名单端点覆盖。
 5. 之后才按 05 W3 进入 P1 编码。
 

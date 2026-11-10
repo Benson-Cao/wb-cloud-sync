@@ -1,49 +1,67 @@
 {
-  "schema": "wbsync-env-check/1",
-  "capturedAt": "2026-11-10T00:13:20.871Z",
+  "schema": "wbsync-env-check/2",
+  "capturedAt": "2026-11-10T00:57:45.416Z",
   "platform": "win32",
-  "scope": "构建链（当前进程），不是 DSH 宿主运行时",
+  "scope": "构建链（当前进程 + 隔离工具链），不是 DSH 宿主运行时",
   "tools": {
     "npm": "present (C:\\Users\\Administrator\\.workbuddy\\binaries\\node\\versions\\22.22.2-6\\npm)",
     "pnpm": null,
     "corepack": "present (C:\\Users\\Administrator\\.workbuddy\\binaries\\node\\versions\\22.22.2-6\\corepack)",
     "dsh": null
   },
+  "toolchain": {
+    "root": "D:\\Dw phone\\.wbsync-tools",
+    "nodePath": "D:\\Dw phone\\.wbsync-tools\\node-v24.22.2-win-x64\\node.exe",
+    "nodeVersion": "v24.22.2",
+    "pnpmCjs": "D:\\Dw phone\\.wbsync-tools\\pnpm\\node_modules\\pnpm\\bin\\pnpm.cjs",
+    "pnpmVersion": "11.28.11",
+    "note": "隔离构建链：只在 source scripts/toolchain-env.sh 后前置 PATH，不改系统环境变量"
+  },
+  "desktopInstallEvidence": {
+    "pluginName": "dsh-wb-cloud-sync-spike",
+    "capturedAt": "2026-11-07T10:10:44.079Z",
+    "note": "真机启动快照 errors=[] 且 pluginName 存在，证明桌面版插件安装/加载链路可用"
+  },
   "checks": [
     {
       "id": "E1",
       "label": "构建链 Node ≥ 24.9",
-      "pass": false,
-      "observed": "v22.22.2"
+      "pass": true,
+      "observed": "当前进程 v22.22.2 / 隔离工具链 v24.22.2",
+      "basis": "隔离工具链 D:\\Dw phone\\.wbsync-tools\\node-v24.22.2-win-x64\\node.exe 实跑 -v 达标"
     },
     {
       "id": "E2",
       "label": "pnpm 11.x 可用",
-      "pass": false,
-      "observed": "NOT_INSTALLED"
+      "pass": true,
+      "observed": "11.x (11.28.11, 隔离工具链)",
+      "basis": "用隔离 Node 实跑 D:\\Dw phone\\.wbsync-tools\\pnpm\\node_modules\\pnpm\\bin\\pnpm.cjs -v"
     },
     {
       "id": "E3",
       "label": "Corepack 可用（用于启用 pnpm 11）",
       "pass": true,
-      "observed": "present (C:\\Users\\Administrator\\.workbuddy\\binaries\\node\\versions\\22.22.2-6\\corepack)"
+      "observed": "present (C:\\Users\\Administrator\\.workbuddy\\binaries\\node\\versions\\22.22.2-6\\corepack)",
+      "basis": "PATH shim 存在性"
     },
     {
       "id": "E4",
       "label": "NODE_OPTIONS 不含 --no-experimental-strip-types",
       "pass": true,
-      "observed": "--require=\"D:/Program Files/WorkBuddy/resources/app.asar.unpacked/cli/vendor/shim/node-language-shim.cjs\""
+      "observed": "--require=\"D:/Program Files/WorkBuddy/resources/app.asar.unpacked/cli/vendor/shim/node-language-shim.cjs\"",
+      "basis": "当前进程环境变量"
     },
     {
       "id": "E5",
-      "label": "dsh CLI 在 PATH",
-      "pass": false,
-      "observed": "NOT_IN_PATH"
+      "label": "DSH 插件安装通道可用",
+      "pass": true,
+      "observed": "桌面版插件管理器（真机加载证据 dsh-wb-cloud-sync-spike @ 2026-11-07T10:10:44.079Z）",
+      "basis": "桌面版无独立 dsh CLI；以真机插件加载快照作通道证据（历史证据，仅证明链路存在）"
     }
   ],
-  "passed": 2,
+  "passed": 5,
   "total": 5,
-  "verdict": "NOT_READY",
+  "verdict": "READY",
   "dshRuntime": {
     "nodeVersion": "24.21.0",
     "capturedAt": "2026-11-07T10:10:44.079Z",
@@ -51,8 +69,9 @@
     "note": "来自 2026-11-07 真机探针的启动快照，是宿主运行时而非构建链；会过期，不可当作当前环境证明"
   },
   "remediation": [
-    "pnpm 11：corepack prepare pnpm@11.28.5 --activate（corepack 已装）；如需 shim 再 corepack enable",
-    "Node ≥ 24.9：CI 已用 Node 24；本地请自行升级，**不要改 WorkBuddy 自带的 Node**",
-    "dsh CLI：把 DSH 的 bin 加进 PATH，或直接用桌面版插件管理器（本机已验证可装）"
+    "启用隔离构建链：source scripts/toolchain-env.sh（只改当前 shell 的 PATH，不改系统/用户环境变量）",
+    "工具链位置：../.wbsync-tools/（仓库外，不入库）；Node 24 LTS + pnpm 11，SHA256 与官方 SHASUMS256.txt 核对一致",
+    "E5 判据修正：桌面版 DSH 无独立 dsh CLI，真机插件经 GUI 插件管理器安装并加载；dsh CLI 在 PATH 只是等价通道之一",
+    "CI 用 actions/setup-node 24，不依赖本机工具链；本地工具链只服务 P1 开工"
   ]
 }
