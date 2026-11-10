@@ -65,7 +65,7 @@ const createInbox = (ws) => {
  *   - 传函数 → 用其返回值作为 http/response 的 {status, body}
  *   - 不传   → 不应答（请求会走 10s 超时；测试里不会用到）
  */
-const registerHost = async (deviceId, createHandler = null) => {
+const registerHost = async (deviceId, createHandler = null, extraHandlers = {}) => {
   const ws = await openHostWs()
   const inbox = createInbox(ws)
   ws.send(JSON.stringify({ t: 'host/register', deviceId, hostToken: 'host-secret', caps: [] }))
@@ -74,9 +74,12 @@ const registerHost = async (deviceId, createHandler = null) => {
     for (;;) {
       const msg = await inbox.next(60_000).catch(() => null)
       if (!msg) return
-      if (msg.t === 'http/request' && msg.endpoint === 'session/create' && createHandler) {
-        const { status, body } = await createHandler(msg.body ?? {})
-        ws.send(JSON.stringify({ t: 'http/response', reqId: msg.reqId, status, body }))
+      if (msg.t === 'http/request') {
+        const handler = msg.endpoint === 'session/create' ? createHandler : extraHandlers[msg.endpoint]
+        if (handler) {
+          const { status, body } = await handler(msg.body ?? {})
+          ws.send(JSON.stringify({ t: 'http/response', reqId: msg.reqId, status, body }))
+        }
       }
     }
   })()
@@ -143,6 +146,25 @@ test('C4 Host 离线（心跳窗口过后）→ 409 HOST_OFFLINE（retryable）'
   assert.equal(r.status, 409)
   assert.equal(r.json.error.code, 'HOST_OFFLINE')
   assert.equal(r.json.error.retryable, true)
+})
+
+test('C8 客户端 cancelTurn()：走白名单 session/cancel，缺参数如实拒绝', async () => {
+  const token = await pair('pc-c8')
+  const seen = []
+  await registerHost('pc-c8', null, {
+    'session/cancel': async (body) => {
+      seen.push(body)
+      return { status: 200, body: { ok: true, data: { cancelled: true }, protocol: 'wbsync/1' } }
+    },
+  })
+  const client = createPwaClient({ baseUrl: base, deviceId: 'pc-c8', token })
+  try {
+    assert.deepEqual(await client.cancelTurn({ sessionId: 'session-c8' }), { cancelled: true })
+    assert.deepEqual(seen, [{ clientId: 'pwa', sessionId: 'session-c8' }])
+    await assert.rejects(() => client.cancelTurn({}), /缺 sessionId/)
+  } finally {
+    client.stop()
+  }
 })
 
 test('C7 真机 0.1.5 回归：新建成功引导行不得清掉 CP 其余会话', async () => {

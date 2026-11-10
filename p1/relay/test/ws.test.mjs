@@ -210,3 +210,34 @@ test('W7 降级通道仍可用：无 WS 时走轮询桥', async () => {
   })
   assert.equal((await inflight).json.data.via, 'poll')
 })
+
+test('W8 配对先于 WS 注册：积压下行帧转交新 WS，不 504', async () => {
+  const token = await pair('late-ws')
+  // 配对已把 CP 标成在线，但 Host 还没连 WS：isOnline=true，bridge 只能投降级队列
+  const inflight = call('/d/late-ws/session/prompt', { method: 'POST', token, body: { text: 'early' } })
+  for (let i = 0; i < 50; i++) {
+    if ((relay.state.queue.get('late-ws') ?? []).length) break
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  assert.equal((relay.state.queue.get('late-ws') ?? []).length, 1, '帧应先落在降级队列')
+
+  const ws = await openWs()
+  const inbox = createInbox(ws)
+  try {
+    await register(ws, inbox, 'late-ws')
+    const frame = await inbox.next()
+    assert.equal(frame.t, 'http/request', 'WS 注册后应收到被转交的积压帧')
+    assert.equal(frame.endpoint, 'session/prompt')
+    assert.equal(frame.body.text, 'early')
+    assert.equal((relay.state.queue.get('late-ws') ?? []).length, 0, '队列应已清空')
+    ws.send(JSON.stringify({
+      t: 'http/response', reqId: frame.reqId, status: 200,
+      body: { ok: true, data: { via: 'flushed' }, protocol: PROTOCOL },
+    }))
+    const r = await inflight
+    assert.equal(r.status, 200, JSON.stringify(r.json))
+    assert.equal(r.json.data.via, 'flushed')
+  } finally {
+    await waitClose(ws)
+  }
+})

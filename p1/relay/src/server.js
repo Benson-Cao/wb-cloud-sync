@@ -547,7 +547,16 @@ export function createRelay(options = {}) {
             lastSeenAt: now(),
             capabilities: msg.caps ?? [],
           })
-          return conn.sendJson({ t: 'host/registered', deviceId, protocol: PROTOCOL })
+          conn.sendJson({ t: 'host/registered', deviceId, protocol: PROTOCOL })
+          // 时序窗口：配对 / 心跳先把 CP 标成在线，但 WS 还没注册时，bridge 会把
+          // 下行帧投进降级轮询队列；而 Host 只走 WS，帧会躺到 10s 超时 → 504。
+          // 注册完成后把积压帧转交给新 WS（纯轮询 Host 永不注册 WS，不受影响）。
+          const queued = state.queue.get(deviceId) ?? []
+          if (queued.length) {
+            state.queue.delete(deviceId)
+            for (const frame of queued) conn.sendJson(frame)
+          }
+          return
         }
         return handleHostFrame(deviceId, text, conn)
       },

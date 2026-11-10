@@ -4,7 +4,7 @@ Relay 以前把设备表、会话索引、位点都揣在自己进程内存里�
 
 ```
 p1/cp/src/index.js   createControlPlane()  ← 四张表 + 过期扫描
-p1/cp/test/          18 个用例
+p1/cp/test/          19 个用例
 ```
 
 ## 一、四张表（字段与 `PROTOCOL.md` §2 一致）

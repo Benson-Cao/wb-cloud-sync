@@ -437,6 +437,22 @@ const promptEntry = (services) => {
   return null
 }
 
+/**
+ * 官方 `session/cancel`（asar 取证）：required 只有 sessionId，
+ * `SessionController.cancel(request) → commands.cancel(request)` →
+ * `agent.cancel({ kind: "user" }, { keepInbox: true })`，返回 `{ accepted: true }`。
+ * 只取消当前轮次、保留待处理收件箱，不自行中断进程或删事件。
+ */
+const cancelEntry = (services) => {
+  const c = services.sessionController
+  if (typeof c?.cancel === 'function') return { svc: c, name: 'sessionController', kind: 'cancel' }
+  if (typeof c?.commands?.cancel === 'function') return { svc: c.commands, name: 'sessionController.commands', kind: 'cancel' }
+  if (typeof services.agents?.get === 'function') {
+    return { svc: services.agents, name: 'agents', kind: 'agentCancel' }
+  }
+  return null
+}
+
 function createHostAdapters(ctx, options = {}) {
   // 只留作「服务注册晚于插件」的对照，不参与实际调用（0.1.4 的教训）。
   const boot = probeServices(ctx)
@@ -493,6 +509,7 @@ function createHostAdapters(ctx, options = {}) {
       const now = probeServices(ctx)
       const c = createEntry(now.services)
       const p = promptEntry(now.services)
+      const x = cancelEntry(now.services)
       const serviceReport = {}
       for (const name of SERVICE_CANDIDATES) {
         const r = now.resolved[name]
@@ -504,9 +521,10 @@ function createHostAdapters(ctx, options = {}) {
         controller: Boolean(c),
         create: Boolean(c),
         prompt: Boolean(p),
-        cancel: false,   // 未取证，保持 409
+        cancel: Boolean(x),
         writer: c ? `${c.name}.${c.kind}` : null,
         messenger: p ? `${p.name}.${p.kind}` : null,
+        canceller: x ? `${x.name}.${x.kind}` : null,
         probe: {
           hasGet: safeType('get') === 'function',
           hasInject: safeType('inject') === 'function',
@@ -529,12 +547,29 @@ function createHostAdapters(ctx, options = {}) {
       return r.requestId ? { ok: r.ok, code: r.code, message: r.message, value: r.value } : r
     },
 
-    /** 取消入口尚未取证到可靠方法名，保持显式 409（不猜 API）。 */
-    cancelTurn: async () => ({
-      ok: false,
-      code: 'WRITER_UNAVAILABLE',
-      message: '宿主取消入口未取证，暂不接入；不得自行中断轮次',
-    }),
+    /** 取消当前轮次：官方 session/cancel 只吃 { sessionId }，保留 pending inbox。 */
+    cancelTurn: async ({ sessionId } = {}) => {
+      const services = current()
+      const entry = cancelEntry(services)
+      if (!entry) return unavailable('可用的取消轮次入口（cancel）', services)
+      if (!sessionId) {
+        return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'cancelTurn 缺 sessionId' }
+      }
+      try {
+        if (entry.kind === 'agentCancel') {
+          const agent = entry.svc.get(sessionId)
+          if (typeof agent?.cancel !== 'function') {
+            return { ok: false, code: 'HOST_ADAPTER_ERROR', message: `agents.get(${sessionId}) 无 cancel` }
+          }
+          agent.cancel({ kind: 'user' }, { keepInbox: true })
+          return { ok: true, value: { cancelled: true } }
+        }
+        const r = await entry.svc.cancel({ sessionId })
+        return { ok: true, value: r ?? { cancelled: true } }
+      } catch (error) {
+        return asError(error, entry)
+      }
+    },
 
     /** 新建会话（+ 可选第一句话）。 */
     createSession: async ({ text, cwd } = {}) => {

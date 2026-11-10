@@ -4,7 +4,7 @@
 
 ## 安装
 
-DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.5.tgz`（由本目录 `npm pack` 产出）。
+DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.6.tgz`（由本目录 `npm pack` 产出）。
 
 ## 配置（缺省即可本机试跑）
 
@@ -20,7 +20,7 @@ PC 浏览器地址栏打开 `http://127.0.0.1:<DSH端口>/__wbsync/pair` 生成 
 端口是动态的，用 `netstat -ano | findstr <DSH进程PID>` 查 LISTENING 行），手机在
 `http://<局域网IP>:8787/app` 输码配对。
 
-## 宿主入口（0.1.5 定案）
+## 宿主入口（0.1.6 定案）
 
 每次调用**惰性重探**宿主服务（0.1.4 的启动期静态快照会漏掉晚注册依赖），按官方完整语义排序：
 
@@ -32,15 +32,17 @@ PC 浏览器地址栏打开 `http://127.0.0.1:<DSH端口>/__wbsync/pair` 生成 
    `HOST_ADAPTER_ERROR`，保留只为如实报错。
 
 `sessionController.prompt(request, signal)` 负责发第一句话与后续投递（`clientMsgId` →
-`requestId`，宿主原生幂等）。**绝不 `open(id,'write')`**。服务缺失时相关操作如实回 409
-`WRITER_UNAVAILABLE`；取消入口未取证，暂保持 409。
+`requestId`，宿主原生幂等）。**取消轮次**走官方 `sessionController.cancel({sessionId})`
+（`session/cancel` 的 required 仅 `sessionId`，内部 `agent.cancel({kind:"user"},{keepInbox:true})`，
+只中断当前轮次、保留待处理收件箱）；依次回退 `commands.cancel` / `agents.get(id).cancel`。
+**绝不 `open(id,'write')`**；服务缺失时相关操作如实回 409 `WRITER_UNAVAILABLE`。
 
-真机自检：PC 浏览器打开 `http://127.0.0.1:<DSH端口>/__wbsync/status`，看 `writer` / `messenger`
-与 `writer.probe`（含 `boot` 启动期快照、`lateBound` 晚到服务、逐服务 `methods` / `errors`）。
-手机端新建失败时会把宿主异常原文一并显示，不再只有一个 `HOST_ADAPTER_ERROR`。
+真机自检：PC 浏览器打开 `http://127.0.0.1:<DSH端口>/__wbsync/status`，看 `writer` / `messenger` /
+`canceller` 与 `writer.probe`（含 `boot` 启动期快照、`lateBound` 晚到服务、逐服务 `methods` / `errors`）。
+手机端新建 / 取消失败时会把宿主异常原文一并显示，不再只有一个错误码。
 
 ## 铁律（与源码一致）
 
-- **绝不 `open(id,'write')`**：投递 / 新建走宿主入口，缺失回 409 `WRITER_UNAVAILABLE`
+- **绝不 `open(id,'write')`**：投递 / 新建 / 取消都走宿主入口，缺失回 409 `WRITER_UNAVAILABLE`
 - 历史补齐绑 `sessionPersistence.open(id,'read')` **只读句柄**
 - 所有注册与定时器挂 `ctx.effect`，卸载即撤回

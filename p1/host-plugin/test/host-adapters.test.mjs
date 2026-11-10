@@ -239,6 +239,50 @@ test('HA18 官方 prompt 优先于 agents.followup', async () => {
   assert.deepEqual(calls, ['official'])
 })
 
+test('HA19 cancelTurn 走官方 sessionController.cancel({sessionId})', async () => {
+  const calls = []
+  const ctx = { sessionController: {
+    cancel: async (r) => { calls.push(r); return { accepted: true } },
+  } }
+  const adapters = createHostAdapters(ctx)
+  assert.equal(adapters.capabilities().cancel, true)
+  assert.equal(adapters.capabilities().canceller, 'sessionController.cancel')
+  const r = await adapters.cancelTurn({ sessionId: 's-19' })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.value, { accepted: true })
+  assert.deepEqual(calls, [{ sessionId: 's-19' }], 'session/cancel 的 required 只有 sessionId')
+})
+
+test('HA20 cancel 同义入口 commands.cancel 与 agents.get().cancel 兜底', async () => {
+  const viaCommands = createHostAdapters({ sessionController: {
+    commands: { cancel: async () => ({ accepted: true }) },
+  } })
+  assert.equal(viaCommands.capabilities().canceller, 'sessionController.commands.cancel')
+  assert.equal((await viaCommands.cancelTurn({ sessionId: 's' })).ok, true)
+
+  const cancelled = []
+  const viaAgents = createHostAdapters({ agents: {
+    get: () => ({ cancel: (...args) => { cancelled.push(args); return true } }),
+  } })
+  assert.equal(viaAgents.capabilities().canceller, 'agents.agentCancel')
+  const r = await viaAgents.cancelTurn({ sessionId: 's-20' })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.value, { cancelled: true })
+  assert.deepEqual(cancelled, [[{ kind: 'user' }, { keepInbox: true }]], '只取消当前轮次、保留 pending inbox')
+})
+
+test('HA21 cancel 服务缺失 / 宿主抛错 / 缺 sessionId 如实报错', async () => {
+  const missing = createHostAdapters({})
+  assert.equal((await missing.cancelTurn({})).code, 'WRITER_UNAVAILABLE')
+  const thrown = createHostAdapters({ sessionController: {
+    cancel: async () => { throw new Error('no live turn') },
+  } })
+  const r = await thrown.cancelTurn({ sessionId: 's' })
+  assert.equal(r.code, 'HOST_ADAPTER_ERROR')
+  assert.match(r.message, /no live turn/)
+  assert.match((await thrown.cancelTurn({})).message, /缺 sessionId/)
+})
+
 test('HA6 create 抛错 / 未返回 sessionId → HOST_ADAPTER_ERROR', async () => {
   const thrown = createHostAdapters({ sessionController: { create: async () => { throw new Error('workspace gone') } } })
   const a = await thrown.createSession({})

@@ -308,6 +308,31 @@ export function createPwaClient({
     return payload.data   // { sessionId, ... }
   }
 
+  /**
+   * 取消某会话当前正在运行的轮次：`POST /d/<deviceId>/session/cancel`
+   * （白名单 `session/*`）。只请求宿主中断，不自行删事件、不关连接。
+   */
+  const cancelTurn = async ({ sessionId } = {}) => {
+    if (!sessionId) {
+      throw Object.assign(new Error('取消轮次缺 sessionId'), { code: 'INVALID_ARGUMENT' })
+    }
+    const r = await fetchImpl(`${base}/d/${encodeURIComponent(deviceId)}/session/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ clientId, sessionId }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      const detail = typeof payload?.error?.message === 'string' ? payload.error.message : ''
+      throw Object.assign(
+        new Error(`取消失败：${code}${detail && detail !== code ? ` · ${detail}` : ''}`),
+        { code, detail },
+      )
+    }
+    return payload.data
+  }
+
   const snapshot = () => ({
     deviceId,
     stopped,
@@ -323,5 +348,5 @@ export function createPwaClient({
     })),
   })
 
-  return { refreshSessions, createSession, follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null }
+  return { refreshSessions, createSession, cancelTurn, follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null }
 }

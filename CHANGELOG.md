@@ -4,6 +4,17 @@
 
 ---
 
+## [P1 W3 续 20] · 2026-11-10 18:2x · 非协议变更
+
+- **收掉三项 W3 剩余待办，版本 0.1.6**：
+  1. **Relay 504 边界**：`isOnline` 认 CP 心跳活跃（配对即 online），`bridge` 只认活跃 WS；二者时序窗口内下行帧被投进降级轮询队列，而 Host 只走 WS → 10s 后 504。改为 **Host WS 注册时把该设备积压帧转交新 WS**（先发 `host/registered` 再 flush），纯轮询 Host 永不注册 WS、降级通道不受影响。新增 W8 回归（配对先于 WS 注册，帧仍 200 送达）。
+  2. **`cancelTurn` 接官方取消入口**：asar 取证 `session/cancel` 的 required 只有 `sessionId`；`SessionController.cancel(request) → commands.cancel → agent.cancel({kind:"user"},{keepInbox:true})`，只取消当前轮次、保留待处理收件箱。适配器按 `sessionController.cancel` → `commands.cancel` → `agents.get(id).cancel` 分层，`capabilities()` 增 `cancel` / `canceller`。手机端新增 `cancelTurn()`（`POST /d/<deviceId>/session/cancel`，白名单 `session/*`）与事件流面板「取消当前轮次」按钮；SW 升 `wbsync-shell-v5`。
+  3. **第一句话投递真机取证**：按 zstd frame 边界解压 DSH 会话日志，`session-83b84c44-…` 含 20 个事件（`user/message` ×4、`turn/start`、`assistant/attempt`、`turn/end`），`seq max 18`，与 CP `lastSeq:18` 一致；空会话 `session-0968f7b3-…` 仅 4 个头事件、`seq max 2`。`sessionController.prompt` 真机可用。
+- 新增 5 例（W8 / HA19-21 / C8），测试 152 → **157**；`build-bundle.mjs --check` 通过；门禁自动项 9/9、快照 CURRENT。
+- **部署**：Host bundle 0.1.6 需重新装包 + 重启 DSH；Relay / CP 改动需重启 Relay（会清内存态 CP、手机需重新配对）。两者可在同一次维护里做完。
+
+---
+
 ## [P1 W3 续 19] · 2026-11-10 18:0x · 非协议变更
 
 - **真机 0.1.5 复验通过（P1 W3 手机 ↔ PC 全链路打通）**：装包重启后（DSH PID 28880 / web 端口 **53346**），`/__wbsync/status` 报 `writer:"sessionController.create"`、`messenger:"sessionController.prompt"`、`controller/create/prompt:true`；`probe.boot.sessionController:false` 而 `lateBound:["sessionController","connection","workspaceRegistry"]`——**直接证实「服务注册晚于插件 apply」**，惰性动态探测就是正确修法。

@@ -17,7 +17,7 @@ node p1/relay/run.mjs                    # PORT=8787；WBSYNC_HOST_TOKEN / WBSYN
 「Relay 地址」= 跑在 PC 上、手机与 PC 插件共同连着的这个进程的 `http://<局域网IP>:<端口>`；
 `start(port, host)` 默认只听 `127.0.0.1`（单测/本机调试），真机联调传 `'0.0.0.0'` 或直接用 `run.mjs`。
 
-`createRelay(options)` 返回未监听的 `http.Server` + 内存 `state`，注入 `now()` / `randomBytes()` 可让时间与随机性确定，规则判定不靠运行时猜测。`node --test` 共 **35 个用例**：HTTP 9、Host WS 7、手机事件订阅 7、跨实例共享 CP 4、静态壳服务 5、监听与启动器形态 3。
+`createRelay(options)` 返回未监听的 `http.Server` + 内存 `state`，注入 `now()` / `randomBytes()` 可让时间与随机性确定，规则判定不靠运行时猜测。`node --test` 共 **37 个用例**：HTTP 9、Host WS 8（含 W8 积压帧转交）、手机事件订阅 7、跨实例共享 CP 4、静态壳服务 6、监听与启动器形态 3。
 
 ## 传输形态
 
@@ -67,7 +67,7 @@ node p1/relay/run.mjs                    # PORT=8787；WBSYNC_HOST_TOKEN / WBSYN
 
 ## 明确的边界
 
-- **配对后的 45s 活跃窗口**：`/pair/verify` 把设备记为「最近活跃」（`lastSeenAt=now`），窗口内没有 Host WS 时，桥接请求会在降级通道里等到 10s 超时回 504 `NO_PROGRESS`（不会误投帧）。现实中 PC 能出配对码即意味着宿主在跑；真机上表现为极短暂的「配对完就发消息可能转一下」。
+- **配对后的 45s 活跃窗口**：`/pair/verify` 把设备记为「最近活跃」（`lastSeenAt=now`），此时可能还没有 Host WS。桥接帧先落降级轮询队列；**Host WS 注册时 Relay 会把该设备的积压帧转交给新 WS**（W8 回归），所以「配对完立刻发消息」不再等到 10s 超时回 504 `NO_PROGRESS`。若 Host 始终不连 WS，帧仍由 `/host/poll` 取走或按 10s 超时。
 - **CP 尚未分离**：配对码登记、设备档案、会话索引暂由 Relay 单机内存承担，不落盘、重启即清空。
 - **未设 `WBSYNC_HOST_TOKEN` 时 Host 注册不校验令牌**（run.mjs 试跑形态，控制台有醒目警告）：**对外使用必须显式设置**，且与插件 config 的 `hostToken` 一致。
 - **静态壳是同步阻塞读**（`readFileSync`，开发期骨架够用）：文件都是 KB 级平铺小文件；换生产再改流式 + 缓存头策略。
@@ -82,4 +82,4 @@ node p1/relay/run.mjs                    # PORT=8787；WBSYNC_HOST_TOKEN / WBSYN
 2. ~~CP 分离~~（`p1/cp` 四张表，已落地）。
 3. ~~Host 插件 bundle 最小可运行~~（`p1/host-plugin`，已落地）。
 4. ~~PWA 骨架：设备选择、会话列表、`sinceSeq` 补齐渲染~~（`p1/pwa`，已落地）。
-5. 剩余：配对向导 UI（手机不再手填令牌）、`POST /api/sessions` 新建会话、附件上行、真机联调。
+5. 剩余：附件上行（`attachments/*` 属 P2）、会话索引增量 diff、PC 侧主动吊销 UI、GA 前四方会签。
