@@ -4,7 +4,7 @@
 
 ## 安装
 
-DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.1.tgz`（由本目录 `npm pack` 产出）。
+DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.2.tgz`（由本目录 `npm pack` 产出）。
 
 ## 配置（缺省即可本机试跑）
 
@@ -20,8 +20,14 @@ PC 浏览器地址栏打开 `http://127.0.0.1:<DSH端口>/__wbsync/pair` 生成 
 端口是动态的，用 `netstat -ano | findstr <DSH进程PID>` 查 LISTENING 行），手机在
 `http://<局域网IP>:8787/app` 输码配对。
 
+## 宿主入口（0.1.2 起）
+
+插件软探测 `sessionController`：`create()` 负责新建会话、`prompt()` 负责发第一句话与后续投递
+（`clientMsgId` → `requestId`，宿主原生幂等）。**绝不 `open(id,'write')`**。服务缺失时相关操作
+如实回 409 `WRITER_UNAVAILABLE`；取消入口未取证，暂保持 409。
+
 ## 铁律（与源码一致）
 
-- **绝不 `open(id,'write')`**：投递 / 新建 / 取消走可注入适配器，未注入回 409 `WRITER_UNAVAILABLE`
+- **绝不 `open(id,'write')`**：投递 / 新建走宿主入口，缺失回 409 `WRITER_UNAVAILABLE`
 - 历史补齐绑 `sessionPersistence.open(id,'read')` **只读句柄**
 - 所有注册与定时器挂 `ctx.effect`，卸载即撤回

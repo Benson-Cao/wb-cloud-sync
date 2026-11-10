@@ -2,7 +2,7 @@
 /**
  * host-plugin 可安装 bundle 打包器
  * ---------------------------------------------------------------
- * 把 src/{index,replay,sessions}.js 合成**单文件自包含** `bundle/index.js`
+ * 把 src/{index,replay,sessions,host-adapters}.js 合成**单文件自包含** `bundle/index.js`
  * （对齐 P0 探针已验证可安装的形态：单入口 + cordis.patch.yml 的 - insert: 层，
  * 不声明 dsh.client），并在外面包一层**默认配置解析**：
  *
@@ -34,10 +34,17 @@ const topLevelNames = (source, label) => {
 
 const stripExports = (source) => source.replace(/^export\s+(?=const|let|function|class)/gm, '')
 
-const [helperReplay, helperSessions, mainSrc] = [read('src/replay.js'), read('src/sessions.js'), read('src/index.js')]
+const [helperReplay, helperSessions, helperHostAdapters, mainSrc] = [
+  read('src/replay.js'), read('src/sessions.js'), read('src/host-adapters.js'), read('src/index.js'),
+]
 
-// ---- 冲突检测：三个模块合并进同一作用域，顶层重名会静默覆盖 ----
-const groups = [topLevelNames(helperReplay, 'replay.js'), topLevelNames(helperSessions, 'sessions.js'), topLevelNames(mainSrc, 'index.js')]
+// ---- 冲突检测：四个模块合并进同一作用域，顶层重名会静默覆盖 ----
+const groups = [
+  topLevelNames(helperReplay, 'replay.js'),
+  topLevelNames(helperSessions, 'sessions.js'),
+  topLevelNames(helperHostAdapters, 'host-adapters.js'),
+  topLevelNames(mainSrc, 'index.js'),
+]
 const seen = new Map()
 for (const [names, label] of groups) {
   for (const n of names) {
@@ -48,23 +55,29 @@ for (const [names, label] of groups) {
 
 // ---- helpers：去掉 export，原样内联 ----
 const helpers = `// ===== 内联自 src/replay.js（重启后历史补齐，只读回放） =====\n${stripExports(helperReplay).trim()}
-// ===== 内联自 src/sessions.js（会话索引上报） =====\n${stripExports(helperSessions).trim()}`
+// ===== 内联自 src/sessions.js（会话索引上报） =====\n${stripExports(helperSessions).trim()}
+// ===== 内联自 src/host-adapters.js（宿主真实入口：create / prompt 软探测） =====\n${stripExports(helperHostAdapters).trim()}`
 
 // ---- 主模块：去掉相对导入；apply 改名 __apply（wrapper 接管配置合并） ----
-if (!/^import \{ createReplayAdapter \} from '\.\/replay\.js'$/m.test(mainSrc)
-  || !/^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'$/m.test(mainSrc)) {
-  throw new Error('src/index.js 的相对导入与打包器预期不一致——请同步更新本脚本')
+const EXPECTED_IMPORTS = [
+  /^import \{ createReplayAdapter \} from '\.\/replay\.js'$/m,
+  /^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'$/m,
+  /^import \{ createHostAdapters \} from '\.\/host-adapters\.js'$/m,
+]
+for (const pattern of EXPECTED_IMPORTS) {
+  if (!pattern.test(mainSrc)) throw new Error('src/index.js 的相对导入与打包器预期不一致——请同步更新本脚本')
 }
 const main = mainSrc
   .replace(/^import \{ createReplayAdapter \} from '\.\/replay\.js'\n/m, '')
   .replace(/^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'\n/m, '')
+  .replace(/^import \{ createHostAdapters \} from '\.\/host-adapters\.js'\n/m, '')
   .replace(/^export function apply\(/m, 'function __apply(')
 if (!main.includes('function __apply(')) throw new Error('apply 改名失败')
 
 const BANNER = `/**
  * dsh-wb-cloud-sync-host · P1 W3 Host 插件可安装 bundle（**自动生成，勿手改**）
  * ---------------------------------------------------------------
- * 由 p1/host-plugin/build-bundle.mjs 从 src/{index,replay,sessions}.js 合成：
+ * 由 p1/host-plugin/build-bundle.mjs 从 src/{index,replay,sessions,host-adapters}.js 合成：
  * 改源码后运行 \`node p1/host-plugin/build-bundle.mjs\` 重新生成（CI 有 --check 同步校验）。
  * 外层 wrapper 负责默认配置：代码默认 ← ~/.dsh/wbsync-host.json ← WBSYNC_* 环境变量 ← apply 的 config。
  */

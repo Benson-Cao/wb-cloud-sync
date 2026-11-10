@@ -23,6 +23,7 @@
  */
 import { createReplayAdapter } from './replay.js'
 import { createSessionIndexReporter } from './sessions.js'
+import { createHostAdapters } from './host-adapters.js'
 
 export const name = 'wbsync-host-dev'
 export const inject = ['webServer', 'sessionPersistence']
@@ -97,18 +98,16 @@ export function apply(ctx, config = {}) {
       ? (id) => ctx.sessionPersistence.open(id, 'read')
       : null)
 
+  /**
+   * 宿主真实入口（bundle 真机形态）：软探测 `sessionController`，缺服务时各适配器
+   * 如实回 409，不影响上行与状态路由。测试可用 `cfg.hostAdapters` / 单个适配器覆盖。
+   */
+  const hostAdapters = cfg.hostAdapters ?? createHostAdapters(ctx, { randomId: cfg.randomId })
+
   const adapters = {
-    submitPrompt: cfg.submitPrompt ?? (async () => ({
-      ok: false, code: 'WRITER_UNAVAILABLE',
-      message: '未注入 submitPrompt 适配器；真机需接宿主 prompt 入口（不得自开写句柄）',
-    })),
-    cancelTurn: cfg.cancelTurn ?? (async () => ({
-      ok: false, code: 'WRITER_UNAVAILABLE', message: '未注入 cancelTurn 适配器',
-    })),
-    createSession: cfg.createSession ?? (async () => ({
-      ok: false, code: 'WRITER_UNAVAILABLE',
-      message: '未注入 createSession 适配器；真机需接宿主新建会话入口（不得自开写句柄）',
-    })),
+    submitPrompt: cfg.submitPrompt ?? hostAdapters.submitPrompt,
+    cancelTurn: cfg.cancelTurn ?? hostAdapters.cancelTurn,
+    createSession: cfg.createSession ?? hostAdapters.createSession,
     replay: cfg.replay ?? (openSession
       ? createReplayAdapter({ openSession, pageSize: cfg.replayPageSize })
       : async () => ({

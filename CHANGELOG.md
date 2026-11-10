@@ -4,6 +4,19 @@
 
 ---
 
+## [P1 W3 续 15] · 2026-11-10 13:4x · 非协议变更
+
+- **真机全链路已通**：截图确认手机「已连接 · 11 个会话」、列表与实时事件流（seq 512）正常；唯一红字 `WRITER_UNAVAILABLE` 是上轮预告的已知待办——`createSession` 适配器未接宿主入口。本轮把它接上。
+- **宿主入口取证（asar 字节级）**：服务 `sessionController`，`create(request)` 入参 `{workspaceId?, cwd?, sessionId?, agentPreset?}`（前两者互斥）、返回 `{sessionId, agentPreset?}`；`prompt(request, source)` 入参 `{requestId, sessionId, mode, content:[{type:'text',text}]}` + `{kind:'user', rpcId}`，`hasPromptRequest()` 按 `rpcId === requestId` 去重（P0 Q2 结论）。`session/cancel` 命中均为 ACP 示例，**不猜 API**，继续保持 409。
+- **新增 `src/host-adapters.js`**：软探测 `sessionController`（`ctx[name]` / `ctx.get(name)`，**不写进 `inject`**——cordis 缺服务会让整个插件 pending）；`submitPrompt` / `createSession` 接宿主入口，`clientMsgId` → `requestId`；服务缺失如实 409。
+- **部分成功语义**：`create` 成功但第一句话 `prompt` 失败时返回**成功** + `prompted:false / promptError`——会话已客观存在，报错会让手机重复创建第二个会话。
+- **打包器**：合成清单 3 → 4 个模块，`build-bundle.mjs --check`（CI）保证 bundle 与源码同步；新增 `host-adapters.test.mjs` 9 例，其中 HA9 用**打包产物**跑真 Relay 端到端，防「改了源码没进用户装的包」。
+- **顺带发现的边界**：Relay `isOnline` 会因 CP 活跃标记**早于** WS 连接就绪返回 true，`bridge` 此时把帧投进降级轮询队列，而 Host 只走 WS → 504。测试改为等 `host/registered`（正确的同步点）；生产常连形态不触发，正式版待办已记入 host-plugin README §10。
+- **版本** `dsh-wb-cloud-sync-host` 0.1.1 → **0.1.2**（`dist/dsh-wb-cloud-sync-host-0.1.2.tgz`，需 DSH 重装）。
+- 测试 130 → **139**（host-plugin 51 → 60）。
+
+---
+
 ## [P1 W3 续 14] · 2026-11-10 13:2x · 非协议变更
 
 - **真机第二个缺口：手机配对报「当前环境没有 WebCrypto（crypto.subtle）」**。`crypto.subtle` 只在**安全上下文**（HTTPS / localhost / 127.0.0.1）暴露；真机走 `http://192.168.0.106:8787/app`（局域网 IP + 明文 HTTP，截图地址栏黄色三角），浏览器里 `globalThis.crypto` 存在但 `subtle` 是 undefined → 原实现抛 `NO_WEBCRYPTO`，配对全链路断。Node ≥19 的全局 crypto 永远带 subtle，**测试环境跑不出这个差异**，属设计层环境盲区。
