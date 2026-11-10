@@ -32,7 +32,8 @@ cp.isDeviceAlive(deviceId, ts)            // 心跳时间窗 + 墓碑 + state
 cp.listDevices()
 
 // SessionIndex
-cp.upsertSessions(ownerDeviceId, rows)    // 全量快照 → { upserted, removed }
+cp.putSession(ownerDeviceId, row)         // 单行合并：只 upsert，不删除同设备其他行
+cp.upsertSessions(ownerDeviceId, rows)    // 全量快照 → { upserted, removed }；复用 putSession
 cp.listSessions({ ownerDeviceId, pinned, accountId })
 cp.getSession(id) / cp.patchSession(id, { pinned, pinnedOrder, title, state })
 
@@ -69,7 +70,7 @@ const cp = options.controlPlane ?? createControlPlane({ now, offlineAfterMs })
 
 错误码沿用协议：`UNAUTHORIZED` / `HOST_OFFLINE`(retryable) / `ROUTE_CONFLICT` / `SESSION_BUSY`(retryable)，由 Relay 映射成 401 / 409 / 409 可重试。
 
-## 五、测试（18 个）
+## 五、测试（19 个）
 
 ```bash
 node --test p1/cp/test/*.test.mjs
@@ -78,7 +79,7 @@ node --test p1/cp/test/*.test.mjs
 | 组 | 覆盖 |
 |---|---|
 | Device | 令牌只能配对写入、注册不能顶掉摘要、吊销后不复活且清会话租约、心跳时间窗边界（44.999s 在线 / 45.001s 离线）、未知设备心跳报 `HOST_OFFLINE` |
-| SessionIndex | 全量替换会移除消失的会话、不覆盖 PC 置顶、跨设备隔离、排序（置顶 → 置顶序 → 最近活跃）、非法 `state` 落回 `stopped`、空主键跳过 |
+| SessionIndex | 全量替换会移除消失的会话、**`putSession` 单行合并不清掉其余会话且后续全量上报仍能校正（真机 0.1.5 回归）**、不覆盖 PC 置顶、跨设备隔离、排序（置顶 → 置顶序 → 最近活跃）、非法 `state` 落回 `stopped`、空主键跳过 |
 | RouteLease | 同设备幂等续租、别家 `ROUTE_CONFLICT`、过期后别人能接手、`leaseId` 不匹配的续租/释放不生效、续租推后过期时间、缺参数不生成野租约 |
 | Cursor | 覆盖写、回退也如实记录（客户端权威）、按 client 过滤、缺参数拒绝 |
 | 其它 | `stats()` 计数、返回值是副本（改调用方对象不污染表） |

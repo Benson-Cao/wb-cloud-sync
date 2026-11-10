@@ -4,6 +4,16 @@
 
 ---
 
+## [P1 W3 续 19] · 2026-11-10 18:0x · 非协议变更
+
+- **真机 0.1.5 复验通过（P1 W3 手机 ↔ PC 全链路打通）**：装包重启后（DSH PID 28880 / web 端口 **53346**），`/__wbsync/status` 报 `writer:"sessionController.create"`、`messenger:"sessionController.prompt"`、`controller/create/prompt:true`；`probe.boot.sessionController:false` 而 `lateBound:["sessionController","connection","workspaceRegistry"]`——**直接证实「服务注册晚于插件 apply」**，惰性动态探测就是正确修法。
+- 手机点「新建会话」后 `downlinks:2`，CP 出现 `session-0968f7b3-…` 与 `session-83b84c44-…` 两个真实会话行（`state:stopped`、带 `workspace`、`lastSeq` 2 / 18），`indexCount` 11 → 13，`headerRef.agentPreset:"standard"`。**新建会话 → Host 全量上报 → 索引可见全通**，`HOST_ADAPTER_ERROR` 消失。
+- **顺带发现并修复 CP 缺陷**：`upsertSessions` 是**全量快照**语义（本轮未出现的行会被删除），Relay 在 `POST /api/sessions` 成功回调里却传单行 `[row]` → 把该设备其余会话全删，直到 Host 下一次 60s 全量上报才恢复（真机抓到 `/host/indexes` 瞬间只剩 1 行）。新增 `cp.putSession(ownerDeviceId, row)` 单行合并（只 upsert、不 remove），`upsertSessions` 复用它；Relay 回调改调 `putSession`。
+- 新增 2 例（CP 单行合并、端到端「引导行不得清掉其余会话」）；测试 150 → **152**。
+- **部署注意**：本次改的是 Relay / CP 源码，需重启 Relay 进程才生效；Host 插件 bundle 未变，`0.1.5.tgz` 不用重打。重启 Relay 会清内存态 CP（设备令牌 / 会话索引），手机需重新配对。
+
+---
+
 ## [P1 W3 续 18] · 2026-11-10 17:xx · 非协议变更
 
 - **真机 0.1.4 定案**：手机点「新建会话」→ `新建失败：新建会话失败：HOST_ADAPTER_ERROR`；`/__wbsync/status` 的 `downlinks:2` 证明下行帧已到 Host，是适配器里 `sessions.create({cwd})` 抛异常。

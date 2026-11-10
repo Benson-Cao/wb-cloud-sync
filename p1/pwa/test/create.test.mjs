@@ -145,6 +145,30 @@ test('C4 Host 离线（心跳窗口过后）→ 409 HOST_OFFLINE（retryable）'
   assert.equal(r.json.error.retryable, true)
 })
 
+test('C7 真机 0.1.5 回归：新建成功引导行不得清掉 CP 其余会话', async () => {
+  const token = await pair('pc-c7')
+  const seeded = await call('/host/sessions', {
+    method: 'POST',
+    body: { deviceId: 'pc-c7', rows: [
+      { sessionId: 's-old-1', state: 'stopped', lastSeq: 1 },
+      { sessionId: 's-old-2', state: 'stopped', lastSeq: 2 },
+    ] },
+  })
+  assert.equal(seeded.status, 200, JSON.stringify(seeded.json))
+  await registerHost('pc-c7', async () => ({
+    status: 200,
+    body: { ok: true, data: { sessionId: 'session-new-7' } },
+  }))
+  const r = await call('/api/sessions', { method: 'POST', token, body: { deviceId: 'pc-c7', text: '' } })
+  assert.equal(r.status, 200, JSON.stringify(r.json))
+  const list = await call('/host/indexes?deviceId=pc-c7')
+  assert.deepEqual(
+    list.json.data.rows.map((x) => x.sessionId).sort(),
+    ['s-old-1', 's-old-2', 'session-new-7'],
+    '单行引导值不得触发全量替换，否则手机列表会闪一下只剩新会话',
+  )
+})
+
 test('C6 客户端 createSession()：宿主异常原文透传，真机不用只靠 code 猜', async () => {
   const token = await pair('pc-c6')
   const hostMessage = 'sessions.create: entry already exists'

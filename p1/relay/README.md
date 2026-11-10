@@ -26,7 +26,7 @@ node p1/relay/run.mjs                    # PORT=8787；WBSYNC_HOST_TOKEN / WBSYN
 | Host → Relay | **`WS /ws/host` 长连** | 先 `host/register`（带 `HOST_TOKEN`），再 `host/heartbeat`、`host/sessions`、`session/event`、`http/response` |
 | 手机订阅事件 | **`WS /d/<deviceId>/events/<sessionId>?token=&sinceSeq=`** | 只下行；令牌走 query（浏览器 WebSocket 不能设 Authorization 头） |
 | 手机读会话列表 | **`GET /api/sessions?deviceId=&pinned=`** | `Bearer <deviceToken>`；协议 §4 CP API 的 W3 单机实现（CP 仍在 Relay 进程内，P2 迁独立服务），测试见 `p1/pwa` A1–A3 |
-| 手机新建会话 | **`POST /api/sessions`**（body 带 `deviceId`） | `Bearer <deviceToken>`；Host 离线 409 `HOST_OFFLINE`（入口置灰）；桥接白名单内 `session/create` → Host `createSession` 适配器；未注入适配器 409 透传。成功后 Relay 把**引导行**（`state:'awaiting'`）写进 CP，Host 下一次全量上报校正 |
+| 手机新建会话 | **`POST /api/sessions`**（body 带 `deviceId`） | `Bearer <deviceToken>`；Host 离线 409 `HOST_OFFLINE`（入口置灰）；桥接白名单内 `session/create` → Host `createSession` 适配器；未注入适配器 409 透传。成功后 Relay 把**引导行**（`state:'awaiting'`）以 `cp.putSession` **单行合并**写进 CP（不走全量替换，否则会清掉该设备其余会话、手机列表闪一下），Host 下一次全量上报校正 |
 | 手机发指令 | HTTP（`/d/<deviceId>/session/*`） | 走白名单 + 桥接成 `http/request` 帧 |
 | 手机请求 → Host | `http/request` 帧 | 同一连接按发送顺序到达，**帧序即流序** |
 | 手机打开壳页面 | **`GET /app`**（及 `/app/*`、`/src/*`） | 无鉴权静态（PWA 必需，docs/04）；`/app` → `p1/pwa/public`，`/src` → `p1/pwa/src`（页面里 `../src/client.js` 的解析目标）；单层文件名 + 解码后校验拒绝路径遍历；`staticDir: null` 关闭 |

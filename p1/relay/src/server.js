@@ -405,7 +405,9 @@ export function createRelay(options = {}) {
           const row = data.index && typeof data.index === 'object'
             ? { ...data.index, sessionId: data.sessionId }
             : { sessionId: data.sessionId, state: 'awaiting', title: data.title ?? null, lastActiveAt: now() }
-          cp.upsertSessions(deviceId, [row])
+          // 单行合并：upsertSessions 是全量快照语义，传单行会把该设备其余会话
+          // 全部删掉（真机 0.1.5 取证：手机列表闪一下只剩新会话）。
+          cp.putSession(deviceId, row)
         })
       }
 

@@ -124,6 +124,27 @@ test('索引按设备全量替换：本轮没出现的会话要移除', () => {
   assert.equal(cp.getSession('s2'), null)
 })
 
+test('putSession 单行合并：不清掉同设备其他会话（真机 0.1.5 回归）', () => {
+  const { cp } = makeCp()
+  cp.upsertSessions('pc-1', [sessionRow('s1'), sessionRow('s2')])
+  const r = cp.putSession('pc-1', {
+    sessionId: 's-new', state: 'awaiting', lastActiveAt: 1_700_000_000_000,
+  })
+  assert.deepEqual(r, { upserted: 1, removed: 0 })
+  assert.deepEqual(
+    cp.listSessions({ ownerDeviceId: 'pc-1' }).map((s) => s.sessionId).sort(),
+    ['s-new', 's1', 's2'],
+  )
+  assert.equal(cp.getSession('s-new').state, 'awaiting')
+  // 后续 Host 全量上报仍能校正该行，两种语义不冲突
+  assert.deepEqual(
+    cp.upsertSessions('pc-1', [sessionRow('s1'), sessionRow('s2'), sessionRow('s-new')]),
+    { upserted: 3, removed: 0 },
+  )
+  assert.equal(cp.getSession('s-new').state, 'stopped')
+  assert.deepEqual(cp.putSession('pc-1', { title: '缺少 sessionId' }), { upserted: 0, removed: 0 })
+})
+
 test('Host 上报不会覆盖 PC 侧置顶状态', () => {
   const { cp } = makeCp()
   cp.upsertSessions('pc-1', [sessionRow('s1')])

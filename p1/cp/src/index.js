@@ -141,7 +141,35 @@ export function createControlPlane({
   /* ------------------------------------------------------ SessionIndex */
 
   /**
-   * 写入某台 Host 的会话索引快照（全量）。
+   * 单行合并写入：只 upsert 一行，**绝不删除同设备其他会话**。
+   * 真机 0.1.5 取证：新建会话成功后 Relay 只拿到一行引导值，若走全量的
+   * `upsertSessions` 会把该设备其余会话全移除，直到 Host 下一次 60s 全量
+   * 上报才恢复——手机列表会「闪一下只剩新会话」。
+   */
+  const putSession = (ownerDeviceId, raw) => {
+    if (!ownerDeviceId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 ownerDeviceId')
+    if (!raw?.sessionId) return { upserted: 0, removed: 0 }
+    const prev = sessions.get(raw.sessionId)
+    sessions.set(raw.sessionId, {
+      sessionId: raw.sessionId,
+      accountId: raw.accountId ?? prev?.accountId ?? null,
+      ownerDeviceId,
+      workspace: raw.workspace ?? null,
+      title: raw.title ?? prev?.title ?? null,
+      // PC 侧状态优先：Host 报文里的 false/0 不能覆盖用户置顶
+      pinned: prev?.pinned ?? Boolean(raw.pinned),
+      pinnedOrder: prev?.pinnedOrder ?? (num(raw.pinnedOrder, 0) ?? 0),
+      state: SESSION_STATES.includes(raw.state) ? raw.state : 'stopped',
+      lastSeq: num(raw.lastSeq),
+      lastActiveAt: num(raw.lastActiveAt),
+      headerRef: raw.headerRef ? { ...raw.headerRef } : null,
+      updatedAt: now(),
+    })
+    return { upserted: 1, removed: 0 }
+  }
+
+  /**
+   * 写入某台 Host 的会话索引快照（全量；本轮未出现的会话会被移除）。
    * @returns { upserted, removed }
    */
   const upsertSessions = (ownerDeviceId, rows = []) => {
@@ -151,23 +179,7 @@ export function createControlPlane({
     for (const raw of Array.isArray(rows) ? rows : []) {
       if (!raw?.sessionId) continue
       seen.add(raw.sessionId)
-      const prev = sessions.get(raw.sessionId)
-      sessions.set(raw.sessionId, {
-        sessionId: raw.sessionId,
-        accountId: raw.accountId ?? prev?.accountId ?? null,
-        ownerDeviceId,
-        workspace: raw.workspace ?? null,
-        title: raw.title ?? prev?.title ?? null,
-        // PC 侧状态优先：Host 报文里的 false/0 不能覆盖用户置顶
-        pinned: prev?.pinned ?? Boolean(raw.pinned),
-        pinnedOrder: prev?.pinnedOrder ?? (num(raw.pinnedOrder, 0) ?? 0),
-        state: SESSION_STATES.includes(raw.state) ? raw.state : 'stopped',
-        lastSeq: num(raw.lastSeq),
-        lastActiveAt: num(raw.lastActiveAt),
-        headerRef: raw.headerRef ? { ...raw.headerRef } : null,
-        updatedAt: now(),
-      })
-      upserted++
+      upserted += putSession(ownerDeviceId, raw).upserted
     }
     let removed = 0
     for (const [id, row] of sessions) {
@@ -298,7 +310,7 @@ export function createControlPlane({
     getDevice, upsertDevice, setDeviceToken, verifyDeviceToken, heartbeatDevice,
     markDeviceOffline, revokeDevice, isDeviceAlive, listDevices,
     // session index
-    upsertSessions, getSession, listSessions, patchSession,
+    putSession, upsertSessions, getSession, listSessions, patchSession,
     // lease
     sweepExpired, getLease, acquireLease, renewLease, releaseLease, listLeases,
     // cursor

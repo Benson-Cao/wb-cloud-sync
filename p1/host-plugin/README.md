@@ -182,7 +182,7 @@ node --test p1/host-plugin/test/*.test.mjs
 2. ~~手机侧（PWA）在重连后主动发 `session/follow`~~（`p1/pwa` 已落地）。
 3. CP 已分离（`p1/cp` 接管索引 / 租约 / 位点 / 设备表）；剩「增量同步」——现在每次全量上报，会话多了要做 diff。
 4. ~~正式包换标识，接入 `dsh.bundle` 分发给真机验证~~（`bundle/` + `dist/dsh-wb-cloud-sync-host-0.1.5.tgz` 已落地并真机装包成功，`build-bundle.mjs --check` 入 CI 防脱节）。
-5. ~~真机装 bundle 跑通「配对 → 列表 → 事件流」~~（截图已确认 11 个会话列表与实时事件流）；**新建会话**在 0.1.4 报 `HOST_ADAPTER_ERROR`，0.1.5 按官方入口重写后待真机复验。
+5. ~~真机装 bundle 跑通「配对 → 列表 → 新建 → 事件流」~~（0.1.5 真机复验通过：`writer:"sessionController.create"`、`downlinks:2`、CP 新增 2 条真实会话行、`indexCount` 11 → 13）。
 6. `cancelTurn` 接宿主取消入口（方法名需重新取证，asar 里命中均为 ACP 示例）。
 7. Relay `isOnline` 会因 CP 活跃标记**早于** WS 连接就绪而返回 true，此时 `bridge` 把帧投进降级轮询队列，而 Host 只走 WS → 504。真机常连形态下不触发，正式版应让 Host 接轮询或让 `isOnline` 只认活跃 WS。
 
