@@ -114,10 +114,16 @@ const fingerprints = {
     'package.json': sha256('package.json'),
     'host-probe.json': sha256('spike/evidence/host-probe.json'),
     'check-plugin.json': sha256('spike/evidence/check-plugin.json'),
+    // 判据脚本本身也是事实：判据改了却沿用旧快照，等于用旧尺子量新代码
+    'gate-check.mjs': sha256('scripts/gate-check.mjs'),
+    'check-env.mjs': sha256('scripts/check-env.mjs'),
+    'signoff-check.mjs': sha256('scripts/signoff-check.mjs'),
+    'sync-protocol.mjs': sha256('scripts/sync-protocol.mjs'),
   },
   signoff: {
     'SECURITY-REVIEW.md': sha256('SECURITY-REVIEW.md'),
     'SIGN-OFF.md': sha256('SIGN-OFF.md'),
+    'SIGN-OFF-PROCEDURE.md': sha256('SIGN-OFF-PROCEDURE.md'),
     '01-charter.md': sha256('docs/01_项目章程.md'),
     'P1-PREREQUISITES.md': sha256('P1-PREREQUISITES.md'),
     'WORKBUDDY-REFERENCE.md': sha256('WORKBUDDY-REFERENCE.md'),
@@ -179,10 +185,12 @@ if (artifactChanged?.length) {
 }
 if (legacySnapshot) {
   freshness.reason = `快照格式为 ${previous.schema ?? '未知'}（缺少 signoff 指纹组或分组指纹），需重算一次`
-} else if (status === 'STALE' && dataChanged?.length) {
-  freshness.reason = `运行代码/证据已变化（阻断）：${dataChanged.join(', ')}`
-} else if (status === 'STALE' && signoffChanged?.length) {
-  freshness.reason = `会签材料已变化（阻断）：${signoffChanged.join(', ')}`
+} else if (status === 'STALE' && (dataChanged?.length || signoffChanged?.length)) {
+  // 两组可能同时变化，全部列出，避免只报第一组让签字人误判改动范围
+  const parts = []
+  if (dataChanged?.length) parts.push(`运行代码/证据：${dataChanged.join(', ')}`)
+  if (signoffChanged?.length) parts.push(`会签材料：${signoffChanged.join(', ')}`)
+  freshness.reason = `已变化（阻断）：${parts.join('；')}`
 } else if (status === 'DRIFTED') {
   freshness.reason = `描述文字变化（不阻断）：${narrativeChanged.join(', ')}`
 }

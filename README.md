@@ -144,6 +144,7 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 ├─ P1-PREREQUISITES.md          # P1 开工前置四项提案（提议中，待会签裁定）
 ├─ SECURITY-REVIEW.md           # 安全 Owner 一页纸（5 行核对）
 ├─ SIGN-OFF.md                  # P0 会签包：自动项 9/9、待签 M1~M7、签署栏
+├─ SIGN-OFF-PROCEDURE.md       # 人的会签操作卡（顺序 / 勾选 / 回写清单）
 ├─ pinned-commit.txt            # DSH 锁定基线 66491b0…（dsh-v0.2.2-rc.1）
 ├─ docs/                        # 设计冻结包（11 份，含 ADR-007~010）
 ├─ scripts/

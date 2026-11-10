@@ -124,8 +124,8 @@ Get-NetTCPConnection -State Listen | Where-Object {
 
 | 组 | 文件 | 变了意味着 | 判定 |
 |---|---|---|---|
-| **data（事实）** | `index.js`、`cordis.patch.yml`、`package.json`、`host-probe.json`、`check-plugin.json` | 运行代码或实测证据已变 | **`STALE`** → CI exit 2，必须重算 |
-| **signoff（会签材料）** | `SECURITY-REVIEW.md`、`SIGN-OFF.md`、`docs/01` 会签表、`P1-PREREQUISITES.md`、`WORKBUDDY-REFERENCE.md` | **签字人实际要读的材料被改** | **`STALE`** → CI exit 2，必须重算 |
+| **data（事实）** | `index.js`、`cordis.patch.yml`、`package.json`、`host-probe.json`、`check-plugin.json`，以及 4 个判据脚本（`gate-check` / `check-env` / `signoff-check` / `sync-protocol`） | 运行代码、实测证据或**判据本身**已变 | **`STALE`** → CI exit 2，必须重算 |
+| **signoff（会签材料）** | `SECURITY-REVIEW.md`、`SIGN-OFF.md`、`SIGN-OFF-PROCEDURE.md`、`docs/01` 会签表、`P1-PREREQUISITES.md`、`WORKBUDDY-REFERENCE.md` | **签字人实际要读的材料被改** | **`STALE`** → CI exit 2，必须重算 |
 | **artifact（发布物）** | `dist/*.tgz` | 重新打包了 | **仅记录 + NOTE，不影响判定** |
 | **narrative（说法）** | `REPORT.md`、`PROTOCOL.md` | 措辞 / 描述更新 | **`DRIFTED`**，放行 + NOTE |
 
@@ -139,6 +139,8 @@ Get-NetTCPConnection -State Listen | Where-Object {
 - 会签时请抄下 `capturedAt` / `git.head` / `fingerprints.data` / `fingerprints.signoff` 摘要写进签署栏备注，事后可复核。
 
 ## 五、签署栏
+
+> **怎么签**：照 [`SIGN-OFF-PROCEDURE.md`](SIGN-OFF-PROCEDURE.md) 执行——会前准备、会议顺序、每人勾什么、签完 9 步回写清单，以及「架构师兼安全 Owner」这一兼任事实的处理方式。
 
 | 角色 | 姓名 / 代号 | 结论（同意 / 附条件 / 否决） | 日期 | 备注 |
 |---|---|---|---|---|
