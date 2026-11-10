@@ -1,0 +1,9 @@
+# P1 W3 骨架：Host 侧 bundle patch
+# 正式包的 id / name 会换成 wb-cloud-sync / dsh-wb-cloud-sync（见 docs/04 §8）；
+# 这里用 -dev 后缀，避免与已真机验证过的探针包混淆。
+- insert:
+    - id: wbsync-host-dev
+      name: '@wbsync/host-plugin-dev'
+      config:
+        relayUrl: ''
+        autoConnect: false

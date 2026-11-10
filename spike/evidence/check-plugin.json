@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-spike-check/1",
-  "capturedAt": "2026-11-10T00:52:55.106Z",
-  "tempDshHome": "D:\\Dw phone\\wb-cloud-sync\\spike\\evidence\\dsh-home-VhHlkd",
-  "nodeVersion": "24.22.2",
+  "capturedAt": "2026-11-10T02:06:58.068Z",
+  "tempDshHome": "D:\\Dw phone\\wb-cloud-sync\\spike\\evidence\\dsh-home-5ykqmP",
+  "nodeVersion": "22.22.2",
   "staticRules": [
     {
       "id": "R1",

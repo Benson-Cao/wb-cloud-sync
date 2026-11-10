@@ -60,7 +60,7 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 - **CP 尚未分离**：配对码登记、设备档案、会话索引暂由 Relay 单机内存承担，不落盘、重启即清空。
 - **不持久化事件**：缓冲只在内存，进程重启即丢；`~/.dsh` 日志仍是唯一真源（`03` P1），重启补齐要回 Host 读日志——属下一步。
 - **不解析事件正文**：Relay 只按 `seq` 排队转发，不看 `ev.data`（ADR-010 / `04` §5.4）。端到端加密属 `wbsync/2`。
-- **P0 快照不覆盖 `p1/`**：`gate-check` 的 `data` 组只含探针插件与 P0 证据，P1 代码由 CI 的「P1 Relay 冒烟测试」阻断把关。
+- **P0 快照不覆盖 `p1/`**：`gate-check` 的 `data` 组只含探针插件与 P0 证据，P1 代码由 CI 的「P1 骨架冒烟测试」阻断把关（`node --test p1/relay/test/*.test.mjs p1/host-plugin/test/*.test.mjs`）。
 - 根 `package.json` 的 `files` 白名单只含 5 个文件，`p1/` 不会进入可安装探针 tarball（G9 已覆盖）。
 
 ## 下一步（`05` W3 剩余）

@@ -1,0 +1,19 @@
+{
+  "name": "@wbsync/host-plugin-dev",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "W3 development skeleton of the DSH host-side plugin: session/event uplink over WS, downlink dispatch to the host submit entry, local routes, reversible teardown.",
+  "main": "src/index.js",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=24.9"
+  }
+}

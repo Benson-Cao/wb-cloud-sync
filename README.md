@@ -169,7 +169,9 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 │  ├─ probe-plugin.mjs          # 探针的离线可测副本
 │  ├─ lib/                      # ASAR 读取器 / 多帧 zstd 解码器
 │  └─ evidence/                 # 脱敏后的证据 JSON
-├─ p1/                          # P1 开发代码（W3 Relay：HTTP + Host WS 长连，不进探针 tarball）
+├─ p1/                          # P1 开发代码（不进探针 tarball）
+│  ├─ relay/                    # W3 Relay：配对 / Host WS 长连 / 手机事件订阅（23 用例）
+│  └─ host-plugin/              # W3 Host 插件骨架：上行 / 下行分派 / 可逆卸载（13 用例）
 └─ LICENSE (MIT)
 ```
 
