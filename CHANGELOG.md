@@ -4,6 +4,18 @@
 
 ---
 
+## [P1 W3 续 12] · 2026-11-10 12:5x · 非协议变更
+
+- **Host 插件可安装包落地**（用户发现插件列表里没有——P0 装的只是探针，P1 host-plugin 一直是源码骨架）：新增 `p1/host-plugin/build-bundle.mjs` 把 `src/{index,replay,sessions}.js` 合成**单文件自包含** `bundle/index.js`（对齐 P0 探针已验证可安装的形态），`bundle/package.json` 的 `dsh` 块只声明 `bundle.patch`（host-only，写法对齐探针 / dsh-nas-sync），`npm pack` 产出 **`dist/dsh-wb-cloud-sync-host-0.1.0.tgz`** → DSH「添加插件」安装。
+- **wrapper 配置链**（低→高）：代码默认（`relayUrl: http://127.0.0.1:8787`、`deviceId: 主机名`、`hostToken: ''`——配 run.mjs 未设令牌形态即**零配置本机试跑**）← `~/.dsh/wbsync-host.json` ← `WBSYNC_*` 环境变量 ← `apply` 的 `config`。
+- **打包器工程化**：顶层重名合并期即失败（三模块进同一作用域，重名会静默覆盖）；相对导入与预期不符时拒绝生成（防止 src 重构后静默打出坏包）；`--check` 模式比对已生成文件——**已入 CI 阻断**，防止「改了 src 忘了重新生成」。
+- 验证三层：① bundle 单独 import 导出正确；② tgz 解包抽查（23.5KB、无相对导入残留、wrapper 在位）；③ `test/bundle.test.mjs` 3 个端到端（bundle 独立外连真 Relay + status 如实上报 `indexReady:false`、pair 路由代理出码、环境变量覆盖 deviceId）。
+- 测试 117 → **120**（host-plugin 48 → 51）。
+
+**边界未变**：bundle 期 `deviceId` 用主机名（正式部署要有稳定 ID + 配对双绑）；`createSession` 适配器未接宿主入口（未注入 409）；run.mjs / bundle 都是开发期形态。
+
+---
+
 ## [P1 W3 续 11] · 2026-11-10 12:4x · 非协议变更
 
 - **真机联调入口补齐**：`start(port)` 原来只绑 `127.0.0.1`——手机根本连不上。`start(port, host)` 加第二参数（默认不变，单测不受影响），并新增 **`p1/relay/run.mjs` 启动器**：监听 `0.0.0.0`，启动即打印所有局域网 IPv4 的「Relay 地址」（壳页面 `/app` 与 PC 插件 `relayUrl` 两种用法各一行）。`PORT` / `HOST` / `WBSYNC_HOST_TOKEN` / `WBSYNC_ADMIN_TOKEN` 环境变量可配，全有默认值。

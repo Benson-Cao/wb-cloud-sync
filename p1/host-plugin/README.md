@@ -124,7 +124,7 @@ Relay 的事件缓冲在内存里，进程一重启就空；手机断线重连�
 4. **丢弃窗口靠 follow 兜底，但没人自动触发**：`dropped` 只计数，重连后主动补拉要等手机侧（PWA）发起。
 5. **索引里没有 `title`**：宿主会话头里确实没有标题字段（实测只有 `version/id/createdAt/cwd/isSeeded/delegationDepth/agentPreset`），标题要由 PC 侧会话管理器补，此处给 `null` 而不是从 `cwd` 编一个。
 
-## 九、测试（48 个用例，`node --test`）
+## 九、测试（51 个用例，`node --test`）
 
 ```bash
 node --test p1/host-plugin/test/*.test.mjs
@@ -143,17 +143,26 @@ node --test p1/host-plugin/test/*.test.mjs
 | 索引接线 | 注册后自动推 `host/sessions`、无 `list()` 不发也不谎报空表、按周期刷新、重连后重推、真 Relay 落库可查（`/host/indexes`） |
 | 断线与卸载 | 退避重连并重新注册；卸载后路由注销、监听移除、不再上行、**不在背后重连** |
 | 端到端（真 Relay） | 配对 → Host WS 注册 → 手机 HTTP 投递 → 适配器 → 响应回程 → 卸载后 Relay 判离线 |
+| **可安装 bundle（3 个）** | 单文件 `bundle/index.js` 独立外连真 Relay、`/__wbsync/status` 如实上报（无 `sessionPersistence` 时 `indexReady:false`）、pair 路由代理真 Relay 出码、wrapper 配置链（默认 ← 文件 ← 环境变量） |
 
 宿主侧用两个替身：`createMockCtx()`（只实现三个能力 + 记录装载/拆除）和 `startFakeRelay()`（复用手写的 `upgradeToWebSocket`，可逐帧观察并可主动下发）；回放用假句柄（`read` / `close`）。端到端用例用**真 `createRelay()`**，跑真实配对与鉴权，不用 mock 绕过。
 
 ## 十、下一步
 
-1. `deviceId` 派生 + 本机持久化 + 与配对令牌双绑。
-2. 手机侧（PWA）在重连后主动发 `session/follow`，把 `dropped` 窗口补回来。
+1. `deviceId` 派生 + 本机持久化 + 与配对令牌双绑（bundle 期临时用主机名）。
+2. ~~手机侧（PWA）在重连后主动发 `session/follow`~~（`p1/pwa` 已落地）。
 3. CP 已分离（`p1/cp` 接管索引 / 租约 / 位点 / 设备表）；剩「增量同步」——现在每次全量上报，会话多了要做 diff。
-4. 正式包换标识，接入 `dsh.bundle` 分发给真机验证。
+4. ~~正式包换标识，接入 `dsh.bundle` 分发给真机验证~~（`bundle/` + `dist/dsh-wb-cloud-sync-host-0.1.0.tgz` 已落地，`build-bundle.mjs --check` 入 CI 防脱节）。
+5. 真机装 bundle 跑通「配对 → 列表 → 新建 → 事件流」，`createSession` 适配器接宿主新建会话入口。
 
 ---
 
 零依赖：`src/` 只有 `index.js` / `replay.js` / `sessions.js` 三个模块、互相 import，无第三方包（WS 用 Node 内置全局 `WebSocket`），可直接 `node --test`。
+
+## 十一、可安装 bundle（`bundle/`）
+
+- `bundle/index.js` 由 `node p1/host-plugin/build-bundle.mjs` 从 `src/` **自动生成**（单文件自包含，顶层重名构建期即失败）；CI 用 `--check` 防「改了 src 忘了生成」。
+- `npm pack` 产出 `dist/dsh-wb-cloud-sync-host-0.1.0.tgz` → DSH「添加插件」安装；`dsh` 块只声明 `bundle.patch`（host-only，写法对齐已验证的探针 / dsh-nas-sync）。
+- wrapper 配置链（低→高）：代码默认（本机 Relay + 主机名 deviceId）← `~/.dsh/wbsync-host.json` ← `WBSYNC_*` 环境变量 ← `apply` 的 `config`。
+- 安装 / 配置详见 `bundle/README.md`。
 

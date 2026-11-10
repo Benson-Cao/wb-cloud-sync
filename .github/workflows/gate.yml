@@ -59,3 +59,8 @@ jobs:
       # host-plugin = 上行 / 下行分派 / 历史补齐 / 会话索引 / 可逆卸载。
       - name: P1 骨架冒烟测试
         run: node --test p1/*/test/*.test.mjs
+
+      # bundle/index.js 是从 src/ 自动生成的单文件（可安装形态），
+      # 与源码脱节即失败——防止「改了 src 忘了重新生成」。
+      - name: Host 插件 bundle 与源码同步校验
+        run: node p1/host-plugin/build-bundle.mjs --check

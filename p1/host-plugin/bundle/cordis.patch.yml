@@ -1,0 +1,8 @@
+# dsh-wb-cloud-sync-host · Cordis **bundle** patch 层
+#
+# 必须是 `- insert:` 形式（profile root 是 []，不带 insert 的 patch 会被静默跳过）。
+# 写法对齐已验证可用的 dsh-nas-sync / dsh-remote / P0 探针。
+# host-only bundle：只声明 dsh.bundle，不声明 dsh.client。
+- insert:
+    - id: wb-cloud-sync-host
+      name: dsh-wb-cloud-sync-host
