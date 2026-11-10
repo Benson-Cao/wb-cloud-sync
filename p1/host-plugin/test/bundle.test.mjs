@@ -72,6 +72,7 @@ test('B1 bundle 独立外连真 Relay：注册成功、status 路由如实上报
   assert.equal(res.data.connected, true)
   assert.equal(res.data.deviceId, 'pc-bundle')
   assert.equal(res.data.indexReady, false)   // 无 sessionPersistence：如实上报，不谎报
+  assert.ok('indexStats' in res.data, 'status 需暴露增量上报明细（mode/unchanged/removed）')
   ctx.dispose()
   await waitFor(() => !relay.isOnline('pc-bundle'), 2000, '卸载后判离线')
 })

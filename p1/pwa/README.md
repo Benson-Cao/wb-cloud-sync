@@ -81,7 +81,7 @@ node --test p1/pwa/test/*.test.mjs       # 或 pnpm --dir p1/pwa test
 - **`PATCH /api/sessions/:id`（置顶）未接**：手机端本就 403（协议 §4），属 PC 侧功能。
 - **附件上行未做**：`attachments/*` 是 P2 端点（WAIVER §5 默认口径）。
 - **sw.js 不缓存业务响应**：离线看到旧会话流比空页面更容易误判，数据永远网络优先。
-- **壳更新要刷两次**：SW 缓存名随清单变更递增（`wbsync-shell-v6`，因 `client.js` 订阅状态修复 + `say()` 反馈可见性改动递增）；旧 SW 接管期间第一次刷新仍返回旧壳，后台装好新 SW 并清掉旧缓存后，第二次刷新才拿到新壳。真机联调期如卡住，用无痕窗口或清除站点数据可一步跳过。壳 HTML 已改网络优先，新增模块不会再被旧缓存拖住；`static.test.mjs` S6 会校验清单覆盖页面与 src 模块的传递 import，防止漏缓存。
+- **壳更新要刷两次**：SW 缓存名随清单变更递增（`wbsync-shell-v8`，因事件流折叠、订阅状态修复、`say()` 反馈可见性等壳改动递增）；旧 SW 接管期间第一次刷新仍返回旧壳，后台装好新 SW 并清掉旧缓存后，第二次刷新才拿到新壳。真机联调期如卡住，用无痕窗口或清除站点数据可一步跳过。壳 HTML 已改网络优先，新增模块不会再被旧缓存拖住；`static.test.mjs` S6 会校验清单覆盖页面与 src 模块的传递 import，防止漏缓存。
 - **附件上行（`attachments/*`）未实现，列为 P2 独立工作项**：需协议 `wbsync/1 r3` 定义端点与 receipt 语义、`ALLOWED_ENDPOINTS` 加入 `attachments/*`、CP 增加 receipt 存储（大小上限 / TTL / 吊销即失效）、Host 侧取证并接 `ctx.fileUploads.registerAgentResolver` 把文件交给 Agent、PWA 增加文件选择并把 `{type:'file',receiptId}` 放进 `session/prompt` 的 content。关键是 ADR-010 信任边界：文件内容是否允许经 Relay 中转、是否计入「零正文落盘」口径，需单独裁定。当前 `session/prompt` schema 已支持 file content，但链路两端都未接，本轮不动。
 
 ## 测试（29 用例，真实 Relay 端到端）

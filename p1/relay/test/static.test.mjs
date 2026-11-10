@@ -120,4 +120,5 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   // 真机 0.1.6 取证：滚到事件流区域点按钮后，顶部反馈条看不见，被误判成「点了没反应」
   assert.match(page, /scrollIntoView/, '操作反馈必须主动滚入视口')
   assert.match(page, /STATUS_TEXT/, '订阅状态需映射中文，不暴露 connecting/following 内部值')
+  assert.match(page, /fold\.type === type/, '连续同类型事件需折叠，避免流式碎片把页面拉爆')
 })

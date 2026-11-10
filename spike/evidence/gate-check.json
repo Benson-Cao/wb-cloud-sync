@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T13:17:57.669Z",
+  "capturedAt": "2026-11-10T13:30:17.661Z",
   "git": {
-    "head": "3da34b033b15911757743371c85b33adabff3deb",
+    "head": "ac62381e52f1ae3c5849e4a73d3ad12458076015",
     "branch": "main",
     "worktreeClean": false
   },
@@ -14,30 +14,24 @@
       "check-plugin.json"
     ],
     "signoffChanged": [],
-    "artifactChanged": [
-      "dist-tarball"
-    ],
+    "artifactChanged": [],
     "narrativeChanged": [],
-    "notes": [
-      "发布物已重建（仅记录，不影响判定）：dist-tarball"
-    ],
-    "previousCapturedAt": "2026-11-10T13:12:31.027Z",
-    "previousGitHead": "c2e9e45a09c69045b3454d628ecf5d7f68180194",
+    "notes": [],
+    "previousCapturedAt": "2026-11-10T13:17:57.669Z",
+    "previousGitHead": "3da34b033b15911757743371c85b33adabff3deb",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
       "previousReason": "已变化（阻断）：运行代码/证据：host-probe.json, check-plugin.json",
-      "capturedAt": "2026-11-10T13:12:31.027Z",
-      "gitHead": "c2e9e45a09c69045b3454d628ecf5d7f68180194",
+      "capturedAt": "2026-11-10T13:17:57.669Z",
+      "gitHead": "3da34b033b15911757743371c85b33adabff3deb",
       "dataChanged": [
         "host-probe.json",
         "check-plugin.json"
       ],
       "signoffChanged": [],
-      "artifactChanged": [
-        "dist-tarball"
-      ],
+      "artifactChanged": [],
       "narrativeChanged": []
     }
   },
@@ -46,8 +40,8 @@
       "index.js": "639eeebca42695b1841a65d99b9812d77c37985171537d90e2429761cbe75523",
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
-      "host-probe.json": "653aa0bbf5d2bb6478421200f115fd9d713658e5827a2faf4d929bbac4a27cd5",
-      "check-plugin.json": "b21a7e3e3b3de586fdcfaf81506c2f4662c85f4cd31b7f104516f36a4e3510a3",
+      "host-probe.json": "a57205ad03ff73f8da91c578a460cbab75501bc32478fa1ae21b847d5557a751",
+      "check-plugin.json": "6c212298aa2915c87a7a47428402bea4db89d30878ea97eb63acc7359c48c5a2",
       "gate-check.mjs": "336f35b54d38ec043e7b7ce4a06e1d63580a337a39852e85f429b13d97a7c2de",
       "check-env.mjs": "d26c26749008404f631c64be52d908e5c0a60074235218327ff6eeb8c270e5b3",
       "signoff-check.mjs": "4491b857f555f520c6170c91e4c46d008b554de9721d9d3900d71f3a63a92938",

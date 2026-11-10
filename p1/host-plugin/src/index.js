@@ -313,6 +313,8 @@ export function apply(ctx, config = {}) {
           indexCount: state.indexCount,
           indexSentAt: state.indexSentAt,
           indexError: state.indexError,
+          // 增量上报明细：mode=full/diff、unchanged 跳过数、removed 删除数
+          indexStats: state.indexStats ?? null,
           lastSeq: Object.fromEntries(state.lastSeq),
           writer: hostAdapters.capabilities?.() ?? { injected: true },
           protocol: PROTOCOL,

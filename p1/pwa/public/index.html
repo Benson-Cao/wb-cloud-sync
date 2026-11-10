@@ -138,17 +138,29 @@
       }
     }
 
+    // 连续同类型事件折叠成一行：流式输出会刷出成百条碎片，逐条铺开会把页面拉爆
+    let fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
     const renderEvent = (sessionId, ev, source) => {
       if (sessionId !== activeSession) return
       const last = seenSeq.get(sessionId) ?? -1
       if (!Number.isInteger(ev?.seq) || ev.seq <= last) return   // 幂等渲染
       seenSeq.set(sessionId, ev.seq)
+      const type = ev?.type ?? ev?.t ?? 'event'
+      const detail = JSON.stringify(ev.data ?? ev, null, 1).slice(0, 400)
+      if (fold.type === type && fold.div) {
+        fold.to = ev.seq
+        fold.count++
+        fold.div.querySelector('code').textContent = `#${fold.from}–#${fold.to} ${type} ×${fold.count}`
+        fold.pre.textContent = detail   // 折叠行始终显示最后一条的摘要
+        return
+      }
       const div = document.createElement('div')
       div.className = 'ev'
-      const type = ev?.type ?? ev?.t ?? 'event'
-      div.innerHTML = `<code>#${ev.seq} ${type}${source === 'replay' ? ' · 补齐' : ''}</code>
-        <pre>${JSON.stringify(ev.data ?? ev, null, 1).slice(0, 400)}</pre>`
+      div.innerHTML = `<code>#${ev.seq} ${type}${source === 'replay' ? ' · 补齐' : ''}</code><pre></pre>`
+      const pre = div.querySelector('pre')
+      pre.textContent = detail
       $('events').appendChild(div)
+      fold = { type, from: ev.seq, to: ev.seq, count: 1, div, pre }
     }
 
     const openClient = (base, deviceId, token) => {
@@ -203,6 +215,9 @@
     const openStream = async (sessionId) => {
       activeSession = sessionId
       seenSeq.set(sessionId, -1)
+      // 切换会话必须清空折叠状态与旧事件，否则会跨会话合并、并残留上一个会话的内容
+      fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
+      $('events').innerHTML = ''
       $('stream').hidden = false
       $('streamTitle').textContent = `事件流 · ${sessionId}`
       for (const el of document.querySelectorAll('.row')) el.classList.remove('active')
