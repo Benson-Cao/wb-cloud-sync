@@ -1,36 +1,34 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T13:30:17.661Z",
+  "capturedAt": "2026-11-10T13:35:03.191Z",
   "git": {
-    "head": "ac62381e52f1ae3c5849e4a73d3ad12458076015",
+    "head": "cd4ffee3db1528b56bff645effa9262748499532",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [
-      "host-probe.json",
-      "check-plugin.json"
+    "dataChanged": [],
+    "signoffChanged": [
+      "SIGN-OFF.md"
     ],
-    "signoffChanged": [],
     "artifactChanged": [],
     "narrativeChanged": [],
     "notes": [],
-    "previousCapturedAt": "2026-11-10T13:17:57.669Z",
-    "previousGitHead": "3da34b033b15911757743371c85b33adabff3deb",
+    "previousCapturedAt": "2026-11-10T13:30:17.661Z",
+    "previousGitHead": "ac62381e52f1ae3c5849e4a73d3ad12458076015",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：运行代码/证据：host-probe.json, check-plugin.json",
-      "capturedAt": "2026-11-10T13:17:57.669Z",
-      "gitHead": "3da34b033b15911757743371c85b33adabff3deb",
-      "dataChanged": [
-        "host-probe.json",
-        "check-plugin.json"
+      "previousReason": "已变化（阻断）：会签材料：SIGN-OFF.md",
+      "capturedAt": "2026-11-10T13:30:17.661Z",
+      "gitHead": "ac62381e52f1ae3c5849e4a73d3ad12458076015",
+      "dataChanged": [],
+      "signoffChanged": [
+        "SIGN-OFF.md"
       ],
-      "signoffChanged": [],
       "artifactChanged": [],
       "narrativeChanged": []
     }
@@ -49,7 +47,7 @@
     },
     "signoff": {
       "SECURITY-REVIEW.md": "654740fe43c975e8a6fe2ee4dd2205b14e79c0641fa4874947fc0ce6acd529c0",
-      "SIGN-OFF.md": "5980bcc44fb44b2a3a127ba447285f875bde720230bc6c0af1c0a558553a4614",
+      "SIGN-OFF.md": "f050a4f14b6ae58feb2ededd209c5d769c9de262afebd49a0a496ef4688ff6d2",
       "SIGN-OFF-PROCEDURE.md": "2c279eb54b44ff3b5fab18c121c53b68b8f3f23da27e0f98fdf18abbb17fd1df",
       "SIGNOFF-WAIVER.md": "920af35df5a96b39d83d401e99d01957d558479b3ad52df1e0cafa12d7c60336",
       "01-charter.md": "3740d12f8192aa94945b9f4de6a7b4a0ecc18a4c3fcd174bd054df45a98d83df",
@@ -65,7 +63,7 @@
     }
   },
   "secretScan": {
-    "filesScanned": 99,
+    "filesScanned": 101,
     "patterns": [
       "github-classic",
       "github-fine-grained",

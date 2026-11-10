@@ -4,6 +4,16 @@
 
 ---
 
+## [P3 前置] · 2026-11-10 21:3x · 出网审计（静态半边）
+
+- 新增 `scripts/egress-audit.mjs`：扫描 `p1/` 运行代码里的 `http(s)://` / `ws(s)://` 字面量，按 `loopback` / `private` / `bind-any` / `placeholder` / `external` 分类；`--check` 在存在 `external` 时 exit 1。
+- **防漏扫**：文件数为 0 或 URL 字面量为 0 时直接 FAIL——正则失效不能静默通过（避免假阴性）。
+- 首轮结果：**31 个文件 / 38 条字面量**，全部为 `loopback`(32) / `private`(3) / `placeholder`(3)，**`external` 0 条 → PASS**。证据 `spike/evidence/egress-audit.json`。
+- **明确边界**：静态审计只看代码里写死的地址，看不到动态拼接、运行时配置与依赖包内部请求。真实流量镜像（`pktmon`）仍是 P3 W10 必做项；脚本里 `runtimeHalf.status` 固定 `NOT_RUN` 并给出命令与判据，**不假装已完成**。
+- **不并入 P0 门禁**：加进 G1–G9 会牵动全仓 `9/9` 表述与快照语义，收益不抵风险；先作为独立脚本 + 证据存在，W10 时再并入。
+
+---
+
 ## [P1 W3 续 26] · 2026-11-10 21:3x · 可观测性与事件流可读性
 
 - **status 补 `indexStats`**：`/__wbsync/status` 现在输出 `indexStats`（`mode: full|diff`、`unchanged`、`removed`、`sources`），真机可确认增量上报实际走的是哪条路径；B1 增字段断言。

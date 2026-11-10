@@ -1,0 +1,76 @@
+{
+  "schema": "wbsync-egress-audit/1",
+  "capturedAt": "2026-11-10T13:34:45.382Z",
+  "scope": "p1",
+  "extensions": [
+    ".js",
+    ".mjs",
+    ".html"
+  ],
+  "filesScanned": 31,
+  "urlLiterals": 38,
+  "hosts": [
+    {
+      "host": "127.0.0.1",
+      "class": "loopback",
+      "count": 30,
+      "files": [
+        "p1/host-plugin/build-bundle.mjs",
+        "p1/host-plugin/test/bundle.test.mjs",
+        "p1/host-plugin/test/host-adapters.test.mjs",
+        "p1/host-plugin/test/plugin.test.mjs",
+        "p1/pwa/test/create.test.mjs",
+        "p1/pwa/test/pairing.test.mjs",
+        "p1/pwa/test/pwa.test.mjs",
+        "p1/relay/run.mjs",
+        "p1/relay/src/server.js",
+        "p1/relay/test/cp-separation.test.mjs",
+        "p1/relay/test/events.test.mjs",
+        "p1/relay/test/listen.test.mjs",
+        "p1/relay/test/relay.test.mjs",
+        "p1/relay/test/static.test.mjs",
+        "p1/relay/test/ws.test.mjs"
+      ]
+    },
+    {
+      "host": "localhost",
+      "class": "loopback",
+      "count": 2,
+      "files": [
+        "p1/relay/src/server.js"
+      ]
+    },
+    {
+      "host": "x",
+      "class": "placeholder",
+      "count": 3,
+      "files": [
+        "p1/relay/test/static.test.mjs"
+      ]
+    },
+    {
+      "host": "192.168.0.106",
+      "class": "private",
+      "count": 2,
+      "files": [
+        "p1/pwa/src/hmac-sha256.js",
+        "p1/pwa/src/pairing.js"
+      ]
+    },
+    {
+      "host": "192.168.x.x",
+      "class": "private",
+      "count": 1,
+      "files": [
+        "p1/pwa/public/index.html"
+      ]
+    }
+  ],
+  "external": [],
+  "verdict": "PASS",
+  "note": "静态半边：只覆盖代码里写死的 http(s)/ws(s) 字面量。动态拼接地址、运行时配置、依赖包内部请求都看不到，必须由 P3 W10 的真实流量镜像补齐。",
+  "runtimeHalf": {
+    "status": "NOT_RUN",
+    "hint": "Windows: pktmon start --capture --comp nics → 复现一轮配对/投递 → pktmon stop → pktmon format 导出；判据：除 Relay 自托管地址外不得出现其它外部目的地址"
+  }
+}
