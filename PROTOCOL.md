@@ -10,7 +10,7 @@
 # 04 接口协议与数据模型（PROTOCOL.md）
 
 > 协议版本：`wbsync/1`
-> Owner：架构师 ｜ 状态：**修订 r1（待会签）** ｜ 协议版本：`wbsync/1`（r1 为澄清 + 新增可选字段，不升主版本）
+> Owner：架构师 ｜ 状态：**修订 r2（待会签）** ｜ 协议版本：`wbsync/1`（r2 为状态枚举扩充 + 正文可见性边界澄清，不升主版本）
 > **本文是跨组件唯一契约源**。任何字段变更必须同时更新本文件、版本号与 CHANGELOG。
 > 字段名以锁定的 DSH commit 实际类型为准；标注「示意」处需在 W1 Spike 后回填精确类型。
 
@@ -87,7 +87,7 @@ SessionIndex {
   title          text,
   pinned         boolean,
   pinnedOrder    int,
-  state          text,        -- 'running' | 'awaiting' | 'completed' | 'unreadable'
+  state          text,        -- 'running' | 'awaiting' | 'completed' | 'stopped' | 'failed' | 'unreadable'
   lastSeq        bigint,      -- 会话内连续 seq 上界
   lastActiveAt   bigint,
   headerRef      jsonb        -- version,parentSession,delegationDepth,agentPreset,isSeeded,origin
@@ -119,6 +119,8 @@ Idempotency {
   PRIMARY KEY (scope, clientMsgId)
 }
 ```
+
+**`state` 映射（r2 新增）**：由 `turn/end.reason` 单向决定 —— `completed | max-tokens → completed`（`max-tokens` 附截断标记）、`aborted → stopped`（远程停止，已完成步骤保留）、`error | interrupted → failed`、`blockaded → awaiting`；日志格式不可解读时 `unreadable`。同一会话同一时刻只上报一种状态，随 `session/index` 增量帧下发，客户端不自行推断。对齐 WorkBuddy 对话级五态（运行中 / 等待输入 / 已完成 / 已停止 / 失败）。
 
 > `SessionHeader` 字段（DSH 侧）：`version / id / createdAt / cwd / parentSession / isSeeded / origin / delegationDepth / agentPreset`。跨设备展示工作空间与会话谱系以它为准，**不要自己猜标题或层级**。
 
@@ -246,6 +248,21 @@ ANY  /d/<deviceId>/$events/*      审批 / 提问通道
 
 **保序**：Relay 不重排帧；同一 `sessionId` 的 `seq` 必须单调递增到达。若检测到乱序，客户端缓存并等待缺口填补，超时按 `NO_PROGRESS` 上报。
 
+### 5.4 正文可见性边界（r2 新增，信任边界澄清）
+
+**事实**：`session/event` 帧的 `ev.data` 就是会话正文。Relay 终止 TLS 后按 ≤64KiB 帧透传，因此 **Relay 进程可见事件帧明文**；CP 不接收该帧。
+
+| 维度 | v1 保证 | 不保证 |
+|---|---|---|
+| 落盘（at-rest） | CP 无正文表、Relay 不写盘；事件流只在内存中转发 | — |
+| 传输（in-transit） | Host↔Relay、Relay↔手机全链路 TLS 1.2+ | **不保证对 Relay 运维的机密性**（可见明文正文） |
+| 工作区文件 | 根本不经过 Relay / CP | — |
+
+- **统一口径**：项目内所有「会话正文不上云」解释为 **「零正文落盘、零正文进入 CP」**，不解释为「零正文经过 Relay」。`02` NFR-4、`08` §6、`07` TC-7.6 的出网审计目标据此收敛为「0 字节工作区文件 + 0 条正文写入持久化层」。
+- **依赖**：正文机密性依赖 **自托管 Relay + 运维可信 + 主机访问控制**，不依赖密码学隔离；部署方须限制 Relay 主机登录、关闭核心转储与调试抓包，见 `10` §6。
+- **升级路径**：若要求「即使 Relay 被攻破也拿不到正文」，须引入 Host↔手机端到端加密载荷（`enc` 字段 + 配对期密钥交换），属**不兼容变更**，升 `wbsync/2` 并单独立 ADR；v1 明确不做（ADR-010）。
+- 与 WorkBuddy 官方「安全中继通道加密 + 为在移动端展示而收集对话内容与任务记录」的差异见 `WORKBUDDY-REFERENCE.md` §3.1。
+
 ---
 
 ## 6. Host 本地接口（`ctx.webServer` 具名路由）
@@ -310,10 +327,11 @@ allowedEndpoints:
 ## 9. 版本与兼容
 
 - 协议版本放在每次握手的 `protocol` 字段；不兼容变更升 `wbsync/2`，Relay 同时兼容 1/2 两个版本至少 90 天。
-- 新增事件类型一律带 `ignorable: true`，保证旧客户端可跳过。
+- 新增事件类型一律由客户端按白名单默认跳过；**不得依赖服务端 `ignorable` 标记**（实测宿主不下发，见 §3）。
 - 新增字段必须可选 + 有默认值；删除字段走 90 天弃用期。
 - 字段类型以锁定 DSH commit 为准；升级 DSH 前跑全量契约测试（见 `07`）。
 - **r1（2026-11-07）**：按 W1 Spike 实测澄清事件契约、幂等映射与 Idempotency 归属；仅新增可选字段与说明，无删除/改名，兼容 `wbsync/1` 现有客户端；依据 ADR-007~009（待会签）。
+- **r2（2026-11-10）**：`SessionIndex.state` 扩充 `stopped` / `failed` 两个枚举值并给出 `turn/end.reason` 映射；新增 §5.4 正文可见性边界；修正「新增事件依赖 `ignorable`」的过时表述。无删除、无改名，兼容 `wbsync/1` 现有客户端；依据 WorkBuddy 对标复核与 ADR-010（待会签）。
 
 ---
 
@@ -323,3 +341,4 @@ allowedEndpoints:
 |---|---|---|---|
 | wbsync/1 | 2026-11-07 | 首版冻结 | 架构师 |
 | wbsync/1 r1 | 2026-11-07 | 按 Spike 实测修订 §1/§2/§3，新增 ADR-007~009 引用（待会签） | 架构师 |
+| wbsync/1 r2 | 2026-11-10 | WorkBuddy 对标复核：state 扩六态、新增 §5.4 正文可见性边界、ADR-010 引用（待会签） | 架构师 |

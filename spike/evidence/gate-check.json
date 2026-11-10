@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/3",
-  "capturedAt": "2026-11-10T00:20:06.841Z",
+  "capturedAt": "2026-11-10T00:41:25.969Z",
   "git": {
-    "head": "7d1c771d4b28db59b7e62f3cdd976f3864a5530b",
+    "head": "b5bebacb0777f1d1716633b5cae28890b119bcb1",
     "branch": "main",
     "worktreeClean": false
   },
@@ -10,19 +10,25 @@
   "freshness": {
     "status": "CURRENT",
     "dataChanged": [],
-    "artifactChanged": [],
+    "artifactChanged": [
+      "dist-tarball"
+    ],
     "narrativeChanged": [],
-    "notes": [],
-    "previousCapturedAt": "2026-11-10T00:13:40.726Z",
-    "previousGitHead": "e140c7053fba25dc92bf7f8bf90ba4018a8f1101",
+    "notes": [
+      "发布物已重建（仅记录，不影响判定）：dist-tarball"
+    ],
+    "previousCapturedAt": "2026-11-10T00:40:53.322Z",
+    "previousGitHead": "b5bebacb0777f1d1716633b5cae28890b119bcb1",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-10T00:13:40.726Z",
-      "gitHead": "e140c7053fba25dc92bf7f8bf90ba4018a8f1101",
+      "capturedAt": "2026-11-10T00:40:53.322Z",
+      "gitHead": "b5bebacb0777f1d1716633b5cae28890b119bcb1",
       "dataChanged": [],
-      "artifactChanged": [],
+      "artifactChanged": [
+        "dist-tarball"
+      ],
       "narrativeChanged": []
     }
   },
@@ -32,14 +38,14 @@
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
       "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
-      "check-plugin.json": "5509b9288dd8967fc146ba7273df4a491be06c1b514e07fe2f8afc069e48bd07"
+      "check-plugin.json": "6af8a69f6b548bdae6f3281799da159efc557f52191a5201d434474e10f1ed76"
     },
     "artifact": {
-      "dist-tarball": "3f60509c42fd9ca121df64a74cf46306ce51fcb6b1953ba50c4cc5fc41c09896"
+      "dist-tarball": "48902c062dacf2dceb275c734295d5a9425e2ee087e71c58206d6f781197d280"
     },
     "narrative": {
       "REPORT.md": "05b1d338f6797668fc26e04cecdd67c23ae2720f59b08dd56079f98ded7549dc",
-      "PROTOCOL.md": "249aeab1fb45b80745aada77af0b887add995f820177ffc61552b37498bf13d6"
+      "PROTOCOL.md": "eb3af57492c02fa4d0bb0aef7862186763261f559da2833c5201d5150d89571e"
     }
   },
   "tarballFiles": [
@@ -102,7 +108,7 @@
     },
     {
       "id": "G7",
-      "label": "ADR-007~009 已写入 03",
+      "label": "ADR-007~010 已写入 03",
       "pass": true
     },
     {
@@ -160,6 +166,12 @@
       "label": "本地构建链 Node ≥24.9 + pnpm 11（见 scripts/check-env.mjs）",
       "status": "NOT MET · 2/5",
       "owner": "HE-A + BE-RL"
+    },
+    {
+      "id": "M7",
+      "label": "ADR-010 正文可见性边界（信任边界，安全 Owner 必看）",
+      "status": "提议中，待会签",
+      "owner": "ARC + 安全 Owner"
     }
   ],
   "gate": "BLOCKED_BY_SIGNOFF"

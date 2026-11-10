@@ -139,15 +139,18 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 ├─ index.js                     # 探针插件入口（纯 ESM，无构建、无依赖）
 ├─ dist/*.tgz                   # 预打好的可安装 tarball
 ├─ PROTOCOL.md                  # 04 的发布副本（sync-protocol.mjs 单向生成）
-├─ CHANGELOG.md                 # 契约变更记录（wbsync/1 r1）
-├─ SIGN-OFF.md                  # P0 会签包：自动项 9/9、待签 M1~M6、签署栏
+├─ CHANGELOG.md                 # 契约变更记录（wbsync/1 r2）
+├─ WORKBUDDY-REFERENCE.md       # WorkBuddy 手机/电脑端对标复核（r2 修订依据）
+├─ SECURITY-REVIEW.md           # 安全 Owner 一页纸（5 行核对）
+├─ SIGN-OFF.md                  # P0 会签包：自动项 9/9、待签 M1~M7、签署栏
 ├─ pinned-commit.txt            # DSH 锁定基线 66491b0…（dsh-v0.2.2-rc.1）
-├─ docs/                        # 设计冻结包 v1.1（11 份，含 ADR-007~009）
+├─ docs/                        # 设计冻结包（11 份，含 ADR-007~010）
 ├─ scripts/
 │  ├─ gate-check.mjs            # P0 门禁自动核查（--check 供 CI，输出证据快照）
 │  ├─ check-env.mjs             # 构建链环境自检（只读，M6b）
 │  ├─ lib/tar.mjs               # 零依赖 tar 解析（G9 解包比对）
 │  ├─ sync-protocol.mjs         # ADR-009：生成 PROTOCOL.md + --check CI 校验
+│  ├─ apply-workbuddy-revisions.mjs # r2 对标复核修订（带断言与备份）
 │  ├─ apply-spike-revisions.mjs # v1.0→v1.1 文档修订（带断言与原文备份）
 │  └─ apply-realdevice-updates.mjs # 真机结论回填（3 处，带断言）
 ├─ spike/

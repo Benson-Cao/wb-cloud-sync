@@ -4,6 +4,7 @@ spike/evidence/plugin-probe.json
 spike/evidence/host-probe.full.json
 .revisions-backup/
 .revisions-backup-realdevice/
+.revisions-backup-workbuddy/
 node_modules/
 *.tgz
 

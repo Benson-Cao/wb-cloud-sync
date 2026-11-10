@@ -174,8 +174,8 @@ const automated = [
     pass: report.includes('4.1.2') && report.includes('8/8') },
   { id: 'G6', label: 'TC-4.10 真机卸载已记录（REPORT §4.1.3）',
     pass: report.includes('4.1.3') },
-  { id: 'G7', label: 'ADR-007~009 已写入 03',
-    pass: (arch.match(/^### ADR-00[789]/gm) ?? []).length === 3 },
+  { id: 'G7', label: 'ADR-007~010 已写入 03',
+    pass: (arch.match(/^### ADR-(00[789]|010)/gm) ?? []).length === 4 },
   { id: 'G8', label: '仓库跟踪文件无 PAT/密钥命中',
     pass: secretClean },
   { id: 'G9', label: '发布包内容与仓库源码逐文件一致（解包比对）',
@@ -191,6 +191,7 @@ const manual = [
   { id: 'M5', label: '安全项一票否决权行使（08 / 01 §6）', status: '待安全 Owner', owner: '安全 Owner' },
   { id: 'M6a', label: 'CI 闸门接入（GitHub Actions · gate.yml）', status: 'MET · run 42366496926', owner: 'HE-A + BE-RL' },
   { id: 'M6b', label: '本地构建链 Node ≥24.9 + pnpm 11（见 scripts/check-env.mjs）', status: 'NOT MET · 2/5', owner: 'HE-A + BE-RL' },
+  { id: 'M7', label: 'ADR-010 正文可见性边界（信任边界，安全 Owner 必看）', status: '提议中，待会签', owner: 'ARC + 安全 Owner' },
 ]
 
 const result = {
