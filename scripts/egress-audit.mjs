@@ -87,6 +87,24 @@ const verdict = scanBroken ? 'FAIL' : external.length === 0 ? 'PASS' : 'REVIEW_R
  * 不审计 DSH 宿主进程组——那是第三方应用的连接（更新/遥测），混进来会把结论搅浑；
  * Host 插件的出网只能靠上面的静态审计 + 代码审查，这点写在 runtimeHalf.scope 里。
  */
+/**
+ * 抓包级全量镜像的操作卡：本脚本不代跑（需要管理员权限 + 人工复现流量），
+ * 但把命令和判据固定下来，任何有权限的人照着执行就能补齐最后一环。
+ */
+const PKTMON_GUIDE = {
+  status: 'NOT_RUN',
+  requires: '管理员 PowerShell（pktmon start 需提权；本脚本运行的会话默认不是管理员）',
+  covers: 'DSH 宿主进程组、依赖包内部请求等进程级枚举看不到的流量',
+  commands: [
+    'pktmon start --capture --comp nics --pkt-size 128 -f C:\\temp\\wbsync-pktmon.etl',
+    '# 复现一轮：手机配对 → 新建会话 → 发消息 → 传一个附件 → 取消',
+    'pktmon stop',
+    'pktmon format C:\\temp\\wbsync-pktmon.etl -o C:\\temp\\wbsync-pktmon.txt -v 3',
+    '# 判据：目的地址只允许本机(127.0.0.1/::1)、局域网(192.168/10/172.16-31)、自托管 Relay；',
+    '#       出现任何公网地址即阻断，需定位到具体端点并解释来源',
+  ],
+}
+
 const collectRuntime = (enabled) => {
   if (!enabled) {
     return {
@@ -145,6 +163,7 @@ const result = {
   verdict,
   note: '静态半边：只覆盖代码里写死的 http(s)/ws(s) 字面量。动态拼接地址、运行时配置、依赖包内部请求都看不到，必须由 P3 W10 的真实流量镜像补齐。',
   runtimeHalf: runtime,
+  pktmon: PKTMON_GUIDE,
 }
 
 if (!process.argv.includes('--no-write')) {

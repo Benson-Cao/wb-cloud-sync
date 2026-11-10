@@ -4,6 +4,15 @@
 
 ---
 
+## [P1 W5 / P3] · 2026-11-10 22:2x · `[hidden]` 样式缺陷 + pktmon 操作卡
+
+- **真机可见缺陷**：点「忘掉这台电脑」后「第一句话 / 新建会话」栏仍显示。根因是 `#newbar { display: flex }` 盖掉了浏览器默认的 `[hidden] { display: none }` —— 该栏**从最初就没真正隐藏过**。加 `#setup[hidden], #newbar[hidden], #stream[hidden] { display: none }` 提权重修复；S6 增断言防回归。SW 升 `wbsync-shell-v10`。
+- **pktmon 抓包本会话无法执行**：`pktmon` 已安装，但当前会话**不是管理员**，`pktmon start` 无法提权。不假装完成——把 5 条命令与判据固化成 `pktmon` 字段写进 `spike/evidence/egress-audit.json`，任何有管理员权限的人照卡执行即可补齐最后一环。
+- 审计现状：静态 `PASS`、运行时（Relay 进程级）`PASS`、pktmon `NOT_RUN`（缺权限，非缺代码）。
+- 测试 170 全绿；门禁 9/9 PASS / CURRENT；无 bundle 变更，手机刷新两次拿 SW `v10`。
+
+---
+
 ## [P1 W5] · 2026-11-10 22:0x · 手机端「忘掉这台电脑」+ 队列缺口结论
 
 - **设置页补最小可用项**：`#setup` 增「忘掉这台电脑」按钮——停客户端、清 `wbsync.token` / `wbsync.deviceId` / `wbsync.base`、清空事件流与折叠状态、回到未配对态。此前用户只能靠清浏览器数据，等于把凭据管理推给用户。SW 升 `wbsync-shell-v9`；S6 增两条断言（入口存在 + 确实清键）。

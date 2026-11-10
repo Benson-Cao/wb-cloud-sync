@@ -1,6 +1,6 @@
 {
   "schema": "wbsync-egress-audit/1",
-  "capturedAt": "2026-11-10T13:54:12.289Z",
+  "capturedAt": "2026-11-10T14:22:33.009Z",
   "scope": "p1",
   "extensions": [
     ".js",
@@ -76,6 +76,13 @@
       {
         "pid": 28084,
         "remote": "127.0.0.1",
+        "port": 57714,
+        "state": "Established",
+        "class": "loopback"
+      },
+      {
+        "pid": 28084,
+        "remote": "127.0.0.1",
         "port": 50707,
         "state": "Established",
         "class": "loopback"
@@ -83,5 +90,18 @@
     ],
     "external": [],
     "note": "只覆盖 Relay 进程；DSH 宿主进程组不在审计范围（第三方应用的更新/遥测会干扰结论）"
+  },
+  "pktmon": {
+    "status": "NOT_RUN",
+    "requires": "管理员 PowerShell（pktmon start 需提权；本脚本运行的会话默认不是管理员）",
+    "covers": "DSH 宿主进程组、依赖包内部请求等进程级枚举看不到的流量",
+    "commands": [
+      "pktmon start --capture --comp nics --pkt-size 128 -f C:\\temp\\wbsync-pktmon.etl",
+      "# 复现一轮：手机配对 → 新建会话 → 发消息 → 传一个附件 → 取消",
+      "pktmon stop",
+      "pktmon format C:\\temp\\wbsync-pktmon.etl -o C:\\temp\\wbsync-pktmon.txt -v 3",
+      "# 判据：目的地址只允许本机(127.0.0.1/::1)、局域网(192.168/10/172.16-31)、自托管 Relay；",
+      "#       出现任何公网地址即阻断，需定位到具体端点并解释来源"
+    ]
   }
 }

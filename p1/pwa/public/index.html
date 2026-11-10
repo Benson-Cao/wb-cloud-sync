@@ -53,6 +53,8 @@
                    border-radius: 8px; padding: 8px 10px; font-size: 14px; }
     #newbar { padding: 10px 16px; background: #191919; border-bottom: 1px solid #2c2c2c;
               display: flex; gap: 8px; }
+    /* display:flex 会盖掉 UA 的 [hidden]{display:none}，必须显式提权重，否则 hidden 形同虚设 */
+    #setup[hidden], #newbar[hidden], #stream[hidden] { display: none; }
   </style>
 </head>
 <body>

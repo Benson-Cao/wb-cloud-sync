@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T14:02:25.785Z",
+  "capturedAt": "2026-11-10T14:22:33.403Z",
   "git": {
-    "head": "5833cbc5cf99959ce62ce594479b2ec2d9b898fe",
+    "head": "0fd41814590e1a9e8b09236b95c4fb1b4dbf295b",
     "branch": "main",
     "worktreeClean": false
   },
@@ -14,14 +14,14 @@
     "artifactChanged": [],
     "narrativeChanged": [],
     "notes": [],
-    "previousCapturedAt": "2026-11-10T13:54:12.620Z",
-    "previousGitHead": "f111621529c37afce8444570c8db3de522fb81ae",
+    "previousCapturedAt": "2026-11-10T14:02:25.785Z",
+    "previousGitHead": "5833cbc5cf99959ce62ce594479b2ec2d9b898fe",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-10T13:54:12.620Z",
-      "gitHead": "f111621529c37afce8444570c8db3de522fb81ae",
+      "capturedAt": "2026-11-10T14:02:25.785Z",
+      "gitHead": "5833cbc5cf99959ce62ce594479b2ec2d9b898fe",
       "dataChanged": [],
       "signoffChanged": [],
       "artifactChanged": [],

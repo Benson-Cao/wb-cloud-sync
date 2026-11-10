@@ -123,4 +123,6 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /fold\.type === type/, '连续同类型事件需折叠，避免流式碎片把页面拉爆')
   assert.match(page, /id="forget"/, '必须有「忘掉这台电脑」入口，清令牌不靠清浏览器数据')
   assert.match(page, /for \(const k of \['wbsync\.token'/, '忘掉电脑必须真的清掉令牌 / 设备 ID / 地址')
+  assert.match(page, /#newbar\[hidden\][\s\S]*?display:\s*none/,
+    'display:flex 会盖掉 UA 的 [hidden]{display:none}，必须显式提权重，否则 hidden 形同虚设')
 })
