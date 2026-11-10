@@ -1,6 +1,6 @@
 {
   "schema": "wbsync-egress-audit/1",
-  "capturedAt": "2026-11-10T13:34:45.382Z",
+  "capturedAt": "2026-11-10T13:54:12.289Z",
   "scope": "p1",
   "extensions": [
     ".js",
@@ -70,7 +70,18 @@
   "verdict": "PASS",
   "note": "静态半边：只覆盖代码里写死的 http(s)/ws(s) 字面量。动态拼接地址、运行时配置、依赖包内部请求都看不到，必须由 P3 W10 的真实流量镜像补齐。",
   "runtimeHalf": {
-    "status": "NOT_RUN",
-    "hint": "Windows: pktmon start --capture --comp nics → 复现一轮配对/投递 → pktmon stop → pktmon format 导出；判据：除 Relay 自托管地址外不得出现其它外部目的地址"
+    "status": "PASS",
+    "scope": "relay-process",
+    "connections": [
+      {
+        "pid": 28084,
+        "remote": "127.0.0.1",
+        "port": 50707,
+        "state": "Established",
+        "class": "loopback"
+      }
+    ],
+    "external": [],
+    "note": "只覆盖 Relay 进程；DSH 宿主进程组不在审计范围（第三方应用的更新/遥测会干扰结论）"
   }
 }

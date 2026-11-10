@@ -4,6 +4,17 @@
 
 ---
 
+## [P3 W10] · 2026-11-10 21:5x · 出网审计补齐运行时半边
+
+- `scripts/egress-audit.mjs` 增 `--runtime`：用 PowerShell `Get-NetTCPConnection` 采集 **Relay 进程**（监听 8787）的全部非 Listen 连接，按同一套分类判定，存在 `external` 即 exit 1。
+- **首轮结果（21:53）**：静态 31 文件 / 38 条字面量 / `external` 0；运行时 Relay PID 28084 仅 1 条 `127.0.0.1:50707 Established`（本机 Host WS），**`external` 0 → PASS**。证据 `spike/evidence/egress-audit.json`。
+- **范围界定**：只审计 Relay 进程，**不审 DSH 宿主进程组**——DSH 是第三方应用，自身的更新/遥测连接会污染结论；Host 插件的出网由静态审计 + 代码审查覆盖。写进 `runtimeHalf.scope` / `note`，不冒充「全量镜像」。
+- **修掉两个实现坑**：① PowerShell 没有反斜杠转义，内嵌 JSON 字面量直接 `ParserError` → 改为空结果统一输出 `[]`；② `State` 枚举被 `ConvertTo-Json` 序列化成数字 `5` → 用 `@{n='State';e={...}}` 转成 `Established`。
+- 非 Windows 平台显式 `SKIPPED` 并给出 `ss -tnp` / `tcpdump` 替代，不静默通过。
+- 门禁自动项 9/9、`gate: PASS`、快照 `CURRENT`；本轮无 bundle 变更，无需重装。
+
+---
+
 ## [P3 前置] · 2026-11-10 21:3x · 出网审计（静态半边）
 
 - 新增 `scripts/egress-audit.mjs`：扫描 `p1/` 运行代码里的 `http(s)://` / `ws(s)://` 字面量，按 `loopback` / `private` / `bind-any` / `placeholder` / `external` 分类；`--check` 在存在 `external` 时 exit 1。
