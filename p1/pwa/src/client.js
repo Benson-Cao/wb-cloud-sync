@@ -194,6 +194,16 @@ export function createPwaClient({
     }
     rec.ws = ws
 
+    ws.addEventListener('open', () => {
+      if (rec.ws !== ws || stopped || rec.status === 'closed') return
+      // WS 握手成功即已订阅：冷会话没有新事件时，不能一直停在 connecting。
+      // gap/refilling 状态由补齐流程自行收敛，这里不覆盖。
+      if (rec.status === 'connecting' || rec.status === 'reconnecting') {
+        rec.status = 'following'
+        emitState()
+      }
+    })
+
     ws.addEventListener('message', (event) => {
       let msg
       try { msg = JSON.parse(String(event.data)) } catch { return }

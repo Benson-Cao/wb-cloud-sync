@@ -4,6 +4,17 @@
 
 ---
 
+## [P1 W3 续 21] · 2026-11-10 18:5x · 非协议变更
+
+- **真机截图暴露两处 PWA 显示缺陷，已修（0.1.6 壳补丁）**：
+  1. **操作反馈不可见**：`say()` 把成功/失败提示写在列表上方的 `#status`，用户滚到事件流区域点「取消当前轮次」后完全看不到，会误判成「点了没反应」。改为 `el.scrollIntoView({block:'center',behavior:'smooth'})`，配对 / 刷新 / 新建 / 取消的反馈都主动滚入视口。
+  2. **冷会话永远显示 `connecting`**：`client.js` 的订阅 WS 没有 `open` 处理器，`status` 只在收到首条 `session/event` 时才转 `following`；冷会话无新事件就一直停在 `connecting · seq=-1`。补 `open` 监听（`connecting` / `reconnecting` → `following`，不覆盖 `gap` 收敛），壳页面把状态映射成中文（连接中 / 重连中 / 已订阅 / 补齐中 / 已关闭），`lastSeq=-1` 显示为「—」不再暴露哨兵值。
+- 静态壳缓存 `wbsync-shell-v6`；`static.test.mjs` S6 增两条防回归断言；新增 B6（mock WS 验证无事件也能进入 `following`）。测试 157 → **158**。
+- **部署**：仅 PWA 静态资源变更（Relay `readFileSync` 实时读盘），**不用重装 Host 插件 tgz、不用重启 DSH / Relay**；手机刷新两次让 SW `v6` 接管即可。
+- **真机判读补充**：截图选中的 `session-9be5a9c5-…` 是 11/5 的冷会话（CP `state:stopped`、`lastSeq:3`，18:48 后日志零写入）。`SessionCommandController.cancel` 对它抛 `session/not-found`（Agent 未 attach）属宿主预期行为；验证取消成功要在**有活跃轮次**的会话上点（当前 `session-f902f078-…` 18:54 仍在写日志）。
+
+---
+
 ## [P1 W3 续 20] · 2026-11-10 18:2x · 非协议变更
 
 - **收掉三项 W3 剩余待办，版本 0.1.6**：

@@ -117,4 +117,7 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.ok(cache, 'SHELL_CACHE 必须是 wbsync-shell-vN 形式')
   assert.ok(Number(cache[1]) >= 4,
     `壳资源变更后缓存名应递增（当前基线 v4），实际 v${cache[1]}`)
+  // 真机 0.1.6 取证：滚到事件流区域点按钮后，顶部反馈条看不见，被误判成「点了没反应」
+  assert.match(page, /scrollIntoView/, '操作反馈必须主动滚入视口')
+  assert.match(page, /STATUS_TEXT/, '订阅状态需映射中文，不暴露 connecting/following 内部值')
 })

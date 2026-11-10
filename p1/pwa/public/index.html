@@ -99,12 +99,21 @@
       el.hidden = false
       el.textContent = text
       el.style.color = isError ? '#e07a7a' : '#7fd18c'
+      // 反馈条在列表上方；用户滚到事件流区域点按钮时看不到，会误判成「点了没反应」。
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
     }
 
+    const STATUS_TEXT = {
+      connecting: '连接中', reconnecting: '重连中', following: '已订阅',
+      gap: '补齐中', closed: '已关闭',
+    }
     const connState = (snap) => {
       if (!snap) return '未连接'
       const f = snap.follows.find((x) => x.sessionId === activeSession)
-      return f ? `${f.sessionId.slice(0, 18)}… · ${f.status} · seq=${f.lastSeq}` : `已连接 · ${snap.sessions.length} 个会话`
+      if (!f) return `已连接 · ${snap.sessions.length} 个会话`
+      // -1 是「尚未收到事件」的内部哨兵值，不直接暴露给用户
+      const seq = f.lastSeq < 0 ? '—' : `seq=${f.lastSeq}`
+      return `${f.sessionId.slice(0, 18)}… · ${STATUS_TEXT[f.status] ?? f.status} · ${seq}`
     }
 
     const renderList = (rows) => {

@@ -1,7 +1,7 @@
 {
   "schema": "wbsync-spike/1",
   "env": {
-    "capturedAt": "2026-11-10T10:31:55.958Z",
+    "capturedAt": "2026-11-10T11:00:44.501Z",
     "platform": "win32",
     "arch": "x64",
     "nodeVersion": "22.22.2",

@@ -163,6 +163,39 @@ test('B1 客户端：refreshSessions + 实时事件按序到达', async () => {
   client.stop()
 })
 
+test('B6 冷会话：WS 握手成功但无事件时状态应为 following，不再一直 connecting', async () => {
+  const states = []
+  class FakeWs {
+    constructor(url) {
+      this.url = url
+      this.listeners = new Map()
+      setTimeout(() => this.fire('open', {}), 0)
+    }
+    addEventListener(type, fn) {
+      if (!this.listeners.has(type)) this.listeners.set(type, [])
+      this.listeners.get(type).push(fn)
+    }
+    fire(type, ev) { for (const fn of this.listeners.get(type) ?? []) fn(ev) }
+    close() { this.fire('close', {}) }
+  }
+  const client = createPwaClient({
+    baseUrl: 'http://127.0.0.1:1', deviceId: 'pc-cold', token: 't',
+    WebSocketImpl: FakeWs,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ ok: true, data: { rows: [] } }) }),
+    onStateChange: (snap) => states.push(snap.follows[0]?.status),
+  })
+  try {
+    client.follow('s-cold', { sinceSeq: -1 })
+    await waitFor(() => client.snapshot().follows[0]?.status === 'following', 1000, 'WS open 后进入 following')
+    const snap = client.snapshot().follows[0]
+    assert.equal(snap.status, 'following')
+    assert.equal(snap.lastSeq, -1, '冷会话没有事件，位点保持初始哨兵值')
+    assert.ok(states.includes('connecting') && states.includes('following'))
+  } finally {
+    client.stop()
+  }
+})
+
 test('B2 断线重连：重连后带本地 lastSeq，补到 dropped 窗口', async () => {
   const token = await pair('pc-drop')
   const host = await registerHost('pc-drop')
