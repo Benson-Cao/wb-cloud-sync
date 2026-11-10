@@ -8,9 +8,16 @@
 ```bash
 source scripts/toolchain-env.sh          # 仓库根执行，启用隔离 Node 24 / pnpm 11
 pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.mjs
+
+# 真机联调：启动 Relay（监听 0.0.0.0，控制台打印所有可用的局域网地址）
+node p1/relay/run.mjs                    # PORT=8787；WBSYNC_HOST_TOKEN / WBSYNC_ADMIN_TOKEN 可选
+# 手机浏览器打开打印出的 http://<局域网IP>:<PORT>/app 即壳页面
 ```
 
-`createRelay(options)` 返回未监听的 `http.Server` + 内存 `state`，注入 `now()` / `randomBytes()` 可让时间与随机性确定，规则判定不靠运行时猜测。`node --test` 共 **32 个用例**：HTTP 9、Host WS 7、手机事件订阅 7、跨实例共享 CP 4、静态壳服务 5。
+「Relay 地址」= 跑在 PC 上、手机与 PC 插件共同连着的这个进程的 `http://<局域网IP>:<端口>`；
+`start(port, host)` 默认只听 `127.0.0.1`（单测/本机调试），真机联调传 `'0.0.0.0'` 或直接用 `run.mjs`。
+
+`createRelay(options)` 返回未监听的 `http.Server` + 内存 `state`，注入 `now()` / `randomBytes()` 可让时间与随机性确定，规则判定不靠运行时猜测。`node --test` 共 **35 个用例**：HTTP 9、Host WS 7、手机事件订阅 7、跨实例共享 CP 4、静态壳服务 5、监听与启动器形态 3。
 
 ## 传输形态
 
@@ -62,6 +69,7 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 
 - **配对后的 45s 活跃窗口**：`/pair/verify` 把设备记为「最近活跃」（`lastSeenAt=now`），窗口内没有 Host WS 时，桥接请求会在降级通道里等到 10s 超时回 504 `NO_PROGRESS`（不会误投帧）。现实中 PC 能出配对码即意味着宿主在跑；真机上表现为极短暂的「配对完就发消息可能转一下」。
 - **CP 尚未分离**：配对码登记、设备档案、会话索引暂由 Relay 单机内存承担，不落盘、重启即清空。
+- **未设 `WBSYNC_HOST_TOKEN` 时 Host 注册不校验令牌**（run.mjs 试跑形态，控制台有醒目警告）：**对外使用必须显式设置**，且与插件 config 的 `hostToken` 一致。
 - **静态壳是同步阻塞读**（`readFileSync`，开发期骨架够用）：文件都是 KB 级平铺小文件；换生产再改流式 + 缓存头策略。
 - **不持久化事件**：缓冲只在内存，进程重启即丢；`~/.dsh` 日志仍是唯一真源（`03` P1），重启补齐要回 Host 读日志——属下一步。
 - **不解析事件正文**：Relay 只按 `seq` 排队转发，不看 `ev.data`（ADR-010 / `04` §5.4）。端到端加密属 `wbsync/2`。

@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T04:04:58.716Z",
+  "capturedAt": "2026-11-10T04:49:38.375Z",
   "git": {
-    "head": "297ca146238d98b481d7098f92171d73274a2db9",
+    "head": "78cd789a329f6944d6a67b9dac952e7a3a5bb0d2",
     "branch": "main",
     "worktreeClean": false
   },
@@ -20,15 +20,15 @@
     "notes": [
       "发布物已重建（仅记录，不影响判定）：dist-tarball"
     ],
-    "previousCapturedAt": "2026-11-10T03:50:10.591Z",
-    "previousGitHead": "5458e2788fcaecd4562e5a118d357ded74a2f463",
+    "previousCapturedAt": "2026-11-10T04:04:58.716Z",
+    "previousGitHead": "297ca146238d98b481d7098f92171d73274a2db9",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
       "previousReason": "已变化（阻断）：运行代码/证据：check-plugin.json",
-      "capturedAt": "2026-11-10T03:50:10.591Z",
-      "gitHead": "5458e2788fcaecd4562e5a118d357ded74a2f463",
+      "capturedAt": "2026-11-10T04:04:58.716Z",
+      "gitHead": "297ca146238d98b481d7098f92171d73274a2db9",
       "dataChanged": [
         "check-plugin.json"
       ],
@@ -45,7 +45,7 @@
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
       "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
-      "check-plugin.json": "d0b523fc75485040a32c06a85e9afe08f80ecb5362d108385c6793b456ce306c",
+      "check-plugin.json": "66dba2950d40e7976922bb8d5834004f3ce645af753bc4cf96d408defd9d0026",
       "gate-check.mjs": "fd0f14dbaa0f927801aa0191398e0f0cdef3baa669b13715f4375568cf7d5da1",
       "check-env.mjs": "d26c26749008404f631c64be52d908e5c0a60074235218327ff6eeb8c270e5b3",
       "signoff-check.mjs": "04de87da587e985b33f3a9f50b424b5d8f8814969ded5b053b42bb03a269057b",
@@ -61,7 +61,7 @@
       "WORKBUDDY-REFERENCE.md": "e286a4af7afe2aab6f9462bfec7d0baf25ff4c892b21245624963490be49cdcc"
     },
     "artifact": {
-      "dist-tarball": "403006d58059564074797ffad01f80825259721d4aa64b7fdc2ef447c3645787"
+      "dist-tarball": "0f46e45424d1ea9d2b3f037e0a448f5198508602332357e0e8d136cc47cead3b"
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
@@ -69,7 +69,7 @@
     }
   },
   "secretScan": {
-    "filesScanned": 87,
+    "filesScanned": 89,
     "patterns": [
       "github-classic",
       "github-fine-grained",

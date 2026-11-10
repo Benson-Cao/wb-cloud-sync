@@ -559,8 +559,10 @@ export function createRelay(options = {}) {
     if (!conn) socket.destroy()
   })
 
-  const start = (port = 0) => new Promise((resolve) => {
-    server.listen(port, '127.0.0.1', () => resolve(server.address().port))
+  const start = (port = 0, host = '127.0.0.1') => new Promise((resolve, reject) => {
+    // 默认只听本机回环（单测/本机调试）；真机联调用 start(port, '0.0.0.0') 或 run.mjs
+    server.listen(port, host, () => resolve(server.address().port))
+    server.once('error', reject)
   })
   const stop = () => new Promise((resolve) => {
     for (const p of state.pending.values()) clearTimeout(p.timer)

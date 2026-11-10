@@ -54,11 +54,11 @@ p1/pwa/
 
 ```bash
 node --test p1/pwa/test/*.test.mjs       # 或 pnpm --dir p1/pwa test
-# 壳页面已挂在 Relay 上：启动 Relay 后手机浏览器直接打开
-#   http://<Relay地址>/app
-# 1. 填 Relay 地址；2. 在 PC 端打开宿主插件本地页 /__wbsync/pair 生成 6 位码；
-# 3. 手机输码点「配对」→ 自动换取令牌并进入会话列表。
-# （不再需要另起静态服务器；静态服务测试见 p1/relay/test/static.test.mjs）
+# 壳页面已挂在 Relay 上：先启动 Relay（仓库根执行）
+#   node p1/relay/run.mjs        # 控制台会打印所有可用的「Relay 地址」
+# 然后手机浏览器打开打印出的 http://<局域网IP>:<端口>/app：
+#   1. 填 Relay 地址；2. 在 PC 端打开宿主插件本地页 /__wbsync/pair 生成 6 位码；
+#   3. 手机输码点「配对」→ 自动换取令牌并进入会话列表。
 ```
 
 ## 明确的边界
