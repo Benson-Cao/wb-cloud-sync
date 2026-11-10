@@ -20,6 +20,7 @@
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
+import { createEventHub } from './events.js'
 import { upgradeToWebSocket } from './ws.js'
 
 export const PROTOCOL = 'wbsync/1'
@@ -93,6 +94,7 @@ export function createRelay(options = {}) {
     sockets: new Map(),      // deviceId -> WS 连接（正式通道）
     indexes: new Map(),      // deviceId -> SessionIndex[]（Host 上报的快照）
     cursors: new Map(),      // 仅可观测性：`clientId|deviceId` -> sinceSeq
+    hub: createEventHub({ capacity: cfg.eventBuffer ?? 1000 }),  // 事件缓冲 + 订阅广播
   }
 
   const sixDigitCode = () => String(rand(4).readUInt32BE(0) % 1_000_000).padStart(6, '0')
@@ -166,9 +168,13 @@ export function createRelay(options = {}) {
       return conn.sendJson({ t: 'ack', ref: msg.reqId, status: 'accepted' })
     }
     if (msg.t === 'session/event') {
-      // Host → 手机的上行事件：W3 骨架里只做入队计数，客户端订阅属后续提交
-      state.indexes.set(deviceId, state.indexes.get(deviceId) ?? [])
-      return
+      // 上行事件：按连续 seq 推进并广播给订阅该会话的手机
+      const r = state.hub.ingest(String(msg.sessionId ?? ''), msg.ev)
+      if (r.rejected) return conn.sendJson({ t: 'ack', ref: msg.sessionId ?? null, status: r.rejected })
+      return conn.sendJson({
+        t: 'ack', ref: msg.sessionId, status: 'accepted',
+        advanced: r.advanced, delivered: r.delivered,
+      })
     }
     return conn.sendJson({ t: 'ack', ref: msg.t ?? null, status: 'ignored' })
   }
@@ -340,9 +346,38 @@ export function createRelay(options = {}) {
 
   const server = createServer(handler)
 
-  // Host 主动长连：/ws/host → 注册帧 → 帧保序双向透传
+  // 两条 upgrade 通道：Host 注册长连、手机事件订阅
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
+
+    // 手机侧事件订阅：/d/<deviceId>/events/<sessionId>?token=&sinceSeq=
+    // 浏览器 WebSocket 不能设 Authorization 头，所以令牌走 query；不得把它写进日志。
+    const sub = /^\/d\/([^/]+)\/events\/([^/]+)$/.exec(url.pathname)
+    if (sub) {
+      const [, deviceId, sessionId] = sub
+      const token = url.searchParams.get('token') ?? ''
+      const d = state.devices.get(deviceId)
+      if (!d || d.tombstone || !d.tokenDigest || !safeEqual(sha256(token), d.tokenDigest)) {
+        socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n')
+        return
+      }
+      if (!isOnline(deviceId)) {
+        socket.end('HTTP/1.1 409 Conflict\r\nContent-Length: 0\r\n\r\n')
+        return
+      }
+      const rawSince = url.searchParams.get('sinceSeq')
+      const sinceSeq = rawSince === null ? -1 : Number(rawSince)
+      let conn = null
+      conn = upgradeToWebSocket(req, socket, head, {
+        onMessage() { /* 手机侧只订阅；上行指令仍走 HTTP（白名单见 04 §7） */ },
+        onClose() { if (conn) state.hub.unsubscribe(conn) },
+      })
+      if (!conn) { socket.destroy(); return }
+      state.hub.subscribe(sessionId, Number.isInteger(sinceSeq) ? sinceSeq : -1, conn)
+      return
+    }
+
+    // Host 主动长连：/ws/host → 注册帧 → 帧保序双向透传
     if (url.pathname !== '/ws/host') { socket.destroy(); return }
 
     let deviceId = null
@@ -384,9 +419,12 @@ export function createRelay(options = {}) {
   const stop = () => new Promise((resolve) => {
     for (const p of state.pending.values()) clearTimeout(p.timer)
     state.pending.clear()
+    state.hub.closeAll()                                    // 手机订阅连接
     for (const conn of state.sockets.values()) conn.close(1001, 'server stopping')
     state.sockets.clear()
-    server.close(() => resolve())
+    const timer = setTimeout(() => resolve(), 2000)         // 兜底：不被残留连接挂死
+    server.closeAllConnections?.()
+    server.close(() => { clearTimeout(timer); resolve() })
   })
 
   return { server, state, start, stop, protocol: PROTOCOL, allowedEndpoints: allowlist, isOnline }
