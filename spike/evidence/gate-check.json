@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-10T14:33:07.030Z",
+  "capturedAt": "2026-11-10T14:46:02.729Z",
   "git": {
-    "head": "30a0fe6ac1db4d262601d764a6615e47a9bc954c",
+    "head": "49c81af109fe6333b1522e3fd06036bf15472641",
     "branch": "main",
     "worktreeClean": false
   },
@@ -10,20 +10,25 @@
   "freshness": {
     "status": "CURRENT",
     "dataChanged": [],
-    "signoffChanged": [],
+    "signoffChanged": [
+      "SIGN-OFF.md"
+    ],
     "artifactChanged": [],
     "narrativeChanged": [],
     "notes": [],
-    "previousCapturedAt": "2026-11-10T14:32:48.356Z",
-    "previousGitHead": "0d622d81aae8a6dd333b662457f24873a1accd19",
+    "previousCapturedAt": "2026-11-10T14:44:04.146Z",
+    "previousGitHead": "1b8f9642c071c2fb06b964985c907dabef58b39c",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-10T14:32:48.356Z",
-      "gitHead": "0d622d81aae8a6dd333b662457f24873a1accd19",
+      "previousStatus": "STALE",
+      "previousReason": "已变化（阻断）：会签材料：SIGN-OFF.md",
+      "capturedAt": "2026-11-10T14:44:04.146Z",
+      "gitHead": "1b8f9642c071c2fb06b964985c907dabef58b39c",
       "dataChanged": [],
-      "signoffChanged": [],
+      "signoffChanged": [
+        "SIGN-OFF.md"
+      ],
       "artifactChanged": [],
       "narrativeChanged": []
     }
@@ -35,14 +40,14 @@
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
       "host-probe.json": "a57205ad03ff73f8da91c578a460cbab75501bc32478fa1ae21b847d5557a751",
       "check-plugin.json": "6c212298aa2915c87a7a47428402bea4db89d30878ea97eb63acc7359c48c5a2",
-      "gate-check.mjs": "69b1bf8afdb2357bc8766b252546414da8c2549b6069cdce1845ea46bf10cafe",
+      "gate-check.mjs": "449ad1f7842d788bdfd25af8078c075d2d2246388cadd4779cdf445b357ded95",
       "check-env.mjs": "d26c26749008404f631c64be52d908e5c0a60074235218327ff6eeb8c270e5b3",
       "signoff-check.mjs": "4491b857f555f520c6170c91e4c46d008b554de9721d9d3900d71f3a63a92938",
       "sync-protocol.mjs": "b2f251a6bea2f7313e27c828914615ee33aa8bffafcc61116d3f1b46bca8631e"
     },
     "signoff": {
       "SECURITY-REVIEW.md": "654740fe43c975e8a6fe2ee4dd2205b14e79c0641fa4874947fc0ce6acd529c0",
-      "SIGN-OFF.md": "62d4ad13e7ec74df717ee68085dc55daf91cc092de53fb5b8e3fb8bc38821ab4",
+      "SIGN-OFF.md": "b6931976ae4a0c527364d606e14c6c7e2bb02b94f62279904eb581648dfeb482",
       "SIGN-OFF-PROCEDURE.md": "2c279eb54b44ff3b5fab18c121c53b68b8f3f23da27e0f98fdf18abbb17fd1df",
       "SIGNOFF-WAIVER.md": "920af35df5a96b39d83d401e99d01957d558479b3ad52df1e0cafa12d7c60336",
       "01-charter.md": "3740d12f8192aa94945b9f4de6a7b4a0ecc18a4c3fcd174bd054df45a98d83df",
@@ -54,11 +59,11 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "fcfacc1aa99c0ab6ecf56cfcb4378cae55e23f6fb2183653edfe65d26f3d8e2e"
+      "PROTOCOL.md": "083faaefa9f7a29f4a329827a705f47f3a38d5e7c3caac23bdf61b94c5d9b317"
     }
   },
   "secretScan": {
-    "filesScanned": 104,
+    "filesScanned": 105,
     "patterns": [
       "github-classic",
       "github-fine-grained",
@@ -95,7 +100,7 @@
     }
   ],
   "chaosAndPerf": {
-    "chaosPass": 8,
+    "chaosPass": 23,
     "chaosFail": 0,
     "chaosError": null,
     "perfVerdict": "PASS",
@@ -150,7 +155,7 @@
     },
     {
       "id": "G10",
-      "label": "混沌套件现场重跑全绿 + 压测证据 PASS（500 并发 WS / P95 / 防悬挂）",
+      "label": "混沌 + 渗透套件现场重跑全绿 + 压测证据 PASS（500 并发 WS / P95 / 防悬挂）",
       "pass": true
     }
   ],
