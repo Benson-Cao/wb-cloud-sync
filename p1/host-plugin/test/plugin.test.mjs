@@ -499,6 +499,88 @@ test('没有只读句柄时如实回 501 NOT_AVAILABLE，不假装补齐成功',
   }
 })
 
+/* ------------------------------------------------------- 会话索引上报 */
+
+const indexPersistence = (rows, openSession = null) => ({
+  list: async () => rows,
+  ...(openSession ? { open: openSession } : {}),
+})
+
+const row = (id, extra = {}) => ({
+  header: {
+    type: 'session', version: 4, id, createdAt: 1_700_000_000_000,
+    cwd: 'C:\\work\\demo', isSeeded: false, delegationDepth: 0, agentPreset: 'standard',
+  },
+  formatStatus: 'ok', revision: 'rev-1', sizeBytes: 256,
+  ...extra,
+})
+
+test('注册成功后自动推一份 host/sessions 索引', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  ctx.sessionPersistence = indexPersistence([row('session-1'), row('session-2')])
+  try {
+    const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true })
+    await waitFor(() => framesOf(relay, 'host/sessions').length === 1, '收到索引帧')
+
+    const frame = framesOf(relay, 'host/sessions')[0]
+    assert.deepEqual(frame.rows.map((r) => r.sessionId), ['session-1', 'session-2'])
+    assert.equal(frame.rows[0].ownerDeviceId, 'pc-1')
+    assert.equal(frame.rows[0].state, 'stopped')
+    // 没有可读句柄 → lastSeq 未知，但不能是 0（0 会被手机当成「没有新事件」）
+    assert.equal(frame.rows[0].lastSeq, null)
+
+    await waitFor(() => plugin.state.indexCount === 2, '状态里记下条数')
+    const status = await callRoute(ctx, '/__wbsync/status')
+    assert.equal(status.json.data.indexReady, true)
+    assert.equal(status.json.data.indexCount, 2)
+    assert.equal(status.json.data.indexError, null)
+    assert.ok(status.json.data.indexSentAt > 0)
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('没有 list() 就不发索引帧，也不谎报空表', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  try {
+    const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true })
+    await waitFor(() => plugin.state.connected, '已连接')
+    await new Promise((r) => setTimeout(r, 120))
+
+    assert.equal(framesOf(relay, 'host/sessions').length, 0)
+    const status = await callRoute(ctx, '/__wbsync/status')
+    assert.equal(status.json.data.indexReady, false)
+    assert.equal(status.json.data.indexCount, 0)
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('按 indexRefreshMs 周期刷新索引，重连后重新推一次', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  ctx.sessionPersistence = indexPersistence([row('session-1')])
+  try {
+    const plugin = apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true,
+      indexRefreshMs: 50, reconnectBaseMs: 20, reconnectMaxMs: 80,
+    })
+    await waitFor(() => framesOf(relay, 'host/sessions').length >= 2, '定时刷新至少一次')
+
+    relay.closeHost()
+    await waitFor(() => relay.host.registers === 2, '重连注册')
+    const before = framesOf(relay, 'host/sessions').length
+    await waitFor(() => framesOf(relay, 'host/sessions').length > before, '重连后再推一次')
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
 /* ------------------------------------------------------- 真 Relay 端到端 */
 
 const hmac = (secret, msg) => createHmac('sha256', secret).update(msg).digest('hex')
@@ -536,12 +618,23 @@ test('端到端：配对 → Host WS 注册 → 手机 HTTP 投递 → 宿主提
     const deviceToken = verify.json.data.deviceToken
 
     // 4. Host 插件外连 Relay 并注册
+    ctx.sessionPersistence = indexPersistence([row('session-1'), row('session-2')])
     const plugin = apply(ctx, {
       relayUrl: base, deviceId: 'pc-1', autoConnect: true,
       submitPrompt: async (args) => { received.push(args); return { ok: true, value: { accepted: true } } },
     })
     await waitFor(() => relay.isOnline('pc-1'), 'Relay 判定 Host 在线')
     await waitFor(() => plugin.state.connected, '插件侧已连接')
+
+    // 4b. 索引帧经真实 Relay 落进 state.indexes，可被查询
+    let indexes = null
+    for (let i = 0; i < 100; i++) {
+      const r = await fetch(`${base}/host/indexes?deviceId=pc-1`)
+      indexes = (await r.json()).data
+      if (indexes.rows.length === 2) break
+      await new Promise((res) => setTimeout(res, 20))
+    }
+    assert.deepEqual(indexes.rows.map((r) => r.sessionId), ['session-1', 'session-2'])
 
     // 5. 手机侧 HTTP 投递 → 帧 → 适配器 → 响应回程
     const deliver = await post('/d/pc-1/session/prompt', { sessionId: 'session-9', text: '远程跑' }, {

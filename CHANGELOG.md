@@ -4,6 +4,20 @@
 
 ---
 
+## [P1 W3 续 5] · 2026-11-10 10:17 · 非协议变更
+
+- **会话索引上报落地**：新增 `p1/host-plugin/src/sessions.js`，把 `sessionPersistence.list()` 的快照整理成协议里的 `SessionIndex` 行（10 个字段，不多不少），注册成功即推一次 `host/sessions`，之后按 `indexRefreshMs`（默认 60s）刷新。Relay 侧本来就有 `state.indexes` 与 `/host/indexes` 查询，现在真有数据了。
+- **两个工程取舍写进代码**：① `lastSeq` 只能靠解码整份日志得到（宿主没有条数接口），所以按 `revision` 缓存，文件没变就复用；② 超过 `maxDecodeBytes`（8 MiB）放弃探测，`lastSeq: null` 表示**未知**——绝不写 0，否则手机会把「没探测」读成「没有新事件」。
+- `state` 口径写清：六态由 `turn/end.reason` 单向下发（r2），本处只给**启动引导值**——`resolveState()` 问得到运行态就用，问不到是 `stopped`，落盘格式坏是 `unreadable`。`pinned / pinnedOrder` 是 PC 侧状态，固定 `false / 0`。
+- **一处事实修正**：上一轮把宿主 `read(offset, length)` 的 `offset` 说成「事件下标不是 seq」。宿主 seam 契约原文是「**首条要包含的逻辑 seq**」，实现恰好是 `events.slice(offset, …)`（因为逻辑 seq 从 0 连续、等于下标）。代码本来的快路径写法是对的，但注释与 README 的解释有偏差，已改成契约原意，并保留「首条 seq 对不上就回退到 0 重读」作为兜底。
+- **标题不作假**：实测会话头只有 `version/id/createdAt/cwd/isSeeded/delegationDepth/agentPreset`，没有标题。索引里 `title: null`，不从 `cwd` 编一个出来。
+- 测试 53 → **70**：新增 `test/sessions.test.mjs` 14 个（契约字段、`headerRef` 只挑 6 键、缓存命中与失效、超预算、`unreadable` 不解码、`resolveState` 非法值回落、`list` 抛错不编造行、`limit` 截断），另加 3 个接线用例（注册后自动推、无 `list()` 不发也不谎报空表、周期刷新 + 重连重推）与端到端里的一条真实链路断言（索引经真 Relay 落进 `/host/indexes` 可查）。
+- `/__wbsync/status` 增加 `indexReady / indexCount / indexSentAt / indexError`；关闭连接与卸载时一并停掉索引定时器。
+
+**边界未变**：`deviceId` / `hostToken` 未持久化与配对双绑；附件上行未做；手机侧（PWA）尚未在重连后主动 `session/follow`；CP 未分离（索引仍在 Relay 内存）。
+
+---
+
 ## [P1 W3 续 4] · 2026-11-10 10:1x · 非协议变更
 
 - **重启后历史补齐落地**（W3 原本最大的一块）：新增 `p1/host-plugin/src/replay.js`。Relay 的缓冲在内存里、进程重启即空，所以补历史必须回 Host 读 `~/.dsh` 的 append-only 日志——`replay` 适配器从占位变成真实现。

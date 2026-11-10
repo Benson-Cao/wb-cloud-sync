@@ -8,9 +8,10 @@
  *   open(id, 'read')            -> handle（`read` 是无所有权句柄，不含写权限）
  *   handle.read(offset, length) -> { eventState, events }
  *   handle.close()              -> 释放句柄
- * `offset` 是**事件下标**，不是 seq。P0 实测同一会话内 `seq` 从 0 连续且等于下标，
- * 因此快路径直接按 `sinceSeq + 1` 当下标读；一旦发现首条事件的 `seq` 对不上，
- * 退化为从 0 读一次再过滤（有界兜底，不是常态路径）。
+ * `offset` 按宿主 seam 契约是「**首条要包含的逻辑 seq**」（不是字节偏移）；实现上是
+ * `events.slice(offset, offset+length)`，因为同会话内 `seq` 从 0 连续、等于数组下标。
+ * 所以快路径直接传 `sinceSeq + 1`；万一首条事件的 `seq` 对不上（逻辑视图与下标不一致），
+ * 退化为从 0 读一次再过滤——有界兜底，不是常态路径。
  *
  * 铁律：**只读**。这里不 `open(id,'write')`、不 `append`、不 `flush`。
  *

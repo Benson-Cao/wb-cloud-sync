@@ -20,6 +20,7 @@
  *   replay({sessionId, sinceSeq})               -> 同上（历史补齐，见 src/replay.js）
  */
 import { createReplayAdapter } from './replay.js'
+import { createSessionIndexReporter } from './sessions.js'
 
 export const name = 'wbsync-host-dev'
 export const inject = ['webServer', 'sessionPersistence']
@@ -33,6 +34,7 @@ const DEFAULTS = {
   reconnectBaseMs: 500,
   reconnectMaxMs: 15_000,
   heartbeatMs: 15_000,
+  indexRefreshMs: 60_000,
   caps: ['attachments', 'artifacts', 'schedule', 'approval'],
 }
 
@@ -76,6 +78,10 @@ export function apply(ctx, config = {}) {
     lastSeq: new Map(),
     reconnectTimer: null,
     heartbeatTimer: null,
+    indexTimer: null,
+    indexCount: 0,
+    indexSentAt: null,
+    indexError: null,
   }
 
   /**
@@ -104,6 +110,28 @@ export function apply(ctx, config = {}) {
         message: '没有可用的只读句柄（未注入 sessionPersistence / openSession）',
       })),
   }
+
+  /**
+   * 会话索引：`sessionPersistence.list()` 是唯一来源。拿不到就不上报（status 里
+   * `indexReady:false`），而不是发一份空表骗手机「你没有会话」。
+   * `lastSeq` 需要解码日志才知道，交给 sessions.js 按 `revision` 缓存。
+   */
+  const listSessions = typeof cfg.listSessions === 'function'
+    ? cfg.listSessions
+    : (typeof ctx.sessionPersistence?.list === 'function'
+      ? (options) => ctx.sessionPersistence.list(options)
+      : null)
+
+  const collectIndex = listSessions
+    ? createSessionIndexReporter({
+      listSessions,
+      openSession,
+      deviceId: cfg.deviceId,
+      limit: cfg.indexLimit,
+      maxDecodeBytes: cfg.indexMaxDecodeBytes,
+      resolveState: cfg.resolveSessionState,
+    })
+    : null
 
   const send = (frame) => {
     if (state.ws?.readyState !== 1) return false
@@ -170,6 +198,28 @@ export function apply(ctx, config = {}) {
     state.heartbeatTimer = setInterval(() => send({ t: 'host/heartbeat', ts: Date.now() }), cfg.heartbeatMs)
   }
 
+  const stopIndexRefresh = () => {
+    if (state.indexTimer) { clearInterval(state.indexTimer); state.indexTimer = null }
+  }
+  const startIndexRefresh = () => {
+    stopIndexRefresh()
+    if (!collectIndex || !(cfg.indexRefreshMs > 0)) return
+    state.indexTimer = setInterval(() => { void sendIndexes() }, cfg.indexRefreshMs)
+  }
+
+  /** 上报会话索引；`connected` 为假或没有 list() 时直接跳过，不制造空表。 */
+  const sendIndexes = async () => {
+    if (!collectIndex || !state.connected) return null
+    const { rows, error, stats } = await collectIndex()
+    if (error) { state.indexError = error; return null }
+    state.indexError = null
+    if (!send({ t: 'host/sessions', rows })) return null
+    state.indexCount = rows.length
+    state.indexSentAt = Date.now()
+    state.indexStats = stats
+    return { count: rows.length, stats }
+  }
+
   const scheduleReconnect = () => {
     if (state.stopped || !cfg.relayUrl) return
     const delay = Math.min(cfg.reconnectMaxMs, cfg.reconnectBaseMs * 2 ** Math.min(state.attempts, 6))
@@ -195,12 +245,19 @@ export function apply(ctx, config = {}) {
     ws.addEventListener('message', (event) => {
       let msg
       try { msg = JSON.parse(String(event.data)) } catch { return }
-      if (msg.t === 'host/registered') { state.connected = true; startHeartbeat(); return }
+      if (msg.t === 'host/registered') {
+        state.connected = true
+        startHeartbeat()
+        startIndexRefresh()
+        void sendIndexes()          // 注册成功即推一份索引，手机不必等下一个刷新周期
+        return
+      }
       if (msg.t === 'http/request') { void handleDownlink(msg); return }
     })
     ws.addEventListener('close', () => {
       state.connected = false
       stopHeartbeat()
+      stopIndexRefresh()
       if (state.ws === ws) state.ws = null
       scheduleReconnect()
     })
@@ -223,6 +280,10 @@ export function apply(ctx, config = {}) {
           downlinks: state.downlinks,
           reconnects: state.reconnects,
           replayReady: Boolean(openSession),
+          indexReady: Boolean(collectIndex),
+          indexCount: state.indexCount,
+          indexSentAt: state.indexSentAt,
+          indexError: state.indexError,
           lastSeq: Object.fromEntries(state.lastSeq),
           protocol: PROTOCOL,
         }))
@@ -262,6 +323,7 @@ export function apply(ctx, config = {}) {
       state.stopped = true
       if (state.reconnectTimer) { clearTimeout(state.reconnectTimer); state.reconnectTimer = null }
       stopHeartbeat()
+      stopIndexRefresh()
       try { state.ws?.close(1000, 'plugin disposed') } catch { /* 已关闭 */ }
       state.ws = null
       state.connected = false
@@ -270,5 +332,5 @@ export function apply(ctx, config = {}) {
     }
   }, 'wbsync-host: uplink + local routes')
 
-  return { state, adapters, connect }
+  return { state, adapters, connect, collectIndex, sendIndexes }
 }
