@@ -24,6 +24,7 @@
 import { createReplayAdapter } from './replay.js'
 import { createSessionIndexReporter } from './sessions.js'
 import { createHostAdapters } from './host-adapters.js'
+import { createApprovalBridge } from './approvals.js'
 
 export const name = 'wbsync-host-dev'
 export const inject = ['webServer', 'sessionPersistence']
@@ -146,6 +147,16 @@ export function apply(ctx, config = {}) {
     return true
   }
 
+  /**
+   * 审批桥：宿主 `approval/request` 瀑布 → 手机。
+   * 手机不在线/超时一律交棒给桌面端（next()），手机只是遥控器不是闸门。
+   */
+  const approvals = createApprovalBridge({
+    send,
+    timeoutMs: cfg.approvalTimeoutMs ?? 120_000,
+    log: (...a) => console.log('[wbsync] approval', ...a),
+  })
+
   /** relayUrl 用 http(s) base（本地配对路由要用 fetch），WS 由协议前缀派生。 */
   const toWsUrl = (base) => String(base)
     .replace(/\/$/, '')
@@ -200,6 +211,22 @@ export function apply(ctx, config = {}) {
         })
         const { status, body: payload } = unwrap(r, { receiptId: null })
         return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === '$events/result') {
+        // 手机点了「允许 / 拒绝」：先答先得，第二个人点会被这里挡掉（409 APPROVAL_GONE）
+        const r = approvals.answer({ approvalId: body?.approvalId, outcome: body?.outcome })
+        if (!r.ok) {
+          const status = r.code === 'INVALID_OUTCOME' ? 400 : 409
+          const code = r.code === 'INVALID_OUTCOME' ? 'INVALID_JSON' : 'APPROVAL_GONE'
+          const msg = r.code === 'INVALID_OUTCOME'
+            ? 'outcome 必须是 allowed-once / rejected / cancelled'
+            : '该审批已被应答或已过期'
+          return send({ t: 'http/response', reqId, status, body: errBody(code, msg, r.code === 'APPROVAL_GONE') })
+        }
+        return send({
+          t: 'http/response', reqId, status: 200,
+          body: { ok: true, data: { approvalId: body?.approvalId, outcome: r.outcome }, protocol: PROTOCOL },
+        })
       }
       return send({
         t: 'http/response', reqId, status: 403,
@@ -350,6 +377,8 @@ export function apply(ctx, config = {}) {
   ctx.effect(() => {
     // 宿主事件订阅：首参是 session 对象，sessionId 取 session.header.id（P0 实测）
     const offEvent = ctx.on('session/event', forwardEvent)
+    // 审批瀑布：第二个参数 next() 是把「接下来谁来答」交还给宿主自己的弹窗
+    const offApproval = ctx.on('approval/request', (request, next) => approvals.onRequest(request, next))
     const disposeRoutes = registerRoutes()
     if (cfg.autoConnect) connect()
 
@@ -361,10 +390,12 @@ export function apply(ctx, config = {}) {
       try { state.ws?.close(1000, 'plugin disposed') } catch { /* 已关闭 */ }
       state.ws = null
       state.connected = false
+      try { approvals.dispose() } catch { /* 已释放 */ }
+      offApproval?.()
       offEvent?.()
       for (const dispose of disposeRoutes) dispose?.()
     }
   }, 'wbsync-host: uplink + local routes')
 
-  return { state, adapters, connect, collectIndex, sendIndexes }
+  return { state, adapters, approvals, connect, collectIndex, sendIndexes }
 }

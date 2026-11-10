@@ -250,6 +250,18 @@ export function createPwaClient({
         }
         return
       }
+      // 审批推送：设备级广播，可能落在任意一条已订阅连接上；与事件游标无关，不碰 lastSeq
+      if (msg.t === 'approval/request') {
+        notify({
+          type: 'approval', approvalId: msg.approvalId, sessionId: msg.sessionId ?? null,
+          toolName: msg.toolName ?? 'unknown', reason: msg.reason ?? null, expiresAt: msg.expiresAt ?? null,
+        })
+        return
+      }
+      if (msg.t === 'approval/resolved') {
+        notify({ type: 'approval-resolved', approvalId: msg.approvalId, outcome: msg.outcome ?? 'cancelled', by: msg.by ?? null })
+        return
+      }
       if (msg.t === 'session/gap') {
         rec.expectedSeq = msg.expectedSeq
         rec.status = 'gap'
@@ -388,6 +400,39 @@ export function createPwaClient({
    * 附件上行：文件 → base64 → 宿主 `fileUploads`，拿回 receiptId 供同一会话的 prompt 引用。
    * 只走白名单 `fileUploads/upload`；本客户端不缓存文件内容。
    */
+  /** 拉取待审批清单：推送只是「更快」，拉取才是「不漏」（断线期间错过的靠这条补）。 */
+  const listApprovals = async () => {
+    const r = await fetchImpl(`${base}/api/approvals?deviceId=${encodeURIComponent(deviceId)}`, {
+      headers: authHeaders(),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      throw Object.assign(new Error(`拉取审批失败：${code}`), { code, status: r.status })
+    }
+    return Array.isArray(payload.data?.rows) ? payload.data.rows : []
+  }
+
+  /** 应答一条审批。outcome 只允许 allowed-once / rejected（cancel 由宿主/超时决定）。 */
+  const answerApproval = async ({ approvalId, outcome } = {}) => {
+    if (!approvalId) throw Object.assign(new Error('应答审批缺 approvalId'), { code: 'INVALID_ARGUMENT' })
+    if (outcome !== 'allowed-once' && outcome !== 'rejected') {
+      throw Object.assign(new Error('outcome 只能是 allowed-once 或 rejected'), { code: 'INVALID_ARGUMENT' })
+    }
+    // 注意 `$events` 在模板串里要转义成 \$events，否则会被当成变量插值成空串（会变成 //result）
+    const r = await fetchImpl(`${base}/d/${encodeURIComponent(deviceId)}/\$events/result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ approvalId, outcome, clientId }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      throw Object.assign(new Error(`应答失败：${code}`), { code, status: r.status })
+    }
+    return payload.data
+  }
+
   const uploadAttachment = async ({ sessionId, file, name } = {}) => {
     if (!sessionId || !file) {
       throw Object.assign(new Error('上传缺 sessionId / file'), { code: 'INVALID_ARGUMENT' })
@@ -430,6 +475,7 @@ export function createPwaClient({
 
   return {
     refreshSessions, createSession, cancelTurn, submitPrompt, uploadAttachment,
+    listApprovals, answerApproval,
     follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null,
   }
 }

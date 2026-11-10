@@ -34,8 +34,11 @@ const topLevelNames = (source, label) => {
 
 const stripExports = (source) => source.replace(/^export\s+(?=const|let|function|class)/gm, '')
 
-const [helperReplay, helperSessions, helperHostAdapters, mainSrc] = [
-  read('src/replay.js'), read('src/sessions.js'), read('src/host-adapters.js'), read('src/index.js'),
+const [helperReplay, helperSessions, helperHostAdapters, helperApprovals, mainSrc] = [
+  read('src/replay.js'), read('src/sessions.js'), read('src/host-adapters.js'),
+  // approvals.js 自带 node:crypto 的 randomUUID 导入，内联前要掐掉（BANNER 已提供）
+  read('src/approvals.js').replace(/^import \{ randomUUID \} from 'node:crypto'\n/m, ''),
+  read('src/index.js'),
 ]
 
 // ---- 冲突检测：四个模块合并进同一作用域，顶层重名会静默覆盖 ----
@@ -43,6 +46,7 @@ const groups = [
   topLevelNames(helperReplay, 'replay.js'),
   topLevelNames(helperSessions, 'sessions.js'),
   topLevelNames(helperHostAdapters, 'host-adapters.js'),
+  topLevelNames(helperApprovals, 'approvals.js'),
   topLevelNames(mainSrc, 'index.js'),
 ]
 const seen = new Map()
@@ -56,13 +60,15 @@ for (const [names, label] of groups) {
 // ---- helpers：去掉 export，原样内联 ----
 const helpers = `// ===== 内联自 src/replay.js（重启后历史补齐，只读回放） =====\n${stripExports(helperReplay).trim()}
 // ===== 内联自 src/sessions.js（会话索引上报） =====\n${stripExports(helperSessions).trim()}
-// ===== 内联自 src/host-adapters.js（宿主真实入口：create / prompt 软探测） =====\n${stripExports(helperHostAdapters).trim()}`
+// ===== 内联自 src/host-adapters.js（宿主真实入口：create / prompt 软探测） =====\n${stripExports(helperHostAdapters).trim()}
+// ===== 内联自 src/approvals.js（审批瀑布 → 手机，先答先得） =====\n${stripExports(helperApprovals).trim()}`
 
 // ---- 主模块：去掉相对导入；apply 改名 __apply（wrapper 接管配置合并） ----
 const EXPECTED_IMPORTS = [
   /^import \{ createReplayAdapter \} from '\.\/replay\.js'$/m,
   /^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'$/m,
   /^import \{ createHostAdapters \} from '\.\/host-adapters\.js'$/m,
+  /^import \{ createApprovalBridge \} from '\.\/approvals\.js'$/m,
 ]
 for (const pattern of EXPECTED_IMPORTS) {
   if (!pattern.test(mainSrc)) throw new Error('src/index.js 的相对导入与打包器预期不一致——请同步更新本脚本')
@@ -71,6 +77,7 @@ const main = mainSrc
   .replace(/^import \{ createReplayAdapter \} from '\.\/replay\.js'\n/m, '')
   .replace(/^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'\n/m, '')
   .replace(/^import \{ createHostAdapters \} from '\.\/host-adapters\.js'\n/m, '')
+  .replace(/^import \{ createApprovalBridge \} from '\.\/approvals\.js'\n/m, '')
   .replace(/^export function apply\(/m, 'function __apply(')
 if (!main.includes('function __apply(')) throw new Error('apply 改名失败')
 

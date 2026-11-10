@@ -4,6 +4,28 @@
 
 ---
 
+## [P2 W8] · 2026-11-10 23:2x · 审批转发（协议 r5）：手机上真的能批工具调用了
+
+先取证再动手。`app.asar` 里挖到宿主的审批契约（不是猜的）：
+
+```ts
+type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+interface ApprovalRequest { agent; toolName: string; callId?; reason?; displayReason?; signal? }
+ctx.on('approval/request', (request, next) => Promise<ApprovalOutcome>)   // 瀑布
+```
+
+`next` 是「交棒给下一个应答方」。这条决定了整个设计：**手机不在线时必须 `next()`**，否则一次断网就让桌面端的工具调用卡死——手机是遥控器，不是闸门。
+
+- **分工：Host 判、Relay 存、手机拉。** Host 插件注册 `approval/request` 瀑布，把请求转成 `$events/request` 上行帧；Relay 存进设备级看板并广播 `approval/request` 给该设备**所有**手机订阅连接（审批是设备级的，与当前看哪个会话无关）；手机 `POST /d/<id>/$events/result` 应答；补拉走 `GET /api/approvals`——**推送只负责更快，拉取才负责不漏**（断线期间错过的那几条靠它补）。
+- **先答先得**：手机连点、两台手机抢答、手机点晚了，一律 409 `APPROVAL_GONE`，且不再占用 Host 一个往返；桌面端先答时宿主 `signal` abort，插件随即发 `$events/resolved` 让手机撤卡并提示「已在电脑上处理」——不让用户以为自己点丢了。
+- **超时交棒而不是拒掉**：手机没答上返回 `next()`，不返回 `unavailable`。宿主语义里 `unavailable` = 「无人可审批」，会直接拒掉这次工具调用；超时只是没来得及，桌面端还有机会。
+- **`pickReason`**：`displayReason` 优先中文 → 英文 → `reason`，手机卡片上显示人能看懂的一句，不甩工具内部字段名。
+- 新增 `p1/host-plugin/src/approvals.js`（110 行，独立可测）+ PWA 审批卡片（`#approvals`，带 `#approvals[hidden]` 提权——同 `[hidden]` 那个坑）。SW 升 `wbsync-shell-v11`。
+- **测试 193 → 213 全绿**：桥接语义 A1–A11、Relay 路由 R1–R7、插件级 P-AP1/P-AP2（含「未知 id → 409」「非法 outcome → 400，不透传给宿主」）。`bundle/index.js` 重新生成并 `--check` 通过（打包器已收录 `approvals.js`，内联前掐掉它自带的 `randomUUID` 导入避免重复声明）。
+- **协议 r5**：`docs/04` 新增 §5.5（帧表 + 三条不变量），CP 清单加 `/api/approvals`，`PROTOCOL.md` 同步再生；均属新增可选，旧客户端不参与审批即无感。
+
+---
+
 ## [P3 W10] · 2026-11-10 22:5x · 渗透用例 S1–S16 + 协议 r4（安全收紧）
 
 一次真机形态的对抗性验收，压出**四个可利用的洞**，并顺手把「白名单」这个说法落实成真：

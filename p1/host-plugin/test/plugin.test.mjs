@@ -731,3 +731,78 @@ test('端到端：配对 → Host WS 注册 → 手机 HTTP 投递 → 宿主提
     await relay.stop()
   }
 })
+
+/* ------------------------------------------------------------ W8 审批转发 */
+
+test('P-AP1 宿主审批瀑布 → 插件上行 $events/request；手机应答帧回来 → 返回 allowed-once', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  try {
+    const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-ap', autoConnect: true })
+    await waitFor(() => plugin.state.connected, '已连接')
+
+    let nextCalled = 0
+    const next = async () => { nextCalled++; return 'unavailable' }
+    // 直接取注册的监听器：mock 的 emit 会丢掉返回值，而瀑布的返回值就是审批结果
+    const handler = (ctx.listeners.get('approval/request') ?? [])[0]
+    assert.equal(typeof handler, 'function', '插件必须注册 approval/request 瀑布')
+
+    const outcomePromise = handler(
+      { agent: { session: { id: 'session-ap' } }, toolName: 'shell_run', callId: 'call-1', reason: '需要执行命令' },
+      next,
+    )
+
+    await waitFor(() => framesOf(relay, '$events/request').length === 1, '上行审批帧')
+    const frame = framesOf(relay, '$events/request')[0]
+    assert.equal(frame.sessionId, 'session-ap')
+    assert.equal(frame.toolName, 'shell_run')
+    assert.equal(frame.reason, '需要执行命令')
+    assert.equal(nextCalled, 0, '手机在线时不该交棒')
+
+    relay.send({
+      t: 'http/request', reqId: 'r-ap', method: 'POST',
+      endpoint: '$events/result',
+      body: { approvalId: frame.approvalId, outcome: 'allowed-once' },
+    })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '应答回响应')
+    const resp = framesOf(relay, 'http/response')[0]
+    assert.equal(resp.status, 200)
+    assert.equal(resp.body.data.outcome, 'allowed-once')
+
+    assert.equal(await outcomePromise, 'allowed-once', '瀑布最终要返回宿主要的 ApprovalOutcome')
+    assert.equal(nextCalled, 0)
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('P-AP2 未知/已应答的审批 id → 409 APPROVAL_GONE；非法 outcome → 400', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  try {
+    const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-ap2', autoConnect: true })
+    await waitFor(() => plugin.state.connected, '已连接')
+
+    relay.send({
+      t: 'http/request', reqId: 'r-bad1', method: 'POST',
+      endpoint: '$events/result', body: { approvalId: 'nope', outcome: 'allowed-once' },
+    })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '第一个响应')
+    const gone = framesOf(relay, 'http/response')[0]
+    assert.equal(gone.status, 409)
+    assert.equal(gone.body.error.code, 'APPROVAL_GONE')
+
+    relay.send({
+      t: 'http/request', reqId: 'r-bad2', method: 'POST',
+      endpoint: '$events/result', body: { approvalId: 'nope', outcome: 'allow-everything' },
+    })
+    await waitFor(() => framesOf(relay, 'http/response').length === 2, '第二个响应')
+    const invalid = framesOf(relay, 'http/response')[1]
+    assert.equal(invalid.status, 400, '不许把手机传来的任意串透给宿主')
+    assert.equal(invalid.body.error.code, 'INVALID_JSON')
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})

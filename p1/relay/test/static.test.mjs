@@ -125,4 +125,13 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /for \(const k of \['wbsync\.token'/, '忘掉电脑必须真的清掉令牌 / 设备 ID / 地址')
   assert.match(page, /#newbar\[hidden\][\s\S]*?display:\s*none/,
     'display:flex 会盖掉 UA 的 [hidden]{display:none}，必须显式提权重，否则 hidden 形同虚设')
+
+  // W8 审批卡片：三件事缺一不可——区域存在、两种应答按钮、避免把「别人先答了」报成失败
+  assert.match(page, /id="approvals"/, '必须有审批区（设备级，不随当前会话变化）')
+  assert.match(page, /#approvals\[hidden\][\s\S]*?display:\s*none/,
+    '审批区的 display:grid 同样会盖掉 [hidden]，必须显式提权')
+  assert.match(page, /answerApproval/, '必须能应答审批')
+  assert.match(page, /APPROVAL_GONE/, '先答先得：409 要按「已在电脑上处理」处理，不能报成失败')
+  assert.match(page, /refreshApprovals/, '必须能拉全量待审批（推送会丢，拉取才不漏）')
+  assert.match(page, /approvalsPulled/, '重连回来要补拉一次审批')
 })

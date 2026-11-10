@@ -55,6 +55,16 @@
               display: flex; gap: 8px; }
     /* display:flex 会盖掉 UA 的 [hidden]{display:none}，必须显式提权重，否则 hidden 形同虚设 */
     #setup[hidden], #newbar[hidden], #stream[hidden] { display: none; }
+
+    /* 审批卡片：设备级，与当前看哪个会话无关 */
+    #approvals { display: grid; gap: 8px; margin: 8px 0 12px; }
+    #approvals[hidden] { display: none; }
+    .card { border: 1px solid #3a4658; border-left: 3px solid #d9a03a; border-radius: 8px; padding: 10px 12px; background: #171f29; }
+    .card .tool { font-weight: 600; }
+    .card .why { color: #9fb0c8; font-size: 13px; margin: 4px 0 8px; white-space: pre-wrap; word-break: break-word; }
+    .card .acts { display: flex; gap: 8px; }
+    .card button.allow { background: #2b6a3f; border-color: #2b6a3f; }
+    .card button.deny { background: #8b3030; border-color: #8b3030; }
   </style>
 </head>
 <body>
@@ -74,6 +84,8 @@
     <input id="newText" placeholder="第一句话（可选，空=建空会话）" />
     <button id="create">新建会话</button>
   </div>
+  <!-- 审批是设备级的（与当前看哪个会话无关），所以放在事件流之外 -->
+  <div id="approvals" hidden></div>
   <main>
     <div id="status" class="hint" hidden></div>
     <div id="list" class="hint">填入 Relay 地址，再输入 PC 端（宿主插件本地页 /__wbsync/pair）生成的 6 位配对码。</div>
@@ -97,6 +109,8 @@
     let client = null
     let activeSession = null
     const seenSeq = new Map()   // sessionId -> 已渲染的最大 seq（幂等渲染）
+    const pendingApprovals = new Map()   // approvalId -> { toolName, reason, sessionId, expiresAt }
+    let approvalsPulled = false          // 已按「进入 following」补拉过一次，避免每次状态抖动都打接口
 
     $('relayBase').value = localStorage.getItem('wbsync.base') ?? ''
     // 已配对过（localStorage 有令牌）就不再展示配对码输入，避免误触重新配对
@@ -174,15 +188,102 @@
         deviceId,
         token,
         onEvent: ({ sessionId, ev, source }) => renderEvent(sessionId, ev, source),
-        onNotice: (n) => { if (n.type === 'sessions') renderList(n.rows) },
-        onStateChange: (snap) => { $('conn').textContent = connState(snap) },
+        onNotice: (n) => {
+          if (n.type === 'sessions') renderList(n.rows)
+          if (n.type === 'approval') { pendingApprovals.set(n.approvalId, n); renderApprovals() }
+          if (n.type === 'approval-resolved') {
+            if (pendingApprovals.delete(n.approvalId)) renderApprovals()
+            // 电脑上先答了：卡片撤掉，并说清是谁处理的，别让人以为自己点丢了
+            if (n.by === 'host') say('该审批已在电脑上处理')
+          }
+        },
+        onStateChange: (snap) => {
+          $('conn').textContent = connState(snap)
+          // 重连回来补拉审批：断线期间 Host 可能发过审批，那时的推送已经丢了
+          const following = Boolean(snap?.follows?.some((f) => f.status === 'following'))
+          if (following && !approvalsPulled) { approvalsPulled = true; void refreshApprovals() }
+          if (!following) approvalsPulled = false
+        },
       })
       client.refreshSessions()
         .then((rows) => {
           renderList(rows); $('list').classList.remove('hint'); $('status').hidden = true
           $('newbar').hidden = false   // 已连接才亮「新建会话」（Host 离线时协议要求入口置灰）
+          void refreshApprovals()      // 推送只保证「更快」，拉取才保证「断线期间的不漏」
         })
         .catch((e) => say(`连接失败：${e.message}`, true))
+    }
+
+    /** 渲染待审批卡片。设备级：不随 activeSession 变化。 */
+    const renderApprovals = () => {
+      const box = $('approvals')
+      box.innerHTML = ''
+      if (!pendingApprovals.size) { box.hidden = true; return }
+      box.hidden = false
+      for (const a of pendingApprovals.values()) {
+        const card = document.createElement('div')
+        card.className = 'card'
+
+        const tool = document.createElement('div')
+        tool.className = 'tool'
+        tool.textContent = `需要审批：${a.toolName ?? '未知工具'}`
+        card.appendChild(tool)
+
+        const why = document.createElement('div')
+        why.className = 'why'
+        const left = a.expiresAt ? Math.max(0, Math.round((a.expiresAt - Date.now()) / 1000)) : null
+        const sid = a.sessionId ? `会话 ${String(a.sessionId).slice(0, 14)}…` : '会话未知'
+        why.textContent = [a.reason, sid, left === null ? null : `${left}s 后交给电脑`].filter(Boolean).join(' · ')
+        card.appendChild(why)
+
+        const acts = document.createElement('div')
+        acts.className = 'acts'
+        const allow = document.createElement('button')
+        allow.className = 'allow'
+        allow.textContent = '允许一次'
+        allow.onclick = () => answerApproval(a.approvalId, 'allowed-once', [allow, deny])
+        const deny = document.createElement('button')
+        deny.className = 'deny'
+        deny.textContent = '拒绝'
+        deny.onclick = () => answerApproval(a.approvalId, 'rejected', [allow, deny])
+        acts.appendChild(allow); acts.appendChild(deny)
+        card.appendChild(acts)
+        box.appendChild(card)
+      }
+    }
+
+    /**
+     * 应答一条审批。先答先得：409 APPROVAL_GONE 说明电脑端已经处理，
+     * 这不是错误，撤卡并说明即可，别把「别人先答了」报成失败。
+     */
+    const answerApproval = async (approvalId, outcome, buttons = []) => {
+      for (const b of buttons) b.disabled = true
+      try {
+        await client.answerApproval({ approvalId, outcome })
+        pendingApprovals.delete(approvalId)
+        renderApprovals()
+        say(outcome === 'allowed-once' ? '已允许（单次）' : '已拒绝')
+      } catch (e) {
+        if (e.code === 'APPROVAL_GONE') {
+          pendingApprovals.delete(approvalId)
+          renderApprovals()
+          say('该审批已在电脑上处理')
+          return
+        }
+        for (const b of buttons) b.disabled = false
+        say(`审批应答失败：${e.message}`, true)
+      }
+    }
+
+    /** 拉全量待审批：WS 推送丢了、手机刚解锁、重连回来，都靠这一条补。 */
+    const refreshApprovals = async () => {
+      if (!client) return
+      try {
+        const rows = await client.listApprovals()
+        pendingApprovals.clear()
+        for (const r of rows) pendingApprovals.set(r.approvalId, r)
+        renderApprovals()
+      } catch { /* 拉不到就等推送，不打断主流程 */ }
     }
 
     /** 有码走配对，没码用已存令牌直连（刷新 / 回访场景）。 */

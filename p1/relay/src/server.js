@@ -276,6 +276,44 @@ export function createRelay(options = {}) {
     pending: new Map(),      // reqId -> { resolve, timer }
     sockets: new Map(),      // deviceId -> WS 连接（正式通道）
     hub: createEventHub({ capacity: cfg.eventBuffer ?? 1000 }),  // 事件缓冲 + 订阅广播
+    // 审批看板：Host 判、Relay 存、手机拉。存的是**已下发过的原帧**，所以手机断线期间
+    // 的审批不会丢——重连后 `GET /api/approvals` 就能补回来。
+    approvals: new Map(),    // approvalId -> { deviceId, payload, expiresAt, createdAt }
+    phoneConns: new Map(),   // deviceId -> Set<conn>（手机上任何会话订阅都算，审批是设备级的）
+  }
+
+  /** 手机侧已建立的事件订阅连接，按设备归组（审批通知要发给该设备的每一台手机）。 */
+  const trackPhoneConn = (deviceId, conn) => {
+    const set = state.phoneConns.get(deviceId) ?? new Set()
+    set.add(conn)
+    state.phoneConns.set(deviceId, set)
+  }
+  const untrackPhoneConn = (deviceId, conn) => {
+    const set = state.phoneConns.get(deviceId)
+    if (!set) return
+    set.delete(conn)
+    if (!set.size) state.phoneConns.delete(deviceId)
+  }
+  /** 广播给该设备上的手机；断掉的顺手剔除。 */
+  const broadcastToDevice = (deviceId, frame) => {
+    const set = state.phoneConns.get(deviceId)
+    if (!set) return 0
+    let reached = 0
+    for (const conn of [...set]) {
+      if (conn.isOpen()) { conn.sendJson(frame); reached++ } else set.delete(conn)
+    }
+    return reached
+  }
+  /** 惰性清过期条目：不额外起定时器，读写时顺手扫。 */
+  const sweepApprovals = (deviceId = null) => {
+    const t = now()
+    for (const [id, row] of state.approvals) {
+      if (deviceId && row.deviceId !== deviceId) continue
+      if (row.expiresAt && row.expiresAt < t) {
+        state.approvals.delete(id)
+        broadcastToDevice(row.deviceId, { t: 'approval/resolved', approvalId: id, outcome: 'cancelled', by: 'expired' })
+      }
+    }
   }
 
   const sixDigitCode = () => String(rand(4).readUInt32BE(0) % 1_000_000).padStart(6, '0')
@@ -397,6 +435,37 @@ export function createRelay(options = {}) {
       p.resolve({ status: msg.status ?? 200, body: msg.body ?? {} })
       return conn.sendJson({ t: 'ack', ref: msg.reqId, status: 'accepted' })
     }
+    if (msg.t === '$events/request') {
+      // 审批请求：存看板 + 推给该设备的所有手机。`expiresAt` 由 Host 给（它才是决定超时的人）。
+      const approvalId = String(msg.approvalId ?? '')
+      if (!approvalId) return conn.sendJson({ t: 'ack', ref: null, status: 'BAD_EVENT' })
+      const payload = {
+        t: 'approval/request',
+        approvalId,
+        sessionId: msg.sessionId ?? null,
+        toolName: msg.toolName ?? 'unknown',
+        callId: msg.callId ?? null,
+        reason: msg.reason ?? null,
+        expiresAt: msg.expiresAt ?? null,
+      }
+      state.approvals.set(approvalId, {
+        deviceId, payload, expiresAt: msg.expiresAt ?? null, createdAt: now(),
+      })
+      const delivered = broadcastToDevice(deviceId, payload)
+      return conn.sendJson({ t: 'ack', ref: approvalId, status: 'accepted', delivered })
+    }
+    if (msg.t === '$events/resolved') {
+      // Host 侧先答了 / 超时 / 被 abort：手机上的卡片要撤
+      const approvalId = String(msg.approvalId ?? '')
+      state.approvals.delete(approvalId)
+      const delivered = broadcastToDevice(deviceId, {
+        t: 'approval/resolved',
+        approvalId,
+        outcome: msg.outcome ?? 'cancelled',
+        by: msg.by ?? 'host',
+      })
+      return conn.sendJson({ t: 'ack', ref: approvalId, status: 'accepted', delivered })
+    }
     if (msg.t === 'session/event') {
       // 上行事件：按连续 seq 推进并广播给订阅该会话的手机
       const r = state.hub.ingest(String(msg.sessionId ?? ''), msg.ev)
@@ -516,6 +585,22 @@ export function createRelay(options = {}) {
         }
         const deviceId = url.searchParams.get('deviceId') ?? ''
         return ok(res, { deviceId, rows: cp.listSessions({ ownerDeviceId: deviceId }) })
+      }
+
+      // 手机侧待审批清单（审批是设备级的，与当前看哪个会话无关）。
+      // 手机断线期间错过的审批靠这条补回来——推送只是「更快」，拉取才是「不漏」。
+      if (method === 'GET' && path === '/api/approvals') {
+        const deviceId = url.searchParams.get('deviceId') ?? ''
+        const auth = String(req.headers.authorization ?? '')
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        if (!cp.verifyDeviceToken(deviceId, token)) {
+          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+        }
+        sweepApprovals(deviceId)
+        const rows = [...state.approvals.values()]
+          .filter((r) => r.deviceId === deviceId)
+          .map((r) => r.payload)
+        return ok(res, { deviceId, rows })
       }
 
       // 手机侧会话列表（协议 §4 CP API 的 W3 单机实现）。
@@ -677,6 +762,24 @@ export function createRelay(options = {}) {
         if (typeof body.sinceSeq === 'number' && body.sessionId) {
           cp.putCursor({ clientId: body.clientId ?? 'anonymous', sessionId: body.sessionId, sinceSeq: body.sinceSeq })
         }
+        // 审批应答：先答先得。已在别处应答/过期的一律 409，不再占用 Host 一个往返。
+        if (endpoint === '$events/result') {
+          const approvalId = String(body?.approvalId ?? '')
+          sweepApprovals(deviceId)
+          if (!approvalId || !state.approvals.has(approvalId)) {
+            return fail(res, 409, 'APPROVAL_GONE', '该审批已被应答或已过期', false)
+          }
+          return bridge(req, res, deviceId, endpoint, body, (response) => {
+            if (response?.status !== 200) return
+            state.approvals.delete(approvalId)
+            broadcastToDevice(deviceId, {
+              t: 'approval/resolved',
+              approvalId,
+              outcome: body?.outcome ?? 'cancelled',
+              by: 'phone',
+            })
+          })
+        }
         return bridge(req, res, deviceId, endpoint, body)
       }
 
@@ -716,9 +819,14 @@ export function createRelay(options = {}) {
       let conn = null
       conn = upgradeToWebSocket(req, socket, head, {
         onMessage() { /* 手机侧只订阅；上行指令仍走 HTTP（白名单见 04 §7） */ },
-        onClose() { if (conn) state.hub.unsubscribe(conn) },
+        onClose() {
+          if (!conn) return
+          state.hub.unsubscribe(conn)
+          untrackPhoneConn(deviceId, conn)   // 审批通知要发到这台设备的所有手机连接
+        },
       })
       if (!conn) { socket.destroy(); return }
+      trackPhoneConn(deviceId, conn)
       state.hub.subscribe(sessionId, Number.isInteger(sinceSeq) ? sinceSeq : -1, conn)
       return
     }
