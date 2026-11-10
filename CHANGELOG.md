@@ -4,6 +4,16 @@
 
 ---
 
+## [P1 W3 续 13] · 2026-11-10 13:1x · 非协议变更
+
+- **真机联调取证 + 出码路由修错**：用户开 `http://127.0.0.1:3080/__wbsync/pair` 得 ERR_CONNECTION_REFUSED——取证确认 **3080 是手机端 DSH 的 web 端口**，PC 端 DSH web 端口是**动态**的（本次 60413；`netstat -ano` 按 DSH 进程 PID 查 LISTENING），9230 是另一内部服务不是 web server。
+- **对照实验定位**：同一端口上已验证可用的 dsh-nas-sync 桥（`/nas-sync-api/*`）返回 401 令牌校验，而 `/__wbsync/*` 也 404 → 0.1.0 包在老端口测不出；换对端口后 `/__wbsync/status` 报 `connected:true / relayConfigured:true / indexReady:true / indexCount:11 / forwarded:16` —— **0.1.0 包真机加载成功、上行链路已通**。
+- **修复 pair 路由**：原来仅 POST，浏览器地址栏（GET）405，与 bundle README「PC 打开路由出码」的承诺不符。0.1.1 起同时支持 GET（浏览器直开）与 POST（脚本调用），其余方法仍 405；测试同步改写（GET 出码 + DELETE 405）。
+- **版本** `dsh-wb-cloud-sync-host` 0.1.0 → **0.1.1**，重新 `npm pack` 出 `dist/dsh-wb-cloud-sync-host-0.1.1.tgz`（需重装后生效）。
+- 测试 123（host-plugin 51，改写不增量）。
+
+---
+
 ## [P1 W3 续 12] · 2026-11-10 12:5x · 非协议变更
 
 - **Host 插件可安装包落地**（用户发现插件列表里没有——P0 装的只是探针，P1 host-plugin 一直是源码骨架）：新增 `p1/host-plugin/build-bundle.mjs` 把 `src/{index,replay,sessions}.js` 合成**单文件自包含** `bundle/index.js`（对齐 P0 探针已验证可安装的形态），`bundle/package.json` 的 `dsh` 块只声明 `bundle.patch`（host-only，写法对齐探针 / dsh-nas-sync），`npm pack` 产出 **`dist/dsh-wb-cloud-sync-host-0.1.0.tgz`** → DSH「添加插件」安装。

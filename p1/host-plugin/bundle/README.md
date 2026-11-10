@@ -4,7 +4,7 @@
 
 ## 安装
 
-DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.0.tgz`（由本目录 `npm pack` 产出）。
+DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.1.tgz`（由本目录 `npm pack` 产出）。
 
 ## 配置（缺省即可本机试跑）
 
@@ -16,7 +16,8 @@ DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1
 | `apply(ctx, config)` 的 `config` | 4 | 宿主注入（骨架期测试用） |
 
 本机试跑：先 `node p1/relay/run.mjs` 启动 Relay（未设令牌形态），插件装好后自动连上；
-PC 打开本地路由 `http://127.0.0.1:<DSH端口>/__wbsync/pair` 生成 6 位码，手机在
+PC 浏览器地址栏打开 `http://127.0.0.1:<DSH端口>/__wbsync/pair` 生成 6 位码（DSH web
+端口是动态的，用 `netstat -ano | findstr <DSH进程PID>` 查 LISTENING 行），手机在
 `http://<局域网IP>:8787/app` 输码配对。
 
 ## 铁律（与源码一致）

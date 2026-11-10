@@ -72,7 +72,7 @@ Relay → Host：
 | 路由 | 方法 | 说明 |
 |---|---|---|
 | `/__wbsync/status` | GET | `connected` / `relayConfigured` / `forwarded` / `dropped` / `downlinks` / `reconnects` / `lastSeq` / `protocol` |
-| `/__wbsync/pair` | POST | 代理一次 `POST <relayUrl>/pair/generate`，把 6 位配对码回给本机 UI |
+| `/__wbsync/pair` | GET / POST | 代理一次 `POST <relayUrl>/pair/generate`，把 6 位配对码回给本机 UI（GET 供浏览器地址栏直开，POST 供脚本调用；其余方法 405） |
 
 `relayUrl` 配成 **http(s) base**（配对代理要用 `fetch`），WS 地址由 `toWsUrl()` 派生（`http→ws`、`https→wss`）。这样只配一处，不会出现 HTTP 用域名、WS 用 IP 的错配。
 
@@ -152,7 +152,7 @@ node --test p1/host-plugin/test/*.test.mjs
 1. `deviceId` 派生 + 本机持久化 + 与配对令牌双绑（bundle 期临时用主机名）。
 2. ~~手机侧（PWA）在重连后主动发 `session/follow`~~（`p1/pwa` 已落地）。
 3. CP 已分离（`p1/cp` 接管索引 / 租约 / 位点 / 设备表）；剩「增量同步」——现在每次全量上报，会话多了要做 diff。
-4. ~~正式包换标识，接入 `dsh.bundle` 分发给真机验证~~（`bundle/` + `dist/dsh-wb-cloud-sync-host-0.1.0.tgz` 已落地，`build-bundle.mjs --check` 入 CI 防脱节）。
+4. ~~正式包换标识，接入 `dsh.bundle` 分发给真机验证~~（`bundle/` + `dist/dsh-wb-cloud-sync-host-0.1.1.tgz` 已落地并真机装包成功，`build-bundle.mjs --check` 入 CI 防脱节）。
 5. 真机装 bundle 跑通「配对 → 列表 → 新建 → 事件流」，`createSession` 适配器接宿主新建会话入口。
 
 ---
@@ -162,7 +162,8 @@ node --test p1/host-plugin/test/*.test.mjs
 ## 十一、可安装 bundle（`bundle/`）
 
 - `bundle/index.js` 由 `node p1/host-plugin/build-bundle.mjs` 从 `src/` **自动生成**（单文件自包含，顶层重名构建期即失败）；CI 用 `--check` 防「改了 src 忘了生成」。
-- `npm pack` 产出 `dist/dsh-wb-cloud-sync-host-0.1.0.tgz` → DSH「添加插件」安装；`dsh` 块只声明 `bundle.patch`（host-only，写法对齐已验证的探针 / dsh-nas-sync）。
+- `npm pack` 产出 `dist/dsh-wb-cloud-sync-host-0.1.1.tgz` → DSH「添加插件」安装；`dsh` 块只声明 `bundle.patch`（host-only，写法对齐已验证的探针 / dsh-nas-sync）。
+- **真机取证（2026-11-10）**：装包后插件在 PC 端 DSH 正常加载——`/__wbsync/status` 报 `connected:true`、索引 11 条已上送；DSH web 端口是**动态**的（`netstat -ano | findstr <DSH进程PID>` 查 LISTENING），浏览器地址栏 `http://127.0.0.1:<端口>/__wbsync/pair` 即可出码。
 - wrapper 配置链（低→高）：代码默认（本机 Relay + 主机名 deviceId）← `~/.dsh/wbsync-host.json` ← `WBSYNC_*` 环境变量 ← `apply` 的 `config`。
 - 安装 / 配置详见 `bundle/README.md`。
 

@@ -685,14 +685,19 @@ test('端到端：配对 → Host WS 注册 → 手机 HTTP 投递 → 宿主提
     assert.deepEqual(deliver.json.data, { accepted: true })
     assert.deepEqual(received, [{ sessionId: 'session-9', text: '远程跑', clientMsgId: undefined }])
 
-    // 6. 本地配对路由代理真实 Relay 的 /pair/generate
+    // 6. 本地配对路由代理真实 Relay 的 /pair/generate（POST）
     const bridged = await callRoute(ctx, '/__wbsync/pair', { method: 'POST' })
     assert.equal(bridged.status, 200)
     assert.match(String(bridged.json.data.code), /^\d{6}$/)
 
-    // 7. 非 POST 的配对路由拒绝
-    const notPost = await callRoute(ctx, '/__wbsync/pair', { method: 'GET' })
-    assert.equal(notPost.status, 405)
+    // 6b. GET 同样出码（PC 浏览器地址栏直开的真机联调路径）
+    const viaGet = await callRoute(ctx, '/__wbsync/pair', { method: 'GET' })
+    assert.equal(viaGet.status, 200)
+    assert.match(String(viaGet.json.data.code), /^\d{6}$/)
+
+    // 7. 其他方法仍拒绝
+    const notAllowed = await callRoute(ctx, '/__wbsync/pair', { method: 'DELETE' })
+    assert.equal(notAllowed.status, 405)
 
     ctx.dispose()
     await waitFor(() => !relay.isOnline('pc-1'), '卸载后 Relay 判定离线')

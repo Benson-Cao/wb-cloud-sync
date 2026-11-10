@@ -601,8 +601,10 @@ function __apply(ctx, config = {}) {
       kind: 'exact',
       path: '/__wbsync/pair',
       handler: async (req, res) => {
-        if ((req.method ?? 'GET') !== 'POST') {
-          return json(res, 405, errBody('ENDPOINT_NOT_ALLOWED', '仅支持 POST'))
+        // GET 与 POST 都出码：GET 供 PC 浏览器地址栏直接打开（真机联调主路径），POST 供脚本/页面调用。
+        const method = req.method ?? 'GET'
+        if (method !== 'GET' && method !== 'POST') {
+          return json(res, 405, errBody('ENDPOINT_NOT_ALLOWED', '仅支持 GET / POST'))
         }
         if (!cfg.relayUrl) return json(res, 409, errBody('NO_PROGRESS', '未配置 relayUrl', true))
         try {
