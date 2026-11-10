@@ -190,7 +190,7 @@ const manual = [
   { id: 'M4', label: 'ADR-009 PROTOCOL.md 为唯一契约源', status: '提议中，待会签', owner: 'ARC' },
   { id: 'M5', label: '安全项一票否决权行使（08 / 01 §6）', status: '待安全 Owner', owner: '安全 Owner' },
   { id: 'M6a', label: 'CI 闸门接入（GitHub Actions · gate.yml）', status: 'MET · run 42366496926', owner: 'HE-A + BE-RL' },
-  { id: 'M6b', label: '本地构建链 Node ≥24.9 + pnpm 11', status: 'NOT MET', owner: 'HE-A + BE-RL' },
+  { id: 'M6b', label: '本地构建链 Node ≥24.9 + pnpm 11（见 scripts/check-env.mjs）', status: 'NOT MET · 2/5', owner: 'HE-A + BE-RL' },
 ]
 
 const result = {
@@ -222,6 +222,7 @@ if (!process.argv.includes('--check')) {
     freshness: {
       ...freshness,
       status: 'CURRENT',
+      ageDays: 0,        // 新快照刚诞生，年龄归零（上一份的年龄在 supersedes.capturedAt）
       reason: undefined, // 上一份的判定理由归入 supersedes，避免快照自述为「需重算」
       supersedes: {
         previousStatus: freshness.status,

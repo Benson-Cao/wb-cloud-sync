@@ -1,39 +1,28 @@
 {
   "schema": "wbsync-gate-check/3",
-  "capturedAt": "2026-11-07T11:59:23.823Z",
+  "capturedAt": "2026-11-10T00:13:40.726Z",
   "git": {
-    "head": "51161f3663aa09e5872e818293a3d6357fca891d",
+    "head": "e140c7053fba25dc92bf7f8bf90ba4018a8f1101",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [
-      "check-plugin.json"
-    ],
-    "artifactChanged": [
-      "dist-tarball"
-    ],
+    "dataChanged": [],
+    "artifactChanged": [],
     "narrativeChanged": [],
-    "notes": [
-      "发布物已重建（仅记录，不影响判定）：dist-tarball"
-    ],
-    "previousCapturedAt": "2026-11-07T11:58:38.460Z",
-    "previousGitHead": "51161f3663aa09e5872e818293a3d6357fca891d",
+    "notes": [],
+    "previousCapturedAt": "2026-11-10T00:13:23.361Z",
+    "previousGitHead": "e140c7053fba25dc92bf7f8bf90ba4018a8f1101",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "STALE",
-      "previousReason": "运行代码/证据已变化（阻断）：check-plugin.json",
-      "capturedAt": "2026-11-07T11:58:38.460Z",
-      "gitHead": "51161f3663aa09e5872e818293a3d6357fca891d",
-      "dataChanged": [
-        "check-plugin.json"
-      ],
-      "artifactChanged": [
-        "dist-tarball"
-      ],
+      "previousStatus": "CURRENT",
+      "capturedAt": "2026-11-10T00:13:23.361Z",
+      "gitHead": "e140c7053fba25dc92bf7f8bf90ba4018a8f1101",
+      "dataChanged": [],
+      "artifactChanged": [],
       "narrativeChanged": []
     }
   },
@@ -43,10 +32,10 @@
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
       "host-probe.json": "aaab61e2347d65fbbf6c380ecec0fa7b66e259f3c2a547f12bb15a3fe5b8a236",
-      "check-plugin.json": "9fa9b007eecf77766e1d91da7ab50df1cfd487c20db43817ff9cd618a46263d3"
+      "check-plugin.json": "5509b9288dd8967fc146ba7273df4a491be06c1b514e07fe2f8afc069e48bd07"
     },
     "artifact": {
-      "dist-tarball": "a4112bb894619efba2b45054c68fc8ff0345a5ea8faadb6eaef09876a47c9f99"
+      "dist-tarball": "3f60509c42fd9ca121df64a74cf46306ce51fcb6b1953ba50c4cc5fc41c09896"
     },
     "narrative": {
       "REPORT.md": "05b1d338f6797668fc26e04cecdd67c23ae2720f59b08dd56079f98ded7549dc",
@@ -168,8 +157,8 @@
     },
     {
       "id": "M6b",
-      "label": "本地构建链 Node ≥24.9 + pnpm 11",
-      "status": "NOT MET",
+      "label": "本地构建链 Node ≥24.9 + pnpm 11（见 scripts/check-env.mjs）",
+      "status": "NOT MET · 2/5",
       "owner": "HE-A + BE-RL"
     }
   ],

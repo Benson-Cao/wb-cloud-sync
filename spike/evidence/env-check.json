@@ -1,0 +1,58 @@
+{
+  "schema": "wbsync-env-check/1",
+  "capturedAt": "2026-11-10T00:13:20.871Z",
+  "platform": "win32",
+  "scope": "构建链（当前进程），不是 DSH 宿主运行时",
+  "tools": {
+    "npm": "present (C:\\Users\\Administrator\\.workbuddy\\binaries\\node\\versions\\22.22.2-6\\npm)",
+    "pnpm": null,
+    "corepack": "present (C:\\Users\\Administrator\\.workbuddy\\binaries\\node\\versions\\22.22.2-6\\corepack)",
+    "dsh": null
+  },
+  "checks": [
+    {
+      "id": "E1",
+      "label": "构建链 Node ≥ 24.9",
+      "pass": false,
+      "observed": "v22.22.2"
+    },
+    {
+      "id": "E2",
+      "label": "pnpm 11.x 可用",
+      "pass": false,
+      "observed": "NOT_INSTALLED"
+    },
+    {
+      "id": "E3",
+      "label": "Corepack 可用（用于启用 pnpm 11）",
+      "pass": true,
+      "observed": "present (C:\\Users\\Administrator\\.workbuddy\\binaries\\node\\versions\\22.22.2-6\\corepack)"
+    },
+    {
+      "id": "E4",
+      "label": "NODE_OPTIONS 不含 --no-experimental-strip-types",
+      "pass": true,
+      "observed": "--require=\"D:/Program Files/WorkBuddy/resources/app.asar.unpacked/cli/vendor/shim/node-language-shim.cjs\""
+    },
+    {
+      "id": "E5",
+      "label": "dsh CLI 在 PATH",
+      "pass": false,
+      "observed": "NOT_IN_PATH"
+    }
+  ],
+  "passed": 2,
+  "total": 5,
+  "verdict": "NOT_READY",
+  "dshRuntime": {
+    "nodeVersion": "24.21.0",
+    "capturedAt": "2026-11-07T10:10:44.079Z",
+    "pluginName": "dsh-wb-cloud-sync-spike",
+    "note": "来自 2026-11-07 真机探针的启动快照，是宿主运行时而非构建链；会过期，不可当作当前环境证明"
+  },
+  "remediation": [
+    "pnpm 11：corepack prepare pnpm@11.28.5 --activate（corepack 已装）；如需 shim 再 corepack enable",
+    "Node ≥ 24.9：CI 已用 Node 24；本地请自行升级，**不要改 WorkBuddy 自带的 Node**",
+    "dsh CLI：把 DSH 的 bin 加进 PATH，或直接用桌面版插件管理器（本机已验证可装）"
+  ]
+}

@@ -44,3 +44,8 @@ jobs:
 
       - name: 发布包可打包
         run: npm pack --dry-run
+
+      # 只记录不阻断：本地构建链（Node >=24.9 + pnpm 11）属人工项 M6b，
+      # 不应让 CI 因开发者机器差异而失败。
+      - name: 构建链环境自检（记录，不阻断）
+        run: node scripts/check-env.mjs

@@ -145,6 +145,8 @@ curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PORT/__wb
 ├─ docs/                        # 设计冻结包 v1.1（11 份，含 ADR-007~009）
 ├─ scripts/
 │  ├─ gate-check.mjs            # P0 门禁自动核查（--check 供 CI，输出证据快照）
+│  ├─ check-env.mjs             # 构建链环境自检（只读，M6b）
+│  ├─ lib/tar.mjs               # 零依赖 tar 解析（G9 解包比对）
 │  ├─ sync-protocol.mjs         # ADR-009：生成 PROTOCOL.md + --check CI 校验
 │  ├─ apply-spike-revisions.mjs # v1.0→v1.1 文档修订（带断言与原文备份）
 │  └─ apply-realdevice-updates.mjs # 真机结论回填（3 处，带断言）
