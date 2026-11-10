@@ -11,6 +11,7 @@
 - **官方新建会话链路（asar 取证）**：`SessionController.create(request) → commands.create → SessionCommandController.create → agents.createSession({cwd, reusable}) → ApiSessionAgentController.createMinted → ctx.agents.create({ sessionId:'session-<uuid>', meta:{cwd}, agentOptions, setup })`，返回 `{sessionId}`。`session/prompt` 的 required 为 `requestId / sessionId / mode / content`，第二参是 signal。`sessions` 其实是 host 侧 **SessionRegistry**（`store / enter / announce / liveEntryFor / fork`），`create` 只建 entry——这就是 0.1.4 抛错的根因；`agents` 是 **AgentRegistry**（`super(ctx,"agents")`），其 `create(options)` 注释即「constructs the agent and its session」。
 - **0.1.5 修法**：① 服务探测改为**每次调用惰性重探**（晚到依赖自动接上）；② 候选按「官方完整语义 → 内部同义 → 底层兜底」排序，`sessions.create` 降末位；③ 返回值归一化支持 `sessionId / agent.id / id`；④ 错误带入口名与返回结构；⑤ status 增报 `probe.boot` / `probe.lateBound`；⑥ PWA 把 `error.message` 透传到屏幕（`client.js` 原先只取 `code`，真机看不到宿主原文）。
 - 新增 7 例（官方入口优先、服务晚到、commands/agents 同义入口、AgentRegistry 底层兜底、错误原文、prompt 优先级、PWA 错误透传）；测试 143 → **150**，版本 **0.1.5**（`dist/dsh-wb-cloud-sync-host-0.1.5.tgz`）。
+- **SW 同步递增 `wbsync-shell-v4`**：`client.js` 属 SW 缓存优先资源，不升缓存名手机会继续拿旧文件、错误透传不生效；真机需刷新两次让新 SW 接管。
 - **教训**：静态枚举一个运行时的**局部**服务表，不等于证明全局没有该服务；启动期快照对晚注册依赖是致命的，能力探测必须放到调用点。
 
 ---

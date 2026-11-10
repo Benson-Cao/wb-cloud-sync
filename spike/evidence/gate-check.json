@@ -1,43 +1,30 @@
 {
   "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T09:44:25.482Z",
+  "capturedAt": "2026-11-10T09:47:08.071Z",
   "git": {
-    "head": "f33d1c7f0d4e089e202a28d59fe45bbfb83b39e7",
+    "head": "a06c3aadb33a7b36df1ab964c055122b5e08a519",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [
-      "host-probe.json",
-      "check-plugin.json"
-    ],
+    "dataChanged": [],
     "signoffChanged": [],
-    "artifactChanged": [
-      "dist-tarball"
-    ],
+    "artifactChanged": [],
     "narrativeChanged": [],
-    "notes": [
-      "发布物已重建（仅记录，不影响判定）：dist-tarball"
-    ],
-    "previousCapturedAt": "2026-11-10T09:04:05.612Z",
-    "previousGitHead": "fae6fe67416b7c92cd66cec3a175e0ef9d88f310",
+    "notes": [],
+    "previousCapturedAt": "2026-11-10T09:46:26.664Z",
+    "previousGitHead": "a06c3aadb33a7b36df1ab964c055122b5e08a519",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：运行代码/证据：host-probe.json, check-plugin.json",
-      "capturedAt": "2026-11-10T09:04:05.612Z",
-      "gitHead": "fae6fe67416b7c92cd66cec3a175e0ef9d88f310",
-      "dataChanged": [
-        "host-probe.json",
-        "check-plugin.json"
-      ],
+      "previousStatus": "CURRENT",
+      "capturedAt": "2026-11-10T09:46:26.664Z",
+      "gitHead": "a06c3aadb33a7b36df1ab964c055122b5e08a519",
+      "dataChanged": [],
       "signoffChanged": [],
-      "artifactChanged": [
-        "dist-tarball"
-      ],
+      "artifactChanged": [],
       "narrativeChanged": []
     }
   },

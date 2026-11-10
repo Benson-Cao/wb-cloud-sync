@@ -111,5 +111,10 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
       assert.equal((await get(port, `/src/${dep}`)).status, 200, `依赖应可从 /src/ 取到：${dep}`)
     }
   }
-  assert.match(sw.text, /wbsync-shell-v3/, '缓存名应随清单变化递增')
+  // 缓存名不硬编码具体版本：只要保持 vN 且不低于当前基线即可，
+  // 避免每次递增（v3 → v4 → …）都要回来改这条断言。
+  const cache = sw.text.match(/SHELL_CACHE\s*=\s*["']wbsync-shell-v(\d+)["']/)
+  assert.ok(cache, 'SHELL_CACHE 必须是 wbsync-shell-vN 形式')
+  assert.ok(Number(cache[1]) >= 4,
+    `壳资源变更后缓存名应递增（当前基线 v4），实际 v${cache[1]}`)
 })
