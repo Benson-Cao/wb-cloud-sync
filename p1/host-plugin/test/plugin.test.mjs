@@ -241,7 +241,47 @@ test('缺 session.header.id 的事件不计账也不发帧', async () => {
   }
 })
 
+
 /* ------------------------------------------------------------ 下行分派 */
+
+test('session/create 分派到注入的 createSession 适配器；未注入则 409 WRITER_UNAVAILABLE', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  const seen = []
+  try {
+    const plugin = apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true,
+      createSession: async (args) => {
+        seen.push(args)
+        return { ok: true, value: { sessionId: 'session-new', index: { sessionId: 'session-new', state: 'awaiting' } } }
+      },
+    })
+    await waitFor(() => plugin.state.connected, '已连接')
+
+    relay.send({ t: 'http/request', reqId: 'r-9', method: 'POST', endpoint: 'session/create', body: { text: '第一句话', clientId: 'pwa' } })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '回响应')
+    const resp = framesOf(relay, 'http/response')[0]
+    assert.equal(resp.reqId, 'r-9')
+    assert.equal(resp.status, 200)
+    assert.deepEqual(resp.body.data, { sessionId: 'session-new', index: { sessionId: 'session-new', state: 'awaiting' } })
+    assert.deepEqual(seen, [{ text: '第一句话', cwd: null, clientId: 'pwa' }])
+
+    // 卸载重装（不带适配器）：同端点 → 409 WRITER_UNAVAILABLE
+    ctx.dispose()
+    const ctx2 = createMockCtx()
+    const plugin2 = apply(ctx2, { relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true })
+    await waitFor(() => plugin2.state.connected, '重连成功')
+    relay.send({ t: 'http/request', reqId: 'r-10', method: 'POST', endpoint: 'session/create', body: { text: '' } })
+    await waitFor(() => framesOf(relay, 'http/response').length === 2, '第二条回响应')
+    const resp2 = framesOf(relay, 'http/response')[1]
+    assert.equal(resp2.status, 409)
+    assert.equal(resp2.body.error.code, 'WRITER_UNAVAILABLE')
+    ctx2.dispose()
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
 
 test('session/prompt 走注入的 submitPrompt 适配器并回 http/response', async () => {
   const relay = await startFakeRelay()

@@ -278,6 +278,30 @@ export function createPwaClient({
     for (const sessionId of [...follows.keys()]) unfollow(sessionId)
   }
 
+  /* ---------------------------------------------------------- 新建会话 */
+
+  /**
+   * 新建会话：`POST /api/sessions`（协议 §4）。Relay 桥接 Host 的
+   * `session/create` 适配器；Host 未注入适配器 → 409 `WRITER_UNAVAILABLE`，
+   * Host 离线 → 409 `HOST_OFFLINE`（retryable）。创建成功即调
+   * `refreshSessions()` 让列表立刻可见（Relay 已把引导行写进 CP）。
+   */
+  const createSession = async ({ text = '', cwd = null } = {}) => {
+    const r = await fetchImpl(`${base}/api/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      // deviceId 必须显式带上：令牌按 Host 设备登记，Relay 要用它定位校验对象
+      body: JSON.stringify({ clientId, deviceId, text, cwd }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      throw Object.assign(new Error(`新建会话失败：${code}`), { code })
+    }
+    await refreshSessions()
+    return payload.data   // { sessionId, ... }
+  }
+
   const snapshot = () => ({
     deviceId,
     stopped,
@@ -293,5 +317,5 @@ export function createPwaClient({
     })),
   })
 
-  return { refreshSessions, follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null }
+  return { refreshSessions, createSession, follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null }
 }

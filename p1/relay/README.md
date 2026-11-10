@@ -19,6 +19,7 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 | Host → Relay | **`WS /ws/host` 长连** | 先 `host/register`（带 `HOST_TOKEN`），再 `host/heartbeat`、`host/sessions`、`session/event`、`http/response` |
 | 手机订阅事件 | **`WS /d/<deviceId>/events/<sessionId>?token=&sinceSeq=`** | 只下行；令牌走 query（浏览器 WebSocket 不能设 Authorization 头） |
 | 手机读会话列表 | **`GET /api/sessions?deviceId=&pinned=`** | `Bearer <deviceToken>`；协议 §4 CP API 的 W3 单机实现（CP 仍在 Relay 进程内，P2 迁独立服务），测试见 `p1/pwa` A1–A3 |
+| 手机新建会话 | **`POST /api/sessions`**（body 带 `deviceId`） | `Bearer <deviceToken>`；Host 离线 409 `HOST_OFFLINE`（入口置灰）；桥接白名单内 `session/create` → Host `createSession` 适配器；未注入适配器 409 透传。成功后 Relay 把**引导行**（`state:'awaiting'`）写进 CP，Host 下一次全量上报校正 |
 | 手机发指令 | HTTP（`/d/<deviceId>/session/*`） | 走白名单 + 桥接成 `http/request` 帧 |
 | 手机请求 → Host | `http/request` 帧 | 同一连接按发送顺序到达，**帧序即流序** |
 | 降级 | `GET /host/poll` + `POST /host/respond` | 设备没有活跃 WS 时使用，便于旧 Host 与单测 |
@@ -58,6 +59,7 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 
 ## 明确的边界
 
+- **配对后的 45s 活跃窗口**：`/pair/verify` 把设备记为「最近活跃」（`lastSeenAt=now`），窗口内没有 Host WS 时，桥接请求会在降级通道里等到 10s 超时回 504 `NO_PROGRESS`（不会误投帧）。现实中 PC 能出配对码即意味着宿主在跑；真机上表现为极短暂的「配对完就发消息可能转一下」。
 - **CP 尚未分离**：配对码登记、设备档案、会话索引暂由 Relay 单机内存承担，不落盘、重启即清空。
 - **不持久化事件**：缓冲只在内存，进程重启即丢；`~/.dsh` 日志仍是唯一真源（`03` P1），重启补齐要回 Host 读日志——属下一步。
 - **不解析事件正文**：Relay 只按 `seq` 排队转发，不看 `ev.data`（ADR-010 / `04` §5.4）。端到端加密属 `wbsync/2`。

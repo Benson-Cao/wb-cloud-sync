@@ -4,6 +4,18 @@
 
 ---
 
+## [P1 W3 续 9] · 2026-11-10 11:5x · 非协议变更
+
+- **新建会话链路打通**（W3 收尾项）：手机 `POST /api/sessions`（body 带 `deviceId`，Bearer 鉴权）→ Relay 桥接白名单内的 `session/create` → Host 插件新适配器 `createSession({text, cwd, clientId})`（正式实现接宿主新建会话入口）。创建成功后 Relay 通过桥接响应钩子把**引导行**（`state:'awaiting'`）写进 CP——手机不必等 Host 下一个 60s 索引刷新周期即可见；Host 全量上报随后校正 `state` / `lastSeq`。
+- **错误分层照旧**：Host 离线 → 409 `HOST_OFFLINE`（retryable，协议 §4 要求手机入口置灰，UI 已照做——未连接前「新建会话」栏隐藏）；Host 未注入 `createSession` 适配器 → 409 `WRITER_UNAVAILABLE` 透传，Relay 不代造会话、CP 不出幽灵行。
+- **写测试抓到自己两个错**：① `createSession` 请求体漏带 `deviceId`——令牌按 Host 设备登记，Relay 无从校验 → 401；② 最初想用「只配对不注册 Host」测离线，实际撞上「配对即视为最近活跃」的既有语义（45s 窗口），改为注入时钟推过窗口再断言——该语义在真实流程里无害（能出码即宿主在跑），已在 `p1/relay/README.md`「明确的边界」写清其表现（窗口内桥接请求走降级通道等到 10s 超时 504，不误投帧）。
+- PWA 客户端新增 `createSession()`（成功后自动 `refreshSessions()` 并打开新会话事件流）；UI 加「新建会话」栏（第一句话可选）。
+- 测试 106 → **112**（`p1/pwa/test/create.test.mjs` 5 个 + host-plugin `session/create` 分派 1 个）。
+
+**边界未变**：真机需在宿主插件注入 `createSession` 适配器（接 `dsh-api-session-controller` 的新建会话入口）才会真正建会话；置顶属 PC 侧功能（手机 403）；附件上行留 P2。
+
+---
+
 ## [P1 W3 续 8] · 2026-11-10 11:4x · 非协议变更
 
 - **配对向导落地**：新增 `p1/pwa/src/pairing.js` + 壳页面改造——手机侧不再手填令牌，正式走「PC 宿主插件本地页 `/__wbsync/pair` 出 6 位码 → 手机输码 → `POST /pair` 换一次性 challenge + per-challenge pairSecret → HMAC-SHA256 → `POST /pair/verify` 换 deviceToken」。HMAC 用 **WebCrypto（`crypto.subtle`）**：浏览器与 Node ≥19 全局 `crypto` 同接口，实现零依赖、测试零 mock（跑的就是浏览器里的真实路径）。

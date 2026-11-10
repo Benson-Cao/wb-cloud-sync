@@ -18,6 +18,8 @@
  *   submitPrompt({sessionId, text, clientMsgId}) -> {ok, value?, code?, message?}
  *   cancelTurn({sessionId})                     -> 同上
  *   replay({sessionId, sinceSeq})               -> 同上（历史补齐，见 src/replay.js）
+ *   createSession({text, cwd, clientId})        -> 同上（新建会话；value 含
+ *                                                  sessionId，可附 index 行）
  */
 import { createReplayAdapter } from './replay.js'
 import { createSessionIndexReporter } from './sessions.js'
@@ -103,6 +105,10 @@ export function apply(ctx, config = {}) {
     cancelTurn: cfg.cancelTurn ?? (async () => ({
       ok: false, code: 'WRITER_UNAVAILABLE', message: '未注入 cancelTurn 适配器',
     })),
+    createSession: cfg.createSession ?? (async () => ({
+      ok: false, code: 'WRITER_UNAVAILABLE',
+      message: '未注入 createSession 适配器；真机需接宿主新建会话入口（不得自开写句柄）',
+    })),
     replay: cfg.replay ?? (openSession
       ? createReplayAdapter({ openSession, pageSize: cfg.replayPageSize })
       : async () => ({
@@ -171,6 +177,13 @@ export function apply(ctx, config = {}) {
       if (endpoint === 'session/cancel') {
         const r = await adapters.cancelTurn({ sessionId: body?.sessionId })
         const { status, body: payload } = unwrap(r, { cancelled: true })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/create') {
+        const r = await adapters.createSession({
+          text: body?.text ?? '', cwd: body?.cwd ?? null, clientId: body?.clientId ?? null,
+        })
+        const { status, body: payload } = unwrap(r, { created: true })
         return send({ t: 'http/response', reqId, status, body: payload })
       }
       if (endpoint === 'session/follow') {

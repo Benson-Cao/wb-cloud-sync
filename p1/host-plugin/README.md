@@ -10,12 +10,13 @@ DSH 宿主里的那一半：**主动外连 Relay**、把宿主事件原样上行
 
 P0 Spike Q2 已取证：手机投递必须走宿主 `dsh-api-session-controller.prompt(request)`，`requestId` 原生幂等，`SessionAlreadyOwnedError` 保证单写者。**绝不 `open(id,'write')`**——那会绕开宿主的并发保护，写出双写分裂。
 
-所以本插件把提交能力抽象成三个**可注入适配器**，自己**不碰** `sessionPersistence` 的写路径：
+所以本插件把提交能力抽象成四个**可注入适配器**，自己**不碰** `sessionPersistence` 的写路径：
 
 | 适配器 | 入参 | 返回 | 缺省行为 |
 |---|---|---|---|
 | `submitPrompt` | `{sessionId, text, clientMsgId}` | `{ok:true, value}` / `{ok:false, code, message}` | 回 `WRITER_UNAVAILABLE`（409） |
 | `cancelTurn` | `{sessionId}` | 同上 | 回 `WRITER_UNAVAILABLE`（409） |
+| `createSession` | `{text, cwd, clientId}` | 同上（`value.sessionId` 必备，可附 `value.index` 行） | 回 `WRITER_UNAVAILABLE`（409） |
 | `replay` | `{sessionId, sinceSeq}` | 同上（`value.events` 为连续前缀） | 绑 `sessionPersistence.open(id,'read')`；拿不到句柄回 `NOT_AVAILABLE`（501） |
 
 未注入时**明确拒绝**并说明原因，不静默降级、不自行追加日志。这条是给正式接入留的口子，也保证骨架可以离线跑单测。
@@ -60,6 +61,7 @@ Relay → Host：
 |---|---|---|---|
 | `session/prompt` | `submitPrompt` | 200 + `{accepted:true}` | 适配器拒绝 → 409 + 原 `code` |
 | `session/cancel` | `cancelTurn` | 200 + `{cancelled:true}` | 同上 |
+| `session/create` | `createSession` | 200 + `{sessionId, …}`（Relay 据此写 CP 引导行） | 同上 |
 | `session/follow` | `replay` | 200 + `{events:[…]}` | 同上 |
 | 其它 | — | — | **403 `ENDPOINT_NOT_ALLOWED`** |
 
@@ -122,7 +124,7 @@ Relay 的事件缓冲在内存里，进程一重启就空；手机断线重连�
 4. **丢弃窗口靠 follow 兜底，但没人自动触发**：`dropped` 只计数，重连后主动补拉要等手机侧（PWA）发起。
 5. **索引里没有 `title`**：宿主会话头里确实没有标题字段（实测只有 `version/id/createdAt/cwd/isSeeded/delegationDepth/agentPreset`），标题要由 PC 侧会话管理器补，此处给 `null` 而不是从 `cwd` 编一个。
 
-## 九、测试（47 个用例，`node --test`）
+## 九、测试（48 个用例，`node --test`）
 
 ```bash
 node --test p1/host-plugin/test/*.test.mjs

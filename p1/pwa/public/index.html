@@ -49,8 +49,10 @@
     .hint { color: #777; font-size: 13px; padding: 16px 0; }
     #setup { padding: 12px 16px; background: #1d1d1d; border-bottom: 1px solid #2c2c2c;
              display: flex; gap: 8px; }
-    #setup input { flex: 1; background: #111; color: #e6e6e6; border: 1px solid #2c2c2c;
+    #setup input, #newbar input { flex: 1; background: #111; color: #e6e6e6; border: 1px solid #2c2c2c;
                    border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+    #newbar { padding: 10px 16px; background: #191919; border-bottom: 1px solid #2c2c2c;
+              display: flex; gap: 8px; }
   </style>
 </head>
 <body>
@@ -64,6 +66,10 @@
     <input id="pairCode" placeholder="6 位配对码" maxlength="6" inputmode="numeric"
            style="max-width:110px" autocomplete="one-time-code" />
     <button id="save">配对</button>
+  </div>
+  <div id="newbar" hidden>
+    <input id="newText" placeholder="第一句话（可选，空=建空会话）" />
+    <button id="create">新建会话</button>
   </div>
   <main>
     <div id="status" class="hint" hidden></div>
@@ -142,7 +148,10 @@
         onStateChange: (snap) => { $('conn').textContent = connState(snap) },
       })
       client.refreshSessions()
-        .then((rows) => { renderList(rows); $('list').classList.remove('hint'); $('status').hidden = true })
+        .then((rows) => {
+          renderList(rows); $('list').classList.remove('hint'); $('status').hidden = true
+          $('newbar').hidden = false   // 已连接才亮「新建会话」（Host 离线时协议要求入口置灰）
+        })
         .catch((e) => say(`连接失败：${e.message}`, true))
     }
 
@@ -188,6 +197,20 @@
 
     $('save').addEventListener('click', () => { void connect() })
     $('refresh').addEventListener('click', () => client?.refreshSessions().catch((e) => say(`刷新失败：${e.message}`, true)))
+    $('create').addEventListener('click', async () => {
+      if (!client) return
+      $('create').disabled = true
+      try {
+        const r = await client.createSession({ text: $('newText').value.trim() })
+        $('newText').value = ''
+        say(`已创建：${r.sessionId}`)
+        openStream(r.sessionId)
+      } catch (e) {
+        say(`新建失败：${e.message}${e.code === 'HOST_OFFLINE' ? '（Host 离线）' : ''}`, true)
+      } finally {
+        $('create').disabled = false
+      }
+    })
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {})
   </script>
 </body>

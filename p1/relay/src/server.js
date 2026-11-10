@@ -120,8 +120,8 @@ export function createRelay(options = {}) {
     return cp.isDeviceAlive(deviceId, now())
   }
 
-  /** 手机侧 /d/<id>/<endpoint> 请求 → 帧 → 等待 Host 响应。 */
-  const bridge = (req, res, deviceId, endpoint, body) => {
+  /** 手机侧 /d/<id>/<endpoint> 请求 → 帧 → 等待 Host 响应。afterResponse 在响应落地后拿到原始应答（可选）。 */
+  const bridge = (req, res, deviceId, endpoint, body, afterResponse = null) => {
     const reqId = hex(16)
     const frame = { t: 'http/request', reqId, method: req.method, endpoint, body, sinceSeq: body?.sinceSeq ?? null }
     const conn = state.sockets.get(deviceId)
@@ -144,6 +144,7 @@ export function createRelay(options = {}) {
       resolve: (response) => {
         clearTimeout(timer)
         reply(res, response.status ?? 200, response.body ?? { ok: true, data: {}, protocol: PROTOCOL })
+        if (afterResponse) { try { afterResponse(response) } catch { /* 记录失败不影响响应 */ } }
       },
       timer,
     })
@@ -300,6 +301,39 @@ export function createRelay(options = {}) {
         return ok(res, {
           deviceId,
           rows: cp.listSessions({ ownerDeviceId: deviceId, pinned }),
+        })
+      }
+
+      // 手机侧新建会话（协议 §4：目标 Host 离线时 HOST_OFFLINE，入口置灰）。
+      // 桥接白名单内的 session/create → Host 的 createSession 适配器（接宿主
+      // 新建会话入口）；Host 未注入适配器时 409 透传，Relay 不代造会话。
+      if (method === 'POST' && path === '/api/sessions') {
+        const auth = String(req.headers.authorization ?? '')
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        const probe = url.searchParams.get('deviceId') ?? ''
+        const body = await readBody(req, cfg.maxBodyBytes)
+        const deviceId = body.deviceId ?? probe
+        if (!cp.verifyDeviceToken(deviceId, token)) {
+          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+        }
+        if (!isOnline(deviceId)) {
+          cp.markDeviceOffline(deviceId)
+          return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
+        }
+        return bridge(req, res, deviceId, 'session/create', {
+          clientId: body.clientId ?? 'pwa',
+          text: typeof body.text === 'string' ? body.text : '',
+          cwd: body.cwd ?? null,
+        }, (response) => {
+          // 创建成功即把会话写进 CP 索引，手机不用等 Host 下一个 60s 刷新周期。
+          // 这里是**启动引导值**（同 sessions.js 的口径）：state/lastSeq 以 Host
+          // 下一次全量上报为准，全量快照会校正本行。
+          const data = response?.body?.data
+          if (response.status !== 200 || !data?.sessionId) return
+          const row = data.index && typeof data.index === 'object'
+            ? { ...data.index, sessionId: data.sessionId }
+            : { sessionId: data.sessionId, state: 'awaiting', title: data.title ?? null, lastActiveAt: now() }
+          cp.upsertSessions(deviceId, [row])
         })
       }
 
