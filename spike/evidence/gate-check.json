@@ -1,8 +1,8 @@
 {
-  "schema": "wbsync-gate-check/4",
-  "capturedAt": "2026-11-10T14:22:33.403Z",
+  "schema": "wbsync-gate-check/5",
+  "capturedAt": "2026-11-10T14:33:07.030Z",
   "git": {
-    "head": "0fd41814590e1a9e8b09236b95c4fb1b4dbf295b",
+    "head": "30a0fe6ac1db4d262601d764a6615e47a9bc954c",
     "branch": "main",
     "worktreeClean": false
   },
@@ -14,14 +14,14 @@
     "artifactChanged": [],
     "narrativeChanged": [],
     "notes": [],
-    "previousCapturedAt": "2026-11-10T14:02:25.785Z",
-    "previousGitHead": "5833cbc5cf99959ce62ce594479b2ec2d9b898fe",
+    "previousCapturedAt": "2026-11-10T14:32:48.356Z",
+    "previousGitHead": "0d622d81aae8a6dd333b662457f24873a1accd19",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-10T14:02:25.785Z",
-      "gitHead": "5833cbc5cf99959ce62ce594479b2ec2d9b898fe",
+      "capturedAt": "2026-11-10T14:32:48.356Z",
+      "gitHead": "0d622d81aae8a6dd333b662457f24873a1accd19",
       "dataChanged": [],
       "signoffChanged": [],
       "artifactChanged": [],
@@ -35,14 +35,14 @@
       "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
       "host-probe.json": "a57205ad03ff73f8da91c578a460cbab75501bc32478fa1ae21b847d5557a751",
       "check-plugin.json": "6c212298aa2915c87a7a47428402bea4db89d30878ea97eb63acc7359c48c5a2",
-      "gate-check.mjs": "336f35b54d38ec043e7b7ce4a06e1d63580a337a39852e85f429b13d97a7c2de",
+      "gate-check.mjs": "69b1bf8afdb2357bc8766b252546414da8c2549b6069cdce1845ea46bf10cafe",
       "check-env.mjs": "d26c26749008404f631c64be52d908e5c0a60074235218327ff6eeb8c270e5b3",
       "signoff-check.mjs": "4491b857f555f520c6170c91e4c46d008b554de9721d9d3900d71f3a63a92938",
       "sync-protocol.mjs": "b2f251a6bea2f7313e27c828914615ee33aa8bffafcc61116d3f1b46bca8631e"
     },
     "signoff": {
       "SECURITY-REVIEW.md": "654740fe43c975e8a6fe2ee4dd2205b14e79c0641fa4874947fc0ce6acd529c0",
-      "SIGN-OFF.md": "706c25280556bde1f412aeaeafe184fde987d3780aa650a4baae5f547507f285",
+      "SIGN-OFF.md": "62d4ad13e7ec74df717ee68085dc55daf91cc092de53fb5b8e3fb8bc38821ab4",
       "SIGN-OFF-PROCEDURE.md": "2c279eb54b44ff3b5fab18c121c53b68b8f3f23da27e0f98fdf18abbb17fd1df",
       "SIGNOFF-WAIVER.md": "920af35df5a96b39d83d401e99d01957d558479b3ad52df1e0cafa12d7c60336",
       "01-charter.md": "3740d12f8192aa94945b9f4de6a7b4a0ecc18a4c3fcd174bd054df45a98d83df",
@@ -58,7 +58,7 @@
     }
   },
   "secretScan": {
-    "filesScanned": 101,
+    "filesScanned": 104,
     "patterns": [
       "github-classic",
       "github-fine-grained",
@@ -94,6 +94,14 @@
       "matched": true
     }
   ],
+  "chaosAndPerf": {
+    "chaosPass": 8,
+    "chaosFail": 0,
+    "chaosError": null,
+    "perfVerdict": "PASS",
+    "perfAgeDays": 0,
+    "perfReason": null
+  },
   "automated": [
     {
       "id": "G1",
@@ -139,10 +147,15 @@
       "id": "G9",
       "label": "发布包内容与仓库源码逐文件一致（解包比对）",
       "pass": true
+    },
+    {
+      "id": "G10",
+      "label": "混沌套件现场重跑全绿 + 压测证据 PASS（500 并发 WS / P95 / 防悬挂）",
+      "pass": true
     }
   ],
-  "automatedPassed": 9,
-  "automatedTotal": 9,
+  "automatedPassed": 10,
+  "automatedTotal": 10,
   "manual": [
     {
       "id": "M1",
