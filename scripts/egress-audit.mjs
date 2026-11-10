@@ -95,6 +95,9 @@ const PKTMON_GUIDE = {
   status: 'NOT_RUN',
   requires: '管理员 PowerShell（pktmon start 需提权；本脚本运行的会话默认不是管理员）',
   covers: 'DSH 宿主进程组、依赖包内部请求等进程级枚举看不到的流量',
+  substitute: '问题「有没有非预期出网」已由两处连接级枚举回答：runtimeHalf（Relay 进程）+ dshGroupObservation（DSH 进程组）。'
+    + '包级抓包不是必需项，而且它会把帧正文（含提示词）写进 .etl 落盘，与 ADR-010「正文零落盘」相冲突——'
+    + '要补的只是「某个包长什么样」这类取证细节，不是通过/不通过的判据。',
   commands: [
     'pktmon start --capture --comp nics --pkt-size 128 -f C:\\temp\\wbsync-pktmon.etl',
     '# 复现一轮：手机配对 → 新建会话 → 发消息 → 传一个附件 → 取消',
@@ -103,6 +106,55 @@ const PKTMON_GUIDE = {
     '# 判据：目的地址只允许本机(127.0.0.1/::1)、局域网(192.168/10/172.16-31)、自托管 Relay；',
     '#       出现任何公网地址即阻断，需定位到具体端点并解释来源',
   ],
+}
+
+/**
+ * DSH 宿主进程组的**观察值**（不参与本项目 verdict）。
+ * ---------------------------------------------------------------
+ * 为什么不并进 verdict：DSH 是第三方宿主，它本来就要连模型后端（443），
+ * 把它算成「本项目出网」既冤枉又会永久让审计变红。但完全不看也不行——
+ * 「有没有非预期出网」这个 W10 的问题，缺了它就没有全貌。
+ * 所以单独列一份 observation：逐条给出目的地址/端口/分类，供人一眼扫过。
+ *
+ * 比抓包更好的地方：连接级枚举不会把提示词正文写进 etl 文件（ADR-010 要求正文零落盘）。
+ */
+const collectDshGroup = () => {
+  if (process.platform !== 'win32') {
+    return { status: 'SKIPPED', scope: 'observation', reason: '仅 Windows 实现；其它平台用 ss -tnp' }
+  }
+  const ps = [
+    "$ids = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*DeepSeek*' -or $_.ProcessName -like '*Harness*' } | Select-Object -ExpandProperty Id)",
+    "if ($ids.Count -eq 0) { Write-Output '[]'; exit 0 }",
+    // Bound/Listen 不是对外连接；0.0.0.0 是未连接的绑定端，必须剔掉，否则全是噪声
+    "$c = @(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ids -contains $_.OwningProcess -and $_.State -ne 'Listen' -and $_.State -ne 'Bound' -and $_.RemoteAddress -ne '0.0.0.0' -and $_.RemoteAddress -ne '::' } | Select-Object OwningProcess,RemoteAddress,RemotePort,@{n='State';e={\"$($_.State)\"}})",
+    "if ($c.Count -eq 0) { Write-Output '[]' } else { ConvertTo-Json -Compress -InputObject $c }",
+  ].join('\n')
+  try {
+    const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+      encoding: 'utf8', timeout: 20000,
+    }).trim()
+    const parsed = JSON.parse(out)
+    const conns = (Array.isArray(parsed) ? parsed : [parsed]).map((r) => ({
+      pid: r.OwningProcess,
+      remote: r.RemoteAddress,
+      port: r.RemotePort,
+      state: r.State,
+      class: classifyHost(r.RemoteAddress),
+    }))
+    const external = conns.filter((c) => c.class === 'external')
+    return {
+      status: external.length ? 'OBSERVED_EXTERNAL' : 'CLEAN',
+      scope: 'observation',
+      connections: conns,
+      external,
+      note: external.length
+        ? 'DSH 是第三方宿主：连模型后端属其功能，不算本项目缺陷。此处只列事实，不判定通过；'
+          + '本项目的结论看上面的 runtimeHalf（Relay 进程）与静态半边。'
+        : '观察值：DSH 进程组当前没有任何公网连接。',
+    }
+  } catch (error) {
+    return { status: 'ERROR', scope: 'observation', reason: String(error?.message ?? error) }
+  }
 }
 
 const collectRuntime = (enabled) => {
@@ -186,7 +238,17 @@ const result = {
   verdict,
   note: '静态半边：只覆盖代码里写死的 http(s)/ws(s) 字面量。动态拼接地址、运行时配置、依赖包内部请求都看不到，必须由 P3 W10 的真实流量镜像补齐。',
   runtimeHalf: runtime,
+  dshGroupObservation: previousEvidence?.dshGroupObservation ?? null,
   pktmon: PKTMON_GUIDE,
+}
+
+// DSH 进程组观察值：加上 --dsh 才采集（要起桌面端才有连接可看）
+if (process.argv.includes('--dsh')) {
+  const dsh = collectDshGroup()
+  result.dshGroupObservation = dsh
+  if (process.argv.includes('--runtime') && previousEvidence?.dshGroupObservation) {
+    result.dshGroupObservation.previous = previousEvidence.dshGroupObservation
+  }
 }
 
 if (!process.argv.includes('--no-write')) {
@@ -200,6 +262,12 @@ for (const h of hosts) console.log(`    ${h.class.padEnd(12)} ${h.host}  ×${h.c
 console.log(`  静态结论：${verdict}${verdict === 'REVIEW_REQUIRED' ? '（存在外部域名，需人工确认是否必要）' : ''}`)
 console.log(`  运行时半边（${runtime.scope ?? '—'}）：${runtime.status}${runtime.reason ? ` —— ${runtime.reason}` : ''}${runtime.hint ? ` —— ${runtime.hint}` : ''}`)
 for (const c of runtime.connections ?? []) console.log(`    ${c.class.padEnd(10)} ${c.remote}:${c.port}  ${c.state}`)
+if (result.dshGroupObservation) {
+  const d = result.dshGroupObservation
+  console.log(`  DSH 宿主进程组观察值（不参与本项目判定）：${d.status}${d.reason ? ` —— ${d.reason}` : ''}`)
+  for (const c of d.connections ?? []) console.log(`    ${c.class.padEnd(10)} ${c.remote}:${c.port}  ${c.state}  pid=${c.pid}`)
+  if (d.note) console.log(`    ${d.note}`)
+}
 if (!process.argv.includes('--no-write')) console.log('  证据:', OUT)
 
 if (process.argv.includes('--check') && verdict !== 'PASS') {

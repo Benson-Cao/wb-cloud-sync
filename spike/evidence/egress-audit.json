@@ -1,19 +1,19 @@
 {
   "schema": "wbsync-egress-audit/1",
-  "capturedAt": "2026-11-10T14:32:44.996Z",
+  "capturedAt": "2026-11-10T14:45:21.960Z",
   "scope": "p1",
   "extensions": [
     ".js",
     ".mjs",
     ".html"
   ],
-  "filesScanned": 32,
-  "urlLiterals": 40,
+  "filesScanned": 33,
+  "urlLiterals": 42,
   "hosts": [
     {
       "host": "127.0.0.1",
       "class": "loopback",
-      "count": 32,
+      "count": 34,
       "files": [
         "p1/host-plugin/build-bundle.mjs",
         "p1/host-plugin/test/bundle.test.mjs",
@@ -29,6 +29,7 @@
         "p1/relay/test/events.test.mjs",
         "p1/relay/test/listen.test.mjs",
         "p1/relay/test/relay.test.mjs",
+        "p1/relay/test/security.test.mjs",
         "p1/relay/test/static.test.mjs",
         "p1/relay/test/ws.test.mjs"
       ]
@@ -90,14 +91,87 @@
       }
     ],
     "external": [],
-    "note": "只覆盖 Relay 进程；DSH 宿主进程组不在审计范围（第三方应用的更新/遥测会干扰结论） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:22:33.009Z 的实测；要刷新请加 --runtime）",
+    "note": "只覆盖 Relay 进程；DSH 宿主进程组不在审计范围（第三方应用的更新/遥测会干扰结论） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:22:33.009Z 的实测；要刷新请加 --runtime） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:32:44.996Z 的实测；要刷新请加 --runtime） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:45:08.454Z 的实测；要刷新请加 --runtime）",
     "carriedOver": true,
-    "measuredAt": "2026-11-10T14:22:33.009Z"
+    "measuredAt": "2026-11-10T14:45:08.454Z"
+  },
+  "dshGroupObservation": {
+    "status": "OBSERVED_EXTERNAL",
+    "scope": "observation",
+    "connections": [
+      {
+        "pid": 6264,
+        "remote": "127.0.0.1",
+        "port": 61503,
+        "state": "Established",
+        "class": "loopback"
+      },
+      {
+        "pid": 6264,
+        "remote": "127.0.0.1",
+        "port": 52677,
+        "state": "Established",
+        "class": "loopback"
+      },
+      {
+        "pid": 6264,
+        "remote": "127.0.0.1",
+        "port": 51174,
+        "state": "Established",
+        "class": "loopback"
+      },
+      {
+        "pid": 29752,
+        "remote": "127.0.0.1",
+        "port": 61773,
+        "state": "Established",
+        "class": "loopback"
+      },
+      {
+        "pid": 3048,
+        "remote": "121.204.231.156",
+        "port": 443,
+        "state": "Established",
+        "class": "external"
+      },
+      {
+        "pid": 3048,
+        "remote": "127.0.0.1",
+        "port": 61773,
+        "state": "Established",
+        "class": "loopback"
+      },
+      {
+        "pid": 29752,
+        "remote": "127.0.0.1",
+        "port": 61773,
+        "state": "Established",
+        "class": "loopback"
+      },
+      {
+        "pid": 6264,
+        "remote": "127.0.0.1",
+        "port": 8787,
+        "state": "Established",
+        "class": "loopback"
+      }
+    ],
+    "external": [
+      {
+        "pid": 3048,
+        "remote": "121.204.231.156",
+        "port": 443,
+        "state": "Established",
+        "class": "external"
+      }
+    ],
+    "note": "DSH 是第三方宿主：连模型后端属其功能，不算本项目缺陷。此处只列事实，不判定通过；本项目的结论看上面的 runtimeHalf（Relay 进程）与静态半边。"
   },
   "pktmon": {
     "status": "NOT_RUN",
     "requires": "管理员 PowerShell（pktmon start 需提权；本脚本运行的会话默认不是管理员）",
     "covers": "DSH 宿主进程组、依赖包内部请求等进程级枚举看不到的流量",
+    "substitute": "问题「有没有非预期出网」已由两处连接级枚举回答：runtimeHalf（Relay 进程）+ dshGroupObservation（DSH 进程组）。包级抓包不是必需项，而且它会把帧正文（含提示词）写进 .etl 落盘，与 ADR-010「正文零落盘」相冲突——要补的只是「某个包长什么样」这类取证细节，不是通过/不通过的判据。",
     "commands": [
       "pktmon start --capture --comp nics --pkt-size 128 -f C:\\temp\\wbsync-pktmon.etl",
       "# 复现一轮：手机配对 → 新建会话 → 发消息 → 传一个附件 → 取消",

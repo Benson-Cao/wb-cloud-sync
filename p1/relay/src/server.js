@@ -42,18 +42,50 @@ const DEFAULTS = {
   rateLimitPerMin: 5,          // 设备 + IP 维度 5 次/分
   rateWindowMs: 60_000,
   requestTimeoutMs: 10_000,    // 10s 无进度防悬挂
+  registerTimeoutMs: 10_000,   // WS 连上后必须在 10s 内发 host/register，否则关闭
   maxBodyBytes: 1_048_576,
 }
 
+/** 定长比较，避免按字符比密钥时的时序泄漏（`===` 会在首字节不同处提前返回）。 */
+const sameSecret = (a, b) => {
+  const x = Buffer.from(String(a ?? ''), 'utf8')
+  const y = Buffer.from(String(b ?? ''), 'utf8')
+  return x.length === y.length && x.length > 0 && timingSafeEqual(x, y)
+}
+
+/** HMAC 十六进制串的比较（长度不等直接否，不抛异常）。 */
 const safeEqual = (a, b) => {
   const x = Buffer.from(String(a), 'hex')
   const y = Buffer.from(String(b), 'hex')
   return x.length === y.length && timingSafeEqual(x, y)
 }
+
+/**
+ * 端点归一化：白名单必须比对**解码后**的端点，否则 `session/..%2Fadmin%2Frevoke`
+ * 能靠「看起来以 session/ 开头」混过前缀匹配，再被 Host 解码成完全不同的路径。
+ * 返回 null 表示这段路径本身就不该被转发（穿越 / 多重编码 / 空字节）。
+ */
+const normalizeEndpoint = (raw) => {
+  let decoded
+  try { decoded = decodeURIComponent(raw) } catch { return null }
+  if (!decoded || decoded.includes('\0')) return null
+  if (/%2f|%5c/i.test(decoded)) return null            // 多重编码：解一次还带转义
+  if (decoded.split('/').some((seg) => seg === '..' || seg === '.')) return null
+  return decoded
+}
+
+/**
+ * 白名单匹配。`session/*` 只放行**单段**端点（`session/prompt`），
+ * 不再用裸 startsWith —— 那会让 `session/prompt/extra`、`session/a/b` 全体通过。
+ */
 const isAllowed = (endpoint, allowlist = ALLOWED_ENDPOINTS) =>
-  allowlist.some((rule) => rule.endsWith('/*')
-    ? endpoint.startsWith(rule.slice(0, -1))
-    : endpoint === rule)
+  allowlist.some((rule) => {
+    if (!rule.endsWith('/*')) return endpoint === rule
+    const head = rule.slice(0, -1)                     // 'session/'
+    if (!endpoint.startsWith(head)) return false
+    const rest = endpoint.slice(head.length)
+    return rest.length > 0 && !rest.includes('/')
+  })
 
 /* ------------------------------------------------------------ 静态壳服务 */
 
@@ -211,7 +243,15 @@ const readBody = async (req, maxBytes) => {
   }
   if (!chunks.length) return {}
   const text = Buffer.concat(chunks).toString('utf8')
-  try { return JSON.parse(text) } catch { throw new Error('INVALID_JSON') }
+  let parsed
+  try { parsed = JSON.parse(text) } catch { throw new Error('INVALID_JSON') }
+  // 协议里每个请求体都是对象；数组 / null / 数字 / 字符串一律按非法处理。
+  // 放行它们会让后续 `body.deviceId` 之类的取值抛出 TypeError 变 500，
+  // 而 500 与非 500 的差异可被用来探测服务端实现细节。
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('INVALID_JSON')
+  }
+  return parsed
 }
 
 /**
@@ -240,6 +280,25 @@ export function createRelay(options = {}) {
 
   const sixDigitCode = () => String(rand(4).readUInt32BE(0) % 1_000_000).padStart(6, '0')
   const hex = (n) => rand(n).toString('hex')
+
+  /**
+   * `/host/*` 的凭据闸。配置了 `hostToken` 就必须带，三种载体任选其一
+   * （Bearer 头 / body.hostToken / query `hostToken`），因为降级通道历史上三种都写过。
+   *
+   * 为什么必须逐端点校验、不能只在 `/host/register` 查一次：这些是**独立 HTTP 请求**，
+   * 彼此没有会话关联。只在注册处校验，等于同网段任何人都能
+   * `GET /host/poll` 读走手机发出的提示词、`POST /host/respond` 改写回复、
+   * `POST /host/sessions` 往手机列表里投毒、`POST /host/heartbeat` 把离线设备伪装成在线。
+   * 未配置 `hostToken` 视为明确的单机开发模式（`run.mjs` 会打警告），不静默放行。
+   */
+  const hostAuthOk = (req, body, url) => {
+    if (!cfg.hostToken) return true
+    const bearer = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+    const fromBody = typeof body?.hostToken === 'string' ? body.hostToken : ''
+    const fromQuery = url.searchParams.get('hostToken') ?? ''
+    return [bearer, fromBody, fromQuery].some((t) => t && sameSecret(t, cfg.hostToken))
+  }
+  const rejectHost = (res) => fail(res, 401, 'UNAUTHORIZED', 'HOST_TOKEN 缺失或不匹配')
 
   const rateLimited = (deviceId, ip) => {
     const key = `${deviceId}|${ip}`
@@ -417,7 +476,7 @@ export function createRelay(options = {}) {
       // Host 注册 / 心跳 / 索引（HTTP 降级通道；正式走 WS）
       if (method === 'POST' && path === '/host/register') {
         const body = await readBody(req, cfg.maxBodyBytes)
-        if (cfg.hostToken && body.hostToken !== cfg.hostToken) return fail(res, 401, 'UNAUTHORIZED', 'HOST_TOKEN 不匹配')
+        if (!hostAuthOk(req, body, url)) return rejectHost(res)
         const prev = cp.getDevice(body.deviceId)
         if (prev?.tombstone) return fail(res, 401, 'UNAUTHORIZED', '设备已吊销')
         cp.upsertDevice({
@@ -430,6 +489,7 @@ export function createRelay(options = {}) {
       }
       if (method === 'POST' && path === '/host/heartbeat') {
         const body = await readBody(req, cfg.maxBodyBytes)
+        if (!hostAuthOk(req, body, url)) return rejectHost(res)
         try {
           const d = cp.heartbeatDevice(body.deviceId, now())
           return ok(res, { deviceId: d.deviceId, lastSeenAt: d.lastSeenAt })
@@ -439,6 +499,7 @@ export function createRelay(options = {}) {
       }
       if (method === 'POST' && path === '/host/sessions') {
         const body = await readBody(req, cfg.maxBodyBytes)
+        if (!hostAuthOk(req, body, url)) return rejectHost(res)
         const d = cp.getDevice(body.deviceId)
         if (!d || d.tombstone) return fail(res, 409, 'HOST_OFFLINE', '设备未注册或已吊销', true)
         const rows = body.rows ?? []
@@ -512,6 +573,7 @@ export function createRelay(options = {}) {
 
       // 降级通道：轮询取帧 / 回响应
       if (method === 'GET' && path === '/host/poll') {
+        if (!hostAuthOk(req, null, url)) return rejectHost(res)
         const deviceId = url.searchParams.get('deviceId') ?? ''
         const frames = state.queue.get(deviceId) ?? []
         state.queue.set(deviceId, [])
@@ -519,6 +581,7 @@ export function createRelay(options = {}) {
       }
       if (method === 'POST' && path === '/host/respond') {
         const body = await readBody(req, cfg.maxBodyBytes)
+        if (!hostAuthOk(req, body, url)) return rejectHost(res)
         const p = state.pending.get(String(body.reqId ?? ''))
         if (!p) return fail(res, 409, 'NO_PROGRESS', '请求已超时或不存在', true)
         state.pending.delete(String(body.reqId))
@@ -585,11 +648,17 @@ export function createRelay(options = {}) {
       // 手机侧端点：/d/<deviceId>/<endpoint>
       const m = /^\/d\/([^/]+)\/(.+)$/.exec(path)
       if (m) {
-        const [, deviceId, endpoint] = m
+        const [, deviceId, rawEndpoint] = m
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
         if (!cp.verifyDeviceToken(deviceId, token)) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+        }
+        // 先解码再判白名单：直接拿原始（可能带 %2F / ..）的串做前缀匹配，
+        // 等于把 `session/..%2Fadmin%2Frevoke` 放行给 Host 自己解。
+        const endpoint = normalizeEndpoint(rawEndpoint)
+        if (endpoint === null) {
+          return fail(res, 403, 'ENDPOINT_NOT_ALLOWED', '端点包含穿越或多重编码')
         }
         if (!isAllowed(endpoint, allowlist)) {
           return fail(res, 403, 'ENDPOINT_NOT_ALLOWED', `端点不在白名单：${endpoint}`)
@@ -658,6 +727,7 @@ export function createRelay(options = {}) {
     if (url.pathname !== '/ws/host') { socket.destroy(); return }
 
     let deviceId = null
+    let registerTimer = null
     const conn = upgradeToWebSocket(req, socket, head, {
       onMessage(text) {
         if (deviceId === null) {
@@ -667,6 +737,7 @@ export function createRelay(options = {}) {
           if (cfg.hostToken && msg.hostToken !== cfg.hostToken) return conn.close(1008, 'bad host token')
           if (!msg.deviceId) return conn.close(1008, 'deviceId required')
           deviceId = String(msg.deviceId)
+          if (registerTimer) { clearTimeout(registerTimer); registerTimer = null }
           const prev = cp.getDevice(deviceId)
           if (prev?.tombstone) return conn.close(1008, 'device revoked')
           state.sockets.set(deviceId, conn)
@@ -690,6 +761,7 @@ export function createRelay(options = {}) {
         return handleHostFrame(deviceId, text, conn)
       },
       onClose() {
+        if (registerTimer) { clearTimeout(registerTimer); registerTimer = null }
         if (deviceId === null) return
         // 发在这条连接上的在途帧已经不可能有回音（Host 换了新连接也认不出旧 reqId），
         // 先就地判失败，再摘连接——顺序不能反，反了就先丢 socket 再没人认领这些请求。
@@ -699,7 +771,17 @@ export function createRelay(options = {}) {
         cp.markDeviceOffline(deviceId)
       },
     })
-    if (!conn) socket.destroy()
+    if (!conn) return socket.destroy()
+
+    // 升级请求本身**不带凭据**（令牌在 register 帧里才校验），所以必须给
+    // 「连上但从不发注册帧」留一条硬截止：否则空连接可无限堆积、占满 fd。
+    if (cfg.registerTimeoutMs > 0) {
+      registerTimer = setTimeout(() => {
+        if (deviceId === null) conn.close(1008, 'register timeout')
+      }, cfg.registerTimeoutMs)
+      registerTimer.unref?.()
+    }
+    return undefined
   })
 
   const start = (port = 0, host = '127.0.0.1') => new Promise((resolve, reject) => {

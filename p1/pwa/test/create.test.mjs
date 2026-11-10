@@ -14,12 +14,13 @@ let relay, port, base
 let clock = 1_700_000_000_000
 const advance = (ms) => { clock += ms }
 
-const call = async (path, { method = 'GET', body, token } = {}) => {
+const call = async (path, { method = 'GET', body, token, hostToken } = {}) => {
   const r = await fetch(`http://127.0.0.1:${port}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(hostToken ? { Authorization: `Bearer ${hostToken}` } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
@@ -200,6 +201,7 @@ test('C7 真机 0.1.5 回归：新建成功引导行不得清掉 CP 其余会话
   const token = await pair('pc-c7')
   const seeded = await call('/host/sessions', {
     method: 'POST',
+    hostToken: 'host-secret',
     body: { deviceId: 'pc-c7', rows: [
       { sessionId: 's-old-1', state: 'stopped', lastSeq: 1 },
       { sessionId: 's-old-2', state: 'stopped', lastSeq: 2 },

@@ -25,7 +25,7 @@ const HOST_TOKEN = process.env.WBSYNC_HOST_TOKEN ?? ''
 const ADMIN_TOKEN = process.env.WBSYNC_ADMIN_TOKEN ?? ''
 
 if (!HOST_TOKEN) {
-  console.warn('[wbsync] 未设置 WBSYNC_HOST_TOKEN——Host 注册将不校验令牌（仅限本机试跑；对外必须显式设置）')
+  console.warn('[wbsync] 未设置 WBSYNC_HOST_TOKEN——所有 /host/* 端点（注册 / 心跳 / 索引 / 轮询 / 应答）均不校验令牌，同网段任何人都能读帧与投毒（仅限本机试跑；对外必须显式设置）')
 }
 
 const relay = createRelay({

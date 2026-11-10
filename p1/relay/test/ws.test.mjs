@@ -13,12 +13,14 @@ const rand = (() => {
   return (size) => Buffer.alloc(size, (++n) & 0xff)
 })()
 
-const call = async (path, { method = 'GET', body, token } = {}) => {
+const call = async (path, { method = 'GET', body, token, hostToken } = {}) => {
   const r = await fetch(`http://127.0.0.1:${port}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      // 降级通道的 /host/* 与 /ws/host 同级受 HOST_TOKEN 保护（渗透用例 S11–S14）
+      ...(hostToken ? { Authorization: `Bearer ${hostToken}` } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
@@ -201,11 +203,11 @@ test('W7 降级通道仍可用：无 WS 时走轮询桥', async () => {
 
   const inflight = call('/d/http-only/session/prompt', { method: 'POST', token, body: { text: 'poll' } })
   await new Promise((r) => setTimeout(r, 30))
-  const polled = await call('/host/poll?deviceId=http-only')
+  const polled = await call('/host/poll?deviceId=http-only', { hostToken: 'host-secret' })
   const frame = polled.json.data.frames[0]
   assert.equal(frame.body.text, 'poll')
   await call('/host/respond', {
-    method: 'POST',
+    method: 'POST', hostToken: 'host-secret',
     body: { reqId: frame.reqId, status: 200, body: { ok: true, data: { via: 'poll' }, protocol: PROTOCOL } },
   })
   assert.equal((await inflight).json.data.via, 'poll')

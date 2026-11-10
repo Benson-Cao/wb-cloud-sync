@@ -30,7 +30,7 @@ node p1/relay/run.mjs                    # PORT=8787；WBSYNC_HOST_TOKEN / WBSYN
 | 手机发指令 | HTTP（`/d/<deviceId>/session/*`） | 走白名单 + 桥接成 `http/request` 帧 |
 | 手机请求 → Host | `http/request` 帧 | 同一连接按发送顺序到达，**帧序即流序** |
 | 手机打开壳页面 | **`GET /app`**（及 `/app/*`、`/src/*`） | 无鉴权静态（PWA 必需，docs/04）；`/app` → `p1/pwa/public`，`/src` → `p1/pwa/src`（页面里 `../src/client.js` 的解析目标）；单层文件名 + 解码后校验拒绝路径遍历；`staticDir: null` 关闭 |
-| 降级 | `GET /host/poll` + `POST /host/respond` | 设备没有活跃 WS 时使用，便于旧 Host 与单测 |
+| 降级 | `GET /host/poll` + `POST /host/respond` | 设备没有活跃 WS 时使用，便于旧 Host 与单测。**两者都必须带 `HOST_TOKEN`**（Bearer 头 / body / query 任选），否则 401——无凭据时可读到手机待发的提示词、并伪造回复（渗透用例 S11/S14） |
 | Host 索引增量 | `host/sessions` 帧 / `POST /host/sessions` | `mode:'full'`（首轮 / 重连后）走 `cp.upsertSessions` 建基线；`mode:'diff'` 走 `cp.applySessionDiff`，只应用 `rows` 与 `removedIds`，不误删未提及行 |
 | PC 管理台 | **`GET /admin/ui`** + `GET /admin` | 同源 HTML：输入 admin token → 列设备 → 逐台吊销；token 只存内存，不进 URL / localStorage |
 | PC 主动吊销 | **`POST /admin/revoke`** | `Bearer <adminToken>`；**未配置 `WBSYNC_ADMIN_TOKEN` 时 409 拒绝写**；吊销即置墓碑、清令牌 / 会话 / 租约并断开现有 WS |

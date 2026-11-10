@@ -19,12 +19,13 @@ const rand = (() => {
   return (size) => Buffer.alloc(size, (++n) & 0xff)
 })()
 
-const call = async (path, { method = 'GET', body, token } = {}) => {
+const call = async (path, { method = 'GET', body, token, hostToken } = {}) => {
   const r = await fetch(`http://127.0.0.1:${port}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(hostToken ? { Authorization: `Bearer ${hostToken}` } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
@@ -373,7 +374,7 @@ test('C8 Host 崩溃恢复：在途请求快速失败；断连期积压帧在重
 
   // 真机形态：WS 断了但 Host 进程还活着，HTTP 心跳仍在上报 → CP 被拉回 online，
   // 此刻的请求只能落降级队列，等 WS 重新注册时一次性转交（W8 的同一条路径）
-  const hb = await call('/host/heartbeat', { method: 'POST', body: { deviceId } })
+  const hb = await call('/host/heartbeat', { method: 'POST', hostToken: 'host-secret', body: { deviceId } })
   assert.equal(hb.status, 200)
   assert.equal(relay.isOnline(deviceId), true, 'HTTP 心跳应能把设备拉回在线')
 

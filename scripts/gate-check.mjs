@@ -225,12 +225,13 @@ try {
 const tarballConsistent = tarballChecks.length > 0 && tarballChecks.every((c) => c.present && c.matched)
 
 // G10：P3 W10 的混沌 + 压测两件证据。
-// 混沌套件**现场重跑**（约 3s，确定性用例，适合放门禁）；压测只校验证据，
-// 不在这里重压 500 连接——门禁要快，重压留给 scripts/bench.mjs。
+// 混沌 + 渗透两个套件**现场重跑**（合计约 8s，确定性用例，适合放门禁）；
+// 压测只校验证据，不在这里重压 500 连接——门禁要快，重压留给 scripts/bench.mjs。
 let chaosPerf = { chaosPass: 0, chaosFail: null, chaosError: null, perfVerdict: null, perfAgeDays: null, perfReason: null }
 try {
-  const out = execFileSync(process.execPath, ['--test', 'p1/relay/test/chaos.test.mjs'],
-    { cwd: ROOT, encoding: 'utf8', timeout: 120_000, stdio: ['ignore', 'pipe', 'pipe'] })
+  const out = execFileSync(process.execPath,
+    ['--test', 'p1/relay/test/chaos.test.mjs', 'p1/relay/test/security.test.mjs'],
+    { cwd: ROOT, encoding: 'utf8', timeout: 180_000, stdio: ['ignore', 'pipe', 'pipe'] })
   const m = /# pass (\d+)[\s\S]*?# fail (\d+)/.exec(out)
   chaosPerf.chaosPass = m ? Number(m[1]) : 0
   chaosPerf.chaosFail = m ? Number(m[2]) : null
@@ -241,8 +242,9 @@ try {
   chaosPerf.chaosFail = m ? Number(m[2]) : -1
   chaosPerf.chaosError = String(e.message ?? e).split('\n')[0].slice(0, 120)
 }
-// 混沌套件至少 8 例全绿；`fail` 解析不出来也算失败（不能把「没跑成」当「没失败」）
-const chaosOk = chaosPerf.chaosFail === 0 && chaosPerf.chaosPass >= 8
+// 混沌 C1–C8 + 渗透 S1–S16 至少 23 例全绿；
+// `fail` 解析不出来也算失败（不能把「没跑成」当「没失败」）
+const chaosOk = chaosPerf.chaosFail === 0 && chaosPerf.chaosPass >= 23
 
 const perf = json('spike/evidence/perf.json')
 const perfAgeDays = perf.capturedAt ? (Date.now() - Date.parse(perf.capturedAt)) / 86_400_000 : null
@@ -285,7 +287,7 @@ const automated = [
     pass: secretScan.clean },
   { id: 'G9', label: '发布包内容与仓库源码逐文件一致（解包比对）',
     pass: tarballConsistent },
-  { id: 'G10', label: '混沌套件现场重跑全绿 + 压测证据 PASS（500 并发 WS / P95 / 防悬挂）',
+  { id: 'G10', label: '混沌 + 渗透套件现场重跑全绿 + 压测证据 PASS（500 并发 WS / P95 / 防悬挂）',
     pass: chaosPerfOk },
 ]
 
