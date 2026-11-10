@@ -148,7 +148,7 @@ node --test p1/host-plugin/test/*.test.mjs
 
 1. `deviceId` 派生 + 本机持久化 + 与配对令牌双绑。
 2. 手机侧（PWA）在重连后主动发 `session/follow`，把 `dropped` 窗口补回来。
-3. CP 分离：会话索引从 Relay 内存表迁到 CP 的四张元数据表（`SessionIndex` / `RouteLease` / `Cursor` / 设备表）。
+3. CP 已分离（`p1/cp` 接管索引 / 租约 / 位点 / 设备表）；剩「增量同步」——现在每次全量上报，会话多了要做 diff。
 4. 正式包换标识，接入 `dsh.bundle` 分发给真机验证。
 
 ---

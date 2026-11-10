@@ -4,6 +4,20 @@
 
 ---
 
+## [P1 W3 续 6] · 2026-11-10 10:24 · 非协议变更
+
+- **CP 分离落地**：新增 `p1/cp/`（`@wbsync/cp-dev`，零依赖）。协议 §2 的四张表——`Device` / `SessionIndex` / `RouteLease` / `Cursor`——从 Relay 进程内存搬到 CP，接口按 Postgres 表 1:1 设计，P2 换真库时替换实现、不动调用方。Relay 的 `state` 只剩传输状态：套接字、待转发帧、事件缓冲、配对短时码、限速计数。
+- **Relay 不再持有元数据**：`/pair/verify`、`/host/register`、`/host/heartbeat`、`/host/sessions`、`/host/indexes`、`/d/*` 鉴权、`/admin`、WS 注册与关闭全部改走 CP。`isOnline()` 改成「有 WS 连接 → 在线，否则问 CP 的心跳时间窗」。`createRelay({ controlPlane })` 传入同一实例即多 Relay 共享一份视图。
+- **三条语义写死并断言**：① Host 上报是**该设备全量快照**，本轮没出现的会话要移除，否则删掉的会话永远挂在手机上；② `pinned / pinnedOrder` 是 PC 侧状态，Host 报文里恒为 false/0，**upsert 不覆盖**已有值，否则每 60s 一次上报会把用户置顶打回原位；③ `tokenDigest` **只能由配对写入**，`upsertDevice()` 忽略传入值，否则任何 Host 知道 `deviceId` 就能顶掉别人的令牌。
+- **租约边界**：`RouteLease` 管的是**跨 Host 路由归属**（同设备重复申请是幂等续租，别家 `ROUTE_CONFLICT`，过期惰性释放）；会话内的单写者仍由宿主 `SessionAlreadyOwnedError` 兜底（ADR-008）。两层不能互相替代。
+- **修了一个原来就写歪的位点键**：Relay 旧实现把 `Cursor` 键写成 `clientId|deviceId`，而协议的主键是 `(clientId, sessionId)`——位点会落到错误的行上。现在要求 `body.sessionId`，拿不到就不记（不用 `deviceId` 冒充会话键），T8 相应改成断言 `(clientId, sessionId)`。
+- 测试 70 → **92**：CP 18 个（心跳边界 44.999s/45.001s、吊销不复活、索引全量替换、置顶不被覆盖、租约幂等与冲突、位点回退如实记录、返回值是副本），Relay 新增 `test/cp-separation.test.mjs` 4 个——**起两个 Relay 共用一个 CP**：一边配对注册另一边能鉴权、一边报索引另一边查得到、CP 吊销后两边同时 401、租约跨实例互斥。这条测试就是「状态不在 Relay」的证明。
+- CI 的 P1 冒烟步骤改为 `node --test p1/*/test/*.test.mjs`，新包自动纳入阻断，不用每次手改清单。
+
+**边界未变**：CP 是**内存实现**（重启仍会失忆，P2 换 Postgres）；配对短时码与限速仍在 Relay；索引每次全量替换、没做增量 diff；`Account` 表与 OAuth 未接；手机侧 PWA 仍未开始。
+
+---
+
 ## [P1 W3 续 5] · 2026-11-10 10:17 · 非协议变更
 
 - **会话索引上报落地**：新增 `p1/host-plugin/src/sessions.js`，把 `sessionPersistence.list()` 的快照整理成协议里的 `SessionIndex` 行（10 个字段，不多不少），注册成功即推一次 `host/sessions`，之后按 `indexRefreshMs`（默认 60s）刷新。Relay 侧本来就有 `state.indexes` 与 `/host/indexes` 查询，现在真有数据了。

@@ -17,9 +17,15 @@
  *   #3 单机期 Relay 内存表为活跃令牌、在线状态与会话索引的权威；
  *   #4 只开放 session/* 与 $events/*，其余端点默认拒绝；
  *   #5b 客户端 sinceSeq 唯一权威，服务端 Cursor 仅作可观测性快照。
+ *
+ * **CP 分离（本轮）**：#3 那条口径已经过时——设备表、会话索引、写句柄租约、消费位点
+ * 四张表迁到 `p1/cp`（接口按 PROTOCOL §2 的 Postgres 表设计）。Relay 只剩传输状态
+ * （套接字、待转发帧、事件缓冲、配对短时码）。多个 Relay 实例共享同一个 CP 实例时，
+ * 看到的是同一份设备与会话视图。
  */
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
+import { createControlPlane } from '../../cp/src/index.js'
 import { createEventHub } from './events.js'
 import { upgradeToWebSocket } from './ws.js'
 
@@ -36,7 +42,6 @@ const DEFAULTS = {
   maxBodyBytes: 1_048_576,
 }
 
-const sha256 = (s) => createHash('sha256').update(s).digest('hex')
 const safeEqual = (a, b) => {
   const x = Buffer.from(String(a), 'hex')
   const y = Buffer.from(String(b), 'hex')
@@ -83,17 +88,16 @@ export function createRelay(options = {}) {
   const now = cfg.now ?? (() => Date.now())
   const rand = cfg.randomBytes ?? randomBytes
   const allowlist = cfg.allowedEndpoints ?? ALLOWED_ENDPOINTS
+  // 元数据全在 CP；Relay 不再自己存设备表 / 索引 / 位点
+  const cp = cfg.controlPlane ?? createControlPlane({ now, offlineAfterMs: cfg.heartbeatTimeoutMs })
 
   const state = {
-    codes: new Map(),        // code -> { deviceId, expiresAt }
+    codes: new Map(),        // code -> { deviceId, expiresAt }（配对短时态，P2 迁 CP）
     challenges: new Map(),   // challenge -> { code, deviceId, pairSecret, expiresAt }
-    devices: new Map(),      // deviceId -> { state, lastSeenAt, tokenDigest, tombstone, caps }
     rateHits: new Map(),     // `${deviceId}|${ip}` -> number[] (ms)
     queue: new Map(),        // deviceId -> 待转发帧（无 WS 时的降级通道）
     pending: new Map(),      // reqId -> { resolve, timer }
     sockets: new Map(),      // deviceId -> WS 连接（正式通道）
-    indexes: new Map(),      // deviceId -> SessionIndex[]（Host 上报的快照）
-    cursors: new Map(),      // 仅可观测性：`clientId|deviceId` -> sinceSeq
     hub: createEventHub({ capacity: cfg.eventBuffer ?? 1000 }),  // 事件缓冲 + 订阅广播
   }
 
@@ -109,13 +113,11 @@ export function createRelay(options = {}) {
     return hits.length > cfg.rateLimitPerMin
   }
 
-  /** 有活跃 WS 连接即在线；WS 关闭后显式标离线；HTTP 心跳设备按时间窗判定。 */
+  /** 有活跃 WS 连接即在线；否则问 CP（心跳时间窗 / 墓碑）。 */
   const isOnline = (deviceId) => {
     const conn = state.sockets.get(deviceId)
     if (conn?.isOpen()) return true
-    const d = state.devices.get(deviceId)
-    if (!d || d.tombstone || d.state === 'offline') return false
-    return now() - d.lastSeenAt <= cfg.heartbeatTimeoutMs
+    return cp.isDeviceAlive(deviceId, now())
   }
 
   /** 手机侧 /d/<id>/<endpoint> 请求 → 帧 → 等待 Host 响应。 */
@@ -152,13 +154,13 @@ export function createRelay(options = {}) {
     let msg
     try { msg = JSON.parse(text) } catch { return conn.close(1003, 'invalid json') }
     if (msg.t === 'host/heartbeat') {
-      const d = state.devices.get(deviceId)
-      if (d) { d.lastSeenAt = now(); d.state = 'online' }
+      try { cp.heartbeatDevice(deviceId, now()) } catch { /* 已吊销：等下一个请求自然 401 */ }
       return conn.sendJson({ t: 'host/heartbeat/ack', ts: now() })
     }
     if (msg.t === 'host/sessions') {
-      state.indexes.set(deviceId, Array.isArray(msg.rows) ? msg.rows : [])
-      return conn.sendJson({ t: 'host/sessions/ack', count: (msg.rows ?? []).length })
+      const rows = Array.isArray(msg.rows) ? msg.rows : []
+      cp.upsertSessions(deviceId, rows)
+      return conn.sendJson({ t: 'host/sessions/ack', count: rows.length })
     }
     if (msg.t === 'http/response') {
       const p = state.pending.get(String(msg.reqId ?? ''))
@@ -189,7 +191,7 @@ export function createRelay(options = {}) {
       if (method === 'GET' && path === '/health') {
         return ok(res, {
           protocol: PROTOCOL,
-          online: [...state.devices.keys()].filter(isOnline).length,
+          online: cp.listDevices().filter((d) => isOnline(d.deviceId)).length,
           sockets: [...state.sockets.entries()].filter(([, c]) => c.isOpen()).length,
         })
       }
@@ -230,16 +232,16 @@ export function createRelay(options = {}) {
         if (!safeEqual(String(body.sig ?? ''), expected)) return fail(res, 401, 'UNAUTHORIZED', 'HMAC 校验失败')
 
         const deviceToken = hex(32)
-        const prev = state.devices.get(c.deviceId)
         // 单活跃令牌：重新配对作废旧令牌；墓碑设备不复活
+        const prev = cp.getDevice(c.deviceId)
         if (prev?.tombstone) return fail(res, 401, 'UNAUTHORIZED', '设备已吊销')
-        state.devices.set(c.deviceId, {
+        cp.upsertDevice({
+          deviceId: c.deviceId,
           state: 'online',
           lastSeenAt: now(),
-          tokenDigest: sha256(deviceToken),
-          tombstone: false,
-          caps: prev?.caps ?? [],
+          capabilities: prev?.capabilities ?? [],
         })
+        cp.setDeviceToken(c.deviceId, deviceToken)   // 只存摘要
         return ok(res, { deviceToken, protocol: PROTOCOL, relayUrl: cfg.publicBaseUrl ?? 'http://127.0.0.1' })
       }
 
@@ -247,33 +249,35 @@ export function createRelay(options = {}) {
       if (method === 'POST' && path === '/host/register') {
         const body = await readBody(req, cfg.maxBodyBytes)
         if (cfg.hostToken && body.hostToken !== cfg.hostToken) return fail(res, 401, 'UNAUTHORIZED', 'HOST_TOKEN 不匹配')
-        const prev = state.devices.get(body.deviceId)
+        const prev = cp.getDevice(body.deviceId)
         if (prev?.tombstone) return fail(res, 401, 'UNAUTHORIZED', '设备已吊销')
-        state.devices.set(body.deviceId, {
-          state: 'online', lastSeenAt: now(),
-          tokenDigest: prev?.tokenDigest ?? null, tombstone: false,
-          caps: body.caps ?? [],
+        cp.upsertDevice({
+          deviceId: body.deviceId,
+          state: 'online',
+          lastSeenAt: now(),
+          capabilities: body.caps ?? [],
         })
         return ok(res, { deviceId: body.deviceId, protocol: PROTOCOL })
       }
       if (method === 'POST' && path === '/host/heartbeat') {
         const body = await readBody(req, cfg.maxBodyBytes)
-        const d = state.devices.get(body.deviceId)
-        if (!d || d.tombstone) return fail(res, 409, 'HOST_OFFLINE', '设备未注册或已吊销', true)
-        d.lastSeenAt = now()
-        d.state = 'online'
-        return ok(res, { deviceId: body.deviceId, lastSeenAt: d.lastSeenAt })
+        try {
+          const d = cp.heartbeatDevice(body.deviceId, now())
+          return ok(res, { deviceId: d.deviceId, lastSeenAt: d.lastSeenAt })
+        } catch {
+          return fail(res, 409, 'HOST_OFFLINE', '设备未注册或已吊销', true)
+        }
       }
       if (method === 'POST' && path === '/host/sessions') {
         const body = await readBody(req, cfg.maxBodyBytes)
-        const d = state.devices.get(body.deviceId)
+        const d = cp.getDevice(body.deviceId)
         if (!d || d.tombstone) return fail(res, 409, 'HOST_OFFLINE', '设备未注册或已吊销', true)
-        state.indexes.set(body.deviceId, Array.isArray(body.rows) ? body.rows : [])
-        return ok(res, { count: (body.rows ?? []).length })
+        const { upserted, removed } = cp.upsertSessions(body.deviceId, body.rows ?? [])
+        return ok(res, { count: upserted, removed })
       }
       if (method === 'GET' && path === '/host/indexes') {
         const deviceId = url.searchParams.get('deviceId') ?? ''
-        return ok(res, { deviceId, rows: state.indexes.get(deviceId) ?? [] })
+        return ok(res, { deviceId, rows: cp.listSessions({ ownerDeviceId: deviceId }) })
       }
 
       // 降级通道：轮询取帧 / 回响应
@@ -297,10 +301,13 @@ export function createRelay(options = {}) {
         if (cfg.adminToken && req.headers.authorization !== `Bearer ${cfg.adminToken}`) {
           return fail(res, 401, 'UNAUTHORIZED', 'admin token 缺失')
         }
-        const rows = [...state.devices.entries()].map(([deviceId, d]) => ({
-          deviceId, state: isOnline(deviceId) ? 'online' : 'offline',
-          lastSeenAt: d.lastSeenAt, tokenDigest: d.tokenDigest, tombstone: d.tombstone,
-          transport: state.sockets.get(deviceId)?.isOpen() ? 'ws' : 'http-poll',
+        const rows = cp.listDevices().map((d) => ({
+          deviceId: d.deviceId,
+          state: isOnline(d.deviceId) ? 'online' : 'offline',
+          lastSeenAt: d.lastSeenAt,
+          tokenDigest: d.tokenDigest,
+          tombstone: d.tombstone,
+          transport: state.sockets.get(d.deviceId)?.isOpen() ? 'ws' : 'http-poll',
         }))
         return ok(res, { rows })
       }
@@ -311,24 +318,25 @@ export function createRelay(options = {}) {
         const [, deviceId, endpoint] = m
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-        const d = state.devices.get(deviceId)
-        if (!d || d.tombstone || !d.tokenDigest || !safeEqual(sha256(token), d.tokenDigest)) {
+        if (!cp.verifyDeviceToken(deviceId, token)) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
         if (!isAllowed(endpoint, allowlist)) {
           return fail(res, 403, 'ENDPOINT_NOT_ALLOWED', `端点不在白名单：${endpoint}`)
         }
         if (!isOnline(deviceId)) {
-          d.state = 'offline'
+          cp.markDeviceOffline(deviceId)
           return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
         }
         let body = {}
         try { body = await readBody(req, cfg.maxBodyBytes) } catch (e) {
           return fail(res, 400, 'INVALID_JSON', String(e.message))
         }
-        // #5b：客户端 sinceSeq 只作观测记录，服务端不据此替客户端决定补齐起点
-        if (typeof body.sinceSeq === 'number') {
-          state.cursors.set(`${body.clientId ?? 'anonymous'}|${deviceId}`, body.sinceSeq)
+        // #5b：客户端 sinceSeq 只作观测记录，服务端不据此替客户端决定补齐起点。
+        // Cursor 的主键是 (clientId, sessionId)：拿不到 sessionId 就不记，
+        // 不用 endpoint 或 deviceId 冒充会话键（那会让位点落到错误的行上）。
+        if (typeof body.sinceSeq === 'number' && body.sessionId) {
+          cp.putCursor({ clientId: body.clientId ?? 'anonymous', sessionId: body.sessionId, sinceSeq: body.sinceSeq })
         }
         return bridge(req, res, deviceId, endpoint, body)
       }
@@ -356,8 +364,7 @@ export function createRelay(options = {}) {
     if (sub) {
       const [, deviceId, sessionId] = sub
       const token = url.searchParams.get('token') ?? ''
-      const d = state.devices.get(deviceId)
-      if (!d || d.tombstone || !d.tokenDigest || !safeEqual(sha256(token), d.tokenDigest)) {
+      if (!cp.verifyDeviceToken(deviceId, token)) {
         socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n')
         return
       }
@@ -390,13 +397,14 @@ export function createRelay(options = {}) {
           if (cfg.hostToken && msg.hostToken !== cfg.hostToken) return conn.close(1008, 'bad host token')
           if (!msg.deviceId) return conn.close(1008, 'deviceId required')
           deviceId = String(msg.deviceId)
-          const prev = state.devices.get(deviceId)
+          const prev = cp.getDevice(deviceId)
           if (prev?.tombstone) return conn.close(1008, 'device revoked')
           state.sockets.set(deviceId, conn)
-          state.devices.set(deviceId, {
-            state: 'online', lastSeenAt: now(),
-            tokenDigest: prev?.tokenDigest ?? null, tombstone: false,
-            caps: msg.caps ?? [],
+          cp.upsertDevice({
+            deviceId,
+            state: 'online',
+            lastSeenAt: now(),
+            capabilities: msg.caps ?? [],
           })
           return conn.sendJson({ t: 'host/registered', deviceId, protocol: PROTOCOL })
         }
@@ -405,9 +413,8 @@ export function createRelay(options = {}) {
       onClose() {
         if (deviceId === null) return
         if (state.sockets.get(deviceId) === conn) state.sockets.delete(deviceId)
-        const d = state.devices.get(deviceId)
         // WS 断开即视为离线，不等 45s 心跳窗口；HTTP 心跳可把状态再拉回 online
-        if (d) d.state = 'offline'
+        cp.markDeviceOffline(deviceId)
       },
     })
     if (!conn) socket.destroy()
@@ -427,5 +434,5 @@ export function createRelay(options = {}) {
     server.close(() => { clearTimeout(timer); resolve() })
   })
 
-  return { server, state, start, stop, protocol: PROTOCOL, allowedEndpoints: allowlist, isOnline }
+  return { server, state, cp, start, stop, protocol: PROTOCOL, allowedEndpoints: allowlist, isOnline }
 }

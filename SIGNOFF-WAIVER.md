@@ -45,7 +45,7 @@
 | 编号 | 默认口径 | 来源 |
 |---|---|---|
 | #2 `pairSecret` | per-challenge 一次性随机数（≥128 bit），随 `challenge` 经 TLS 下发，仅用于本次 HMAC，验证或超时即销毁；不落盘、不复用、不参与 `deviceToken` 派生、不承担身份鉴别 | `P1-PREREQUISITES.md` §1 方案 B |
-| #3 配对状态权威 | 开发期单机：Relay 内存表为活跃令牌与在线状态权威；CP / Host 分离后按 §2 迁移（CP 管档案、Relay 管令牌、Host 仅缓存） | §2 |
+| #3 配对状态权威 | 开发期单机：Relay 内存表为活跃令牌与在线状态权威；CP / Host 分离后按 §2 迁移（CP 管档案、Relay 管令牌、Host 仅缓存）——**W3 本轮已落地**：令牌摘要、设备状态、会话索引、租约、位点均在 `p1/cp`，Relay 只做转发 | §2 |
 | #4 端点白名单 | W3 只开 `session/*`、`$events/*`；`artifacts/*` 留到 P1 末、`attachments/*` / `schedule/*` 留到 P2；`config/*`、`permission/*`、`remote-desktop/*` 不开放 | §3 |
 | #5b `Cursor` | 客户端上报的 `sinceSeq` 为唯一权威，服务端不替客户端决定补齐起点；CP `Cursor` 仅作可观测性快照 | §4 |
 

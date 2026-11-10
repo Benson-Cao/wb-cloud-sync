@@ -111,9 +111,11 @@ test('T4 HMAC 正确签发令牌，只落 SHA-256 摘要；错误签名 401', as
     method: 'POST', body: { challenge: c2.json.data.challenge, sig, clientId: 'p' },
   })
   assert.equal(v.status, 200)
-  const d = relay.state.devices.get('hmac-dev')
+  const d = relay.cp.getDevice('hmac-dev')
   assert.equal(d.tokenDigest, createHash('sha256').update(v.json.data.deviceToken).digest('hex'))
-  assert.ok(!JSON.stringify(relay.state).includes(v.json.data.deviceToken), '明文令牌不落盘')
+  // 明文令牌不落盘：Relay 的传输状态与 CP 的设备行里都不该出现
+  assert.ok(!JSON.stringify(relay.state).includes(v.json.data.deviceToken), '明文令牌不落盘（Relay 侧）')
+  assert.ok(!JSON.stringify(relay.cp.listDevices()).includes(v.json.data.deviceToken), '明文令牌不落盘（CP 侧）')
 })
 
 test('T5 单活跃令牌：重新配对作废旧令牌', async () => {
@@ -174,10 +176,11 @@ test('T8 #5b 客户端 sinceSeq 只作观测记录，不参与补齐决策', asy
   const p = await pair('cursor-dev')
   await call('/host/register', { method: 'POST', body: { deviceId: 'cursor-dev' } })
   const inflight = call('/d/cursor-dev/session/follow', {
-    method: 'POST', token: p.token, body: { sinceSeq: 42, clientId: 'phone-9' },
+    method: 'POST', token: p.token, body: { sinceSeq: 42, clientId: 'phone-9', sessionId: 'session-1' },
   })
   await waitForQueue('cursor-dev')
-  assert.equal(relay.state.cursors.get('phone-9|cursor-dev'), 42)
+  // CP 的 Cursor 主键是 (clientId, sessionId)，不是 deviceId
+  assert.equal(relay.cp.getCursor({ clientId: 'phone-9', sessionId: 'session-1' }).sinceSeq, 42)
   const polled = await call('/host/poll?deviceId=cursor-dev')
   const frame = polled.json.data.frames[0]
   assert.equal(frame.body.sinceSeq, 42)

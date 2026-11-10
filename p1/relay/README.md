@@ -51,7 +51,7 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 按 `SIGNOFF-WAIVER.md` §5（**未经会签，可回滚**）：
 
 - **#2**：`pairSecret` 是 per-challenge 的 128 bit 随机数，随 `challenge` 一次性下发，验证或超时即销毁；不落盘、不复用、不参与 `deviceToken` 派生，也**不承担身份鉴别**。
-- **#3**：单机开发期以 Relay 内存表为活跃令牌、在线状态与会话索引的权威；CP / Host 分离后按 `P1-PREREQUISITES.md` §2 迁移。
+- **#3**：**已迁 CP**（W3 本轮）。设备表、会话索引、写句柄租约、消费位点四张表在 `p1/cp`，Relay 只剩传输状态（套接字 / 待转发帧 / 事件缓冲 / 配对短时码）；令牌摘要也在 CP，Relay 通过 `verifyDeviceToken()` 校验，不再自己存。
 - **#4**：W3 只开 `session/*` 与 `$events/*`；`artifacts/*` 留 P1 末，`attachments/*` / `schedule/*` 留 P2。
 - **#5b**：客户端上报的 `sinceSeq` 是唯一权威，服务端只按它补发与记录观测，不替客户端决定起点。
 

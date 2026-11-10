@@ -55,6 +55,7 @@ jobs:
         run: node scripts/signoff-check.mjs --no-write
 
       # W3 起进入开发期：P1 骨架单测作为阻断项（零依赖，Node 24）。
-      # relay = 配对 / WS 长连 / 事件订阅；host-plugin = 上行 / 下行分派 / 可逆卸载。
+      # cp = 控制面四张表；relay = 配对 / WS 长连 / 事件订阅 / 跨实例共享 CP；
+      # host-plugin = 上行 / 下行分派 / 历史补齐 / 会话索引 / 可逆卸载。
       - name: P1 骨架冒烟测试
-        run: node --test p1/relay/test/*.test.mjs p1/host-plugin/test/*.test.mjs
+        run: node --test p1/*/test/*.test.mjs
