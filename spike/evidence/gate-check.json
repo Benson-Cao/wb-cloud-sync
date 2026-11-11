@@ -1,43 +1,49 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-11T12:54:37.704Z",
+  "capturedAt": "2026-11-11T14:31:44.866Z",
   "git": {
-    "head": "bf48f2dc1ccaa03bfe58284f27e6d182a1ce61a6",
+    "head": "4cf8b2a881c07c8f67a7d8c65c3f2e1bafc30fd5",
     "branch": "main",
     "worktreeClean": true
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [],
-    "signoffChanged": [],
-    "artifactChanged": [],
-    "narrativeChanged": [
-      "PROTOCOL.md"
+    "dataChanged": [
+      "package.json"
     ],
-    "notes": [],
-    "previousCapturedAt": "2026-11-11T12:38:00.867Z",
-    "previousGitHead": "5a1470ed9b3a8af1f6dba77c93e47d2f677af008",
+    "signoffChanged": [],
+    "artifactChanged": [
+      "dist-tarball"
+    ],
+    "narrativeChanged": [],
+    "notes": [
+      "发布物已重建（仅记录，不影响判定）：dist-tarball"
+    ],
+    "previousCapturedAt": "2026-11-11T12:54:37.704Z",
+    "previousGitHead": "bf48f2dc1ccaa03bfe58284f27e6d182a1ce61a6",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "DRIFTED",
-      "previousReason": "描述文字变化（不阻断）：PROTOCOL.md",
-      "capturedAt": "2026-11-11T12:38:00.867Z",
-      "gitHead": "5a1470ed9b3a8af1f6dba77c93e47d2f677af008",
-      "dataChanged": [],
+      "previousStatus": "STALE",
+      "previousReason": "已变化（阻断）：运行代码/证据：package.json",
+      "capturedAt": "2026-11-11T12:54:37.704Z",
+      "gitHead": "bf48f2dc1ccaa03bfe58284f27e6d182a1ce61a6",
+      "dataChanged": [
+        "package.json"
+      ],
       "signoffChanged": [],
-      "artifactChanged": [],
-      "narrativeChanged": [
-        "PROTOCOL.md"
-      ]
+      "artifactChanged": [
+        "dist-tarball"
+      ],
+      "narrativeChanged": []
     }
   },
   "fingerprints": {
     "data": {
       "index.js": "639eeebca42695b1841a65d99b9812d77c37985171537d90e2429761cbe75523",
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
-      "package.json": "3a8a18b17cc39c45226cc73331fe8c7c617a3b3c4b635edd95b1f2d9a845811b",
+      "package.json": "3f54d2511198586f617823d08bfe783e11249751583c5450597b4eec0b292254",
       "host-probe.json": "a57205ad03ff73f8da91c578a460cbab75501bc32478fa1ae21b847d5557a751",
       "check-plugin.json": "6c212298aa2915c87a7a47428402bea4db89d30878ea97eb63acc7359c48c5a2",
       "gate-check.mjs": "449ad1f7842d788bdfd25af8078c075d2d2246388cadd4779cdf445b357ded95",
@@ -55,7 +61,7 @@
       "WORKBUDDY-REFERENCE.md": "e286a4af7afe2aab6f9462bfec7d0baf25ff4c892b21245624963490be49cdcc"
     },
     "artifact": {
-      "dist-tarball": "04e7ba25e1aab479f14929bf62dd155538aeb1cdad3fd4fabbbbd10d3f5aaa5d"
+      "dist-tarball": "fb82af0bba2da8e8054cb5c5b1d955d298dc62496bac271751969b99a65b7818"
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
@@ -63,7 +69,7 @@
     }
   },
   "secretScan": {
-    "filesScanned": 117,
+    "filesScanned": 120,
     "patterns": [
       "github-classic",
       "github-fine-grained",
@@ -104,7 +110,7 @@
     "chaosFail": 0,
     "chaosError": null,
     "perfVerdict": "PASS",
-    "perfAgeDays": 0.9,
+    "perfAgeDays": 1,
     "perfReason": null
   },
   "automated": [
