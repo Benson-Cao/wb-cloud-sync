@@ -1,29 +1,34 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-11T11:38:08.290Z",
+  "capturedAt": "2026-11-11T11:56:12.340Z",
   "git": {
-    "head": "f47cb626f8ac8712c8e14126f7b941fb16ecac32",
+    "head": "553f1a06624cfc1e462e7d7991ee0de3537dea6c",
     "branch": "main",
-    "worktreeClean": false
+    "worktreeClean": true
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
     "dataChanged": [],
-    "signoffChanged": [],
+    "signoffChanged": [
+      "SIGN-OFF.md"
+    ],
     "artifactChanged": [],
     "narrativeChanged": [],
     "notes": [],
-    "previousCapturedAt": "2026-11-11T11:37:59.120Z",
-    "previousGitHead": "a564e49e69f39e98864b715a01e5a7542d5ce61b",
+    "previousCapturedAt": "2026-11-11T11:38:08.290Z",
+    "previousGitHead": "f47cb626f8ac8712c8e14126f7b941fb16ecac32",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-11T11:37:59.120Z",
-      "gitHead": "a564e49e69f39e98864b715a01e5a7542d5ce61b",
+      "previousStatus": "STALE",
+      "previousReason": "已变化（阻断）：会签材料：SIGN-OFF.md",
+      "capturedAt": "2026-11-11T11:38:08.290Z",
+      "gitHead": "f47cb626f8ac8712c8e14126f7b941fb16ecac32",
       "dataChanged": [],
-      "signoffChanged": [],
+      "signoffChanged": [
+        "SIGN-OFF.md"
+      ],
       "artifactChanged": [],
       "narrativeChanged": []
     }
@@ -42,7 +47,7 @@
     },
     "signoff": {
       "SECURITY-REVIEW.md": "654740fe43c975e8a6fe2ee4dd2205b14e79c0641fa4874947fc0ce6acd529c0",
-      "SIGN-OFF.md": "fd91a1ea02b833e33eb9d6bf3d3fca9ef1f7cb6002b8088db1d7b4c27ff0b526",
+      "SIGN-OFF.md": "c9fc51f5370bdf8647f814a7336c934f7a8e90dc25279dd246b2503ac946e849",
       "SIGN-OFF-PROCEDURE.md": "2c279eb54b44ff3b5fab18c121c53b68b8f3f23da27e0f98fdf18abbb17fd1df",
       "SIGNOFF-WAIVER.md": "920af35df5a96b39d83d401e99d01957d558479b3ad52df1e0cafa12d7c60336",
       "01-charter.md": "3740d12f8192aa94945b9f4de6a7b4a0ecc18a4c3fcd174bd054df45a98d83df",
