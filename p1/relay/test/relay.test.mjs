@@ -304,3 +304,38 @@ test('T9 /admin 需鉴权，返回设备状态与令牌指纹', async () => {
     assert.ok(!('deviceToken' in row), '管理台只显示指纹，不返回明文令牌')
   }
 })
+
+test('T12 配对的 relayUrl 回显「你刚才用的是哪个地址」，不写死 127.0.0.1', async () => {
+  const p = await pair('lan-url-dev')
+  assert.equal(p.verify.status, 200)
+  // 手机上把 127.0.0.1 理解成「手机自己」→ ERR_CONNECTION_REFUSED。
+  // 所以这里必须是**客户端刚刚访问成功的那个地址**（Host 头），而不是常量。
+  assert.equal(p.verify.json.data.relayUrl, `http://127.0.0.1:${port}`)
+})
+
+test('T12b 配了 publicBaseUrl 时以配置为准（反代 / 公网域名场景）', async () => {
+  const r2 = createRelay({ publicBaseUrl: 'https://sync.example.com', requestTimeoutMs: 300 })
+  const p2 = await r2.start(0)
+  try {
+    const base2 = `http://127.0.0.1:${p2}`
+    const g = await fetch(`${base2}/pair/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'base-url-dev' }),
+    }).then((r) => r.json())
+    const c = await fetch(`${base2}/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: g.data.code }),
+    }).then((r) => r.json())
+    const sig = createHmac('sha256', c.data.pairSecret).update(c.data.challenge).digest('hex')
+    const v = await fetch(`${base2}/pair/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challenge: c.data.challenge, sig }),
+    }).then((r) => r.json())
+    assert.equal(v.data.relayUrl, 'https://sync.example.com', '显式配置优先于回显')
+  } finally {
+    await r2.stop()
+  }
+})

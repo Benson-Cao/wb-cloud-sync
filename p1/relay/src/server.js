@@ -79,6 +79,16 @@ const sanitizeLabel = (raw) => (typeof raw === 'string'
   : null)
 
 /**
+ * 「客户端刚才是用哪个地址找到我的」——优先取反代给的 X-Forwarded-Proto，其次按 Host 头拼。
+ * 拿它当 `relayUrl` 回给客户端，比写死 `127.0.0.1` 有意义得多：手机上的 127.0.0.1 是手机自己。
+ */
+const requestOrigin = (req) => {
+  const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim() || 'http'
+  const host = String(req.headers.host ?? '').trim()
+  return host ? `${proto}://${host}` : null
+}
+
+/**
  * 端点归一化：白名单必须比对**解码后**的端点，否则 `session/..%2Fadmin%2Frevoke`
  * 能靠「看起来以 session/ 开头」混过前缀匹配，再被 Host 解码成完全不同的路径。
  * 返回 null 表示这段路径本身就不该被转发（穿越 / 多重编码 / 空字节）。
@@ -615,7 +625,10 @@ export function createRelay(options = {}) {
           deviceId: phoneId,          // 这台手机自己的 ID：续配时回传即可轮换令牌
           hostDeviceId: c.deviceId,   // URL 里的目标是它（/d/<hostDeviceId>/…）
           protocol: PROTOCOL,
-          relayUrl: cfg.publicBaseUrl ?? 'http://127.0.0.1',
+          // 回**这台客户端刚刚访问成功的地址**，而不是写死 127.0.0.1：
+          // 手机把 127.0.0.1 当成「自己」，拿到它就会 ERR_CONNECTION_REFUSED。
+          // Host 头由调用方自己设置，回显给他本人不构成反射面；配了 publicBaseUrl 时以配置为准。
+          relayUrl: cfg.publicBaseUrl ?? requestOrigin(req) ?? 'http://127.0.0.1',
         })
       }
 
