@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-11T12:06:16.511Z",
+  "capturedAt": "2026-11-11T12:08:54.707Z",
   "git": {
-    "head": "3a8e59d0b83fe110a7bc20a69d471c41f07327b4",
+    "head": "837e83d83eff81682fb6b4121ecf4c048193ad18",
     "branch": "main",
     "worktreeClean": true
   },
@@ -18,15 +18,15 @@
       "PROTOCOL.md"
     ],
     "notes": [],
-    "previousCapturedAt": "2026-11-11T12:01:19.727Z",
-    "previousGitHead": "77e27068a5ebb8f091f83bc91278b0da2b0ceaa5",
+    "previousCapturedAt": "2026-11-11T12:06:16.511Z",
+    "previousGitHead": "3a8e59d0b83fe110a7bc20a69d471c41f07327b4",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
       "previousReason": "已变化（阻断）：会签材料：SIGN-OFF.md",
-      "capturedAt": "2026-11-11T12:01:19.727Z",
-      "gitHead": "77e27068a5ebb8f091f83bc91278b0da2b0ceaa5",
+      "capturedAt": "2026-11-11T12:06:16.511Z",
+      "gitHead": "3a8e59d0b83fe110a7bc20a69d471c41f07327b4",
       "dataChanged": [],
       "signoffChanged": [
         "SIGN-OFF.md"
@@ -51,7 +51,7 @@
     },
     "signoff": {
       "SECURITY-REVIEW.md": "654740fe43c975e8a6fe2ee4dd2205b14e79c0641fa4874947fc0ce6acd529c0",
-      "SIGN-OFF.md": "0e20eaa4a584285beda53240f1ea167695dc8cb24d035e0a41f791af8d425905",
+      "SIGN-OFF.md": "dc4b1b09f973bc6e2d262a63ee4fa1cc3475829ba8e14427e20e7d6f060bb797",
       "SIGN-OFF-PROCEDURE.md": "2c279eb54b44ff3b5fab18c121c53b68b8f3f23da27e0f98fdf18abbb17fd1df",
       "SIGNOFF-WAIVER.md": "920af35df5a96b39d83d401e99d01957d558479b3ad52df1e0cafa12d7c60336",
       "01-charter.md": "3740d12f8192aa94945b9f4de6a7b4a0ecc18a4c3fcd174bd054df45a98d83df",
@@ -63,7 +63,7 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "25fcc8ff155f32429fb335174e32cb1976c75b59d55e2dab3919b71f9880e9e9"
+      "PROTOCOL.md": "fbaab683bfeccecff293af4091207df5b2c03c2160c7b4d8f88eb4ff64618e9f"
     }
   },
   "secretScan": {
