@@ -68,7 +68,7 @@ const helpers = `// ===== 内联自 src/replay.js（重启后历史补齐，只�
 
 // ---- 主模块：去掉相对导入；apply 改名 __apply（wrapper 接管配置合并） ----
 const EXPECTED_IMPORTS = [
-  /^import \{ createReplayAdapter \} from '\.\/replay\.js'$/m,
+  /^import \{ createBackfillReader, createReplayAdapter \} from '\.\/replay\.js'$/m,
   /^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'$/m,
   /^import \{ createHostAdapters \} from '\.\/host-adapters\.js'$/m,
   /^import \{ createApprovalBridge \} from '\.\/approvals\.js'$/m,
@@ -78,7 +78,7 @@ for (const pattern of EXPECTED_IMPORTS) {
   if (!pattern.test(mainSrc)) throw new Error('src/index.js 的相对导入与打包器预期不一致——请同步更新本脚本')
 }
 const main = mainSrc
-  .replace(/^import \{ createReplayAdapter \} from '\.\/replay\.js'\n/m, '')
+  .replace(/^import \{ createBackfillReader, createReplayAdapter \} from '\.\/replay\.js'\n/m, '')
   .replace(/^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'\n/m, '')
   .replace(/^import \{ createHostAdapters \} from '\.\/host-adapters\.js'\n/m, '')
   .replace(/^import \{ createApprovalBridge \} from '\.\/approvals\.js'\n/m, '')

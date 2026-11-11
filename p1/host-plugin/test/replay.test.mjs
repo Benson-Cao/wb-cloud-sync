@@ -284,3 +284,61 @@ test('B6 单条超过硬上限：回明确 FRAME_TOO_LARGE，不让 WS 被 1009 
   assert.match(r.message, /超过/)
   assert.equal(h.closed, 1, '失败也要还句柄')
 })
+
+/* ------------------------------------------- 首屏窗口：反向补读（2026-11-11） */
+
+test('BF1 取窗口前面一段：返回紧邻 beforeSeq 的 50 条，并标记前面还有', async () => {
+  const { createBackfillReader } = await import('../src/replay.js')
+  const events = Array.from({ length: 100 }, (_, i) => ({ seq: i, type: 'assistant/message', data: { text: `第${i}条` } }))
+  const h = makeHandle(events)
+  const backfill = createBackfillReader({ openSession: async () => h })
+  const r = await backfill({ sessionId: 's', beforeSeq: 80, limit: 50 })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.events.length, 50)
+  assert.equal(r.value.events[0].seq, 30)
+  assert.equal(r.value.events.at(-1).seq, 79)
+  assert.equal(r.value.hasMoreEarlier, true)
+  assert.equal(r.value.fromSeq, 30)
+  assert.equal(r.value.toSeq, 79)
+  assert.equal(h.closed, 1, '句柄必须还回去')
+})
+
+test('BF2 已经到会话开头：hasMoreEarlier=false，不再显示「加载更早」', async () => {
+  const { createBackfillReader } = await import('../src/replay.js')
+  const events = Array.from({ length: 100 }, (_, i) => ({ seq: i, data: {} }))
+  const backfill = createBackfillReader({ openSession: async () => makeHandle(events) })
+  const r = await backfill({ sessionId: 's', beforeSeq: 10, limit: 50 })
+  assert.equal(r.value.events.length, 10)
+  assert.equal(r.value.events[0].seq, 0)
+  assert.equal(r.value.hasMoreEarlier, false)
+})
+
+test('BF3 beforeSeq=0：直接空结果，连句柄都不打开', async () => {
+  const { createBackfillReader } = await import('../src/replay.js')
+  let opened = 0
+  const backfill = createBackfillReader({ openSession: async () => { opened++; return makeHandle([]) } })
+  const r = await backfill({ sessionId: 's', beforeSeq: 0 })
+  assert.deepEqual(r.value.events, [])
+  assert.equal(r.value.hasMoreEarlier, false)
+  assert.equal(opened, 0, '没有可读区间就不该碰日志')
+})
+
+test('BF4 超字节预算时砍更早的、留下紧邻窗口的那几条', async () => {
+  const { createBackfillReader } = await import('../src/replay.js')
+  const events = Array.from({ length: 20 }, (_, i) => ({ seq: i, data: { text: 'x'.repeat(10_000) } }))
+  const backfill = createBackfillReader({ openSession: async () => makeHandle(events), maxBytes: 48 * 1024 })
+  const r = await backfill({ sessionId: 's', beforeSeq: 20, limit: 20 })
+  assert.ok(r.value.events.length > 0 && r.value.events.length < 20, `实际 ${r.value.events.length}`)
+  assert.ok(r.value.bytes <= 48 * 1024)
+  assert.equal(r.value.events.at(-1).seq, 19, '最后一条必须紧邻窗口（不能砍掉最新的）')
+  assert.equal(r.value.hasMoreEarlier, true)
+})
+
+test('BF5 缺 sessionId → SESSION_UNREADABLE；open 抛错也不外泄异常', async () => {
+  const { createBackfillReader } = await import('../src/replay.js')
+  const backfill = createBackfillReader({ openSession: async () => { throw new Error('no') } })
+  assert.equal((await backfill({})).code, 'SESSION_UNREADABLE')
+  const r = await backfill({ sessionId: 'gone', beforeSeq: 10 })
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'SESSION_UNREADABLE')
+})

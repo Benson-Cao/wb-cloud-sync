@@ -21,7 +21,7 @@
  *   createSession({text, cwd, clientId})        -> 同上（新建会话；value 含
  *                                                  sessionId，可附 index 行）
  */
-import { createReplayAdapter } from './replay.js'
+import { createBackfillReader, createReplayAdapter } from './replay.js'
 import { createSessionIndexReporter } from './sessions.js'
 import { createHostAdapters } from './host-adapters.js'
 import { createApprovalBridge } from './approvals.js'
@@ -140,6 +140,13 @@ export function apply(ctx, config = {}) {
     createSession: cfg.createSession ?? hostAdapters.createSession,
     // 适配器返回对象上的方法必须在包装层逐个转发，否则下行分派拿到 undefined
     uploadAttachment: cfg.uploadAttachment ?? hostAdapters.uploadAttachment,
+    // 反向补读：手机首屏只看最近 N 条，往上翻时取紧邻窗口的那一段
+    backfill: cfg.backfill ?? (openSession
+      ? createBackfillReader({ openSession, maxBytes: cfg.replayMaxBytes })
+      : async () => ({
+        ok: false, code: 'NOT_AVAILABLE',
+        message: '没有可用的只读句柄（未注入 sessionPersistence / openSession）',
+      })),
     // 产物索引：与 replay 共用同一个只读句柄，扫 append-only 日志里的显式呈现事件
     listArtifacts: cfg.listArtifacts ?? (openSession
       ? createArtifactIndex({ openSession, pageSize: cfg.artifactPageSize, maxPages: cfg.artifactMaxPages })
@@ -261,6 +268,15 @@ export function apply(ctx, config = {}) {
           sessionId: body?.sessionId, data: body?.data, name: body?.name,
         })
         const { status, body: payload } = unwrap(r, { receiptId: null })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/backfill') {
+        const r = await adapters.backfill({
+          sessionId: body?.sessionId, beforeSeq: body?.beforeSeq, limit: body?.limit,
+        })
+        const { status, body: payload } = unwrap(r, {
+          sessionId: body?.sessionId ?? null, events: [], hasMoreEarlier: false,
+        })
         return send({ t: 'http/response', reqId, status, body: payload })
       }
       if (endpoint === 'session/artifacts') {

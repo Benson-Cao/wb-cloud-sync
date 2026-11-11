@@ -916,3 +916,41 @@ test('P-EV2 正常大小的事件原样转发，一个字都不许改', async ()
     await relay.stop()
   }
 })
+
+/* ------------------------------------------------ 首屏窗口：反向补读分派 */
+
+test('P-BF1 session/backfill 下行分派：参数原样传给适配器，结果原样回帧', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  const seen = []
+  try {
+    const plugin = apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-bf', autoConnect: true,
+      backfill: async (args) => {
+        seen.push(args)
+        return {
+          ok: true,
+          value: {
+            sessionId: args.sessionId, bytes: 128, fromSeq: 30, toSeq: 79, hasMoreEarlier: true,
+            events: [{ seq: 79, type: 'assistant/message', data: { text: '最近一条' } }],
+          },
+        }
+      },
+    })
+    await waitFor(() => plugin.state.connected, '已连接')
+    relay.send({
+      t: 'http/request', reqId: 'r-bf', method: 'POST',
+      endpoint: 'session/backfill',
+      body: { sessionId: 's-bf', beforeSeq: 80, limit: 50 },
+    })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '补读响应')
+    const resp = framesOf(relay, 'http/response')[0]
+    assert.equal(resp.status, 200)
+    assert.equal(resp.body.data.events[0].seq, 79)
+    assert.equal(resp.body.data.hasMoreEarlier, true)
+    assert.deepEqual(seen, [{ sessionId: 's-bf', beforeSeq: 80, limit: 50 }])
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})

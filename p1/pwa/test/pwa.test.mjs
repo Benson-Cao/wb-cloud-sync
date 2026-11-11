@@ -437,3 +437,33 @@ test('D2 Host 也没有历史：补一次就停，不卡在补齐循环里', asy
   assert.equal(snap.lastSeq, -1, '没有事件就别假装有')
   client.stop()
 })
+
+test('D3 旧 Host 不认 session/backfill：退回 follow 取一页，不把「加载更早」变成砖', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    const body = init?.body ? JSON.parse(init.body) : null
+    const tail = String(url).split('/').pop()
+    calls.push(tail)
+    if (tail === 'backfill') {
+      return {
+        ok: false, status: 403,
+        json: async () => ({ ok: false, error: { code: 'ENDPOINT_NOT_ALLOWED' } }),
+      }
+    }
+    if (tail === 'follow') {
+      const from = (Number.isInteger(body?.sinceSeq) ? body.sinceSeq : -1) + 1
+      const events = Array.from({ length: 5 }, (_, i) => ({ seq: from + i, data: {} }))
+      return {
+        ok: true, status: 200,
+        json: async () => ({ ok: true, data: { events, hasMore: false, complete: true } }),
+      }
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true, data: { rows: [] } }) }
+  }
+  const client = createPwaClient({ baseUrl: 'http://x', deviceId: 'd', token: 't', fetchImpl })
+  const data = await client.backfill({ sessionId: 's', beforeSeq: 10, limit: 5 })
+  assert.equal(data.via, 'follow', '要明确告诉上层这是降级路径')
+  assert.deepEqual(data.events.map((e) => e.seq), [5, 6, 7, 8, 9], '只保留窗口前面那段')
+  assert.equal(calls.filter((c) => c === 'backfill').length, 1)
+  assert.equal(calls.filter((c) => c === 'follow').length, 1)
+})

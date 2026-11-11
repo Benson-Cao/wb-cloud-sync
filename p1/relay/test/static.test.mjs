@@ -160,4 +160,10 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /workspaceName\(r\.workspace\)/, '没有标题时回退工作区目录名，而不是一串 session-id')
   assert.match(page, /title\.textContent = r\.title/, '标题走 textContent（工作区路径来自 Host，不能当 HTML）')
   assert.match(page, /STATE_LABEL\[r\.state\]/, '状态要映射中文，不直接暴露 stopped/failed 内部值')
+
+  // 首屏窗口（用户选的方案）：先看最近 N 条，更早的按需反向补读
+  assert.match(page, /EARLIER_WINDOW = 50/, '首屏窗口大小必须是个显式常量，别散落在逻辑里')
+  assert.match(page, /sinceSeq: windowStart/, '打开会话要带窗口起点，而不是永远从 -1 全量拉')
+  assert.match(page, /client\.backfill\(/, '「加载更早」必须走反向补读，不能拿 follow 硬拉')
+  assert.match(page, /const rerender = /, '补到更早事件后要按 seq 整体重绘，避免 DOM 前插乱序')
 })

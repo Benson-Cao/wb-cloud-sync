@@ -256,7 +256,7 @@ export function createPwaClient({
         // Relay 缓冲里一条都没有（刚重启过就是这样）：complete:true 只说明「从你的位置往后
         // 没有缺口」，不等于「这段历史不存在」。必须去 Host 日志补一次——否则打开老会话是白屏，
         // 而 Host 明明有几百条事件。只补一次：补齐后会重新订阅，不设限会来回循环。
-        if (msg.complete === true && msg.toSeq === -1 && rec.lastSeq === -1 && !rec.bootstrapped) {
+        if (msg.complete === true && msg.toSeq === -1 && !rec.bootstrapped) {
           rec.bootstrapped = true
           void refill(rec)
           return
@@ -422,6 +422,54 @@ export function createPwaClient({
    * 只走白名单 `fileUploads/upload`；本客户端不缓存文件内容。
    */
   /**
+   * 反向补读：取窗口前面那一段（手机首屏只看最近 N 条，往上翻时才要更早的）。
+   * 走 session/backfill，与 session/follow 同一条 `session/*` 下行通道。
+   */
+  const backfill = async ({ sessionId, beforeSeq, limit = 50 } = {}) => {
+    if (!sessionId) throw Object.assign(new Error('补读缺 sessionId'), { code: 'INVALID_ARGUMENT' })
+    if (!Number.isInteger(beforeSeq)) throw Object.assign(new Error('补读缺 beforeSeq'), { code: 'INVALID_ARGUMENT' })
+    const r = await fetchImpl(`${base}/d/${encodeURIComponent(deviceId)}/session/backfill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ sessionId, beforeSeq, limit, clientId }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      // 旧版 Host 还不认识 session/backfill（白名单内但没实现，回 403）。
+      // 别让「加载更早」直接变砖：退回 follow 拿一页，再筛出窗口前面的部分。
+      if (code === 'ENDPOINT_NOT_ALLOWED' || r.status === 403 || r.status === 501) {
+        return await backfillViaFollow({ sessionId, beforeSeq, limit })
+      }
+      throw Object.assign(new Error(`补读失败：${code}`), { code, status: r.status })
+    }
+    return payload.data ?? { events: [], hasMoreEarlier: false }
+  }
+
+  /** 兼容旧 Host：用 follow 从更早一点开始取一页，筛出 beforeSeq 之前的部分。 */
+  const backfillViaFollow = async ({ sessionId, beforeSeq, limit }) => {
+    const from = Math.max(-1, beforeSeq - limit - 1)
+    const r = await fetchImpl(`${base}/d/${encodeURIComponent(deviceId)}/session/follow`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ sessionId, sinceSeq: from, clientId }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      throw Object.assign(new Error(`补读失败：${code}`), { code, status: r.status })
+    }
+    const events = (payload.data?.events ?? [])
+      .filter((ev) => Number.isInteger(ev?.seq) && ev.seq < beforeSeq)
+      .slice(-limit)
+    return {
+      events,
+      hasMoreEarlier: events.length > 0 && events[0].seq > 0,
+      via: 'follow',
+    }
+  }
+
+  /**
    * 拉某个会话的产物索引。只回元数据（路径 / 描述 / seq），文件字节不经 Relay。
    * 走的是既有 `session/*` 下行通道，不需要新协议帧。
    */
@@ -515,7 +563,7 @@ export function createPwaClient({
 
   return {
     refreshSessions, createSession, cancelTurn, submitPrompt, uploadAttachment,
-    listApprovals, answerApproval, getArtifacts,
+    listApprovals, answerApproval, getArtifacts, backfill,
     follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null,
   }
 }

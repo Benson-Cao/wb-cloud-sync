@@ -172,3 +172,72 @@ export function createReplayAdapter({ openSession, pageSize = DEFAULT_PAGE_SIZE,
     }
   }
 }
+
+/**
+ * 反向补读：取「窗口前面那一小段」。
+ * ---------------------------------------------------------------
+ * `session/follow` 只能从 `sinceSeq+1` 往后拉，用来补“更早”会一路把后面的也重发一遍。
+ * 手机首屏只看最近 50 条，往上翻时才需要紧邻的那 50 条——这正是反向读。
+ *
+ * 读窗口 `[beforeSeq-limit, beforeSeq)`，再按**字节预算从后往前**挑：
+ * 越靠近窗口的越该留下，所以超预算时砍掉的是更早的那些，而不是最新的。
+ */
+export function createBackfillReader({ openSession, maxBytes = DEFAULT_REPLAY_MAX_BYTES, maxRows = 200 } = {}) {
+  if (typeof openSession !== 'function') {
+    throw new TypeError('createBackfillReader 需要 openSession(sessionId)')
+  }
+  const budget = Math.max(1, Number(maxBytes) || DEFAULT_REPLAY_MAX_BYTES)
+  const cap = Math.min(Math.max(1, Number(maxRows) || 200), 1000)
+
+  return async function backfill({ sessionId, beforeSeq, limit } = {}) {
+    if (!sessionId) return { ok: false, code: 'SESSION_UNREADABLE', message: '缺少 sessionId' }
+    const before = Number.isInteger(beforeSeq) ? beforeSeq : null
+    if (before === null || before <= 0) {
+      return { ok: true, value: { sessionId, events: [], fromSeq: null, toSeq: null, hasMoreEarlier: false, bytes: 0 } }
+    }
+    const want = Math.min(Math.max(1, Number(limit) || 50), cap)
+    const from = Math.max(0, before - want)
+
+    let handle
+    try {
+      handle = await openSession(sessionId)
+    } catch (error) {
+      return {
+        ok: false, code: 'SESSION_UNREADABLE',
+        message: `会话不可读：${error?.message ?? 'unknown'}`,
+      }
+    }
+    try {
+      const page = await handle.read(from, before - from)
+      const batch = (Array.isArray(page?.events) ? page.events : [])
+        .filter((ev) => Number.isInteger(ev?.seq) && ev.seq < before)
+        .sort((a, b) => a.seq - b.seq)
+
+      const picked = []
+      let bytes = 0
+      for (let i = batch.length - 1; i >= 0; i--) {
+        const size = eventBytes(batch[i])
+        if (picked.length && bytes + size > budget) break
+        picked.unshift(batch[i])
+        bytes += size
+      }
+      const first = picked.length ? picked[0].seq : null
+      return {
+        ok: true,
+        value: {
+          sessionId,
+          events: picked,
+          bytes,
+          fromSeq: first,
+          toSeq: picked.length ? picked[picked.length - 1].seq : null,
+          // 最早那条不是 0，说明前面还有，界面该保留「加载更早」
+          hasMoreEarlier: first !== null && first > 0,
+        },
+      }
+    } catch (error) {
+      return { ok: false, code: 'SESSION_UNREADABLE', message: `反向补读失败：${error?.message ?? 'unknown'}` }
+    } finally {
+      try { await handle.close?.() } catch { /* 已关闭 */ }
+    }
+  }
+}

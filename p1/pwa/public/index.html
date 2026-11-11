@@ -63,6 +63,8 @@
     .ev.tool summary { cursor: pointer; color: #9fb0c8; }
     .ev.tool pre { max-height: 260px; overflow: auto; }
     .divider { color: #6b7c92; font-size: 12px; text-align: center; margin: 10px 0; }
+    #earlier { display: block; width: 100%; margin: 0 0 10px; background: #1b2431; border: 1px solid #3a4658; color: #9fb0c8; }
+    #earlier[hidden] { display: none; }
     .hint { color: #777; font-size: 13px; padding: 16px 0; }
     #setup { padding: 12px 16px; background: #1d1d1d; border-bottom: 1px solid #2c2c2c;
              display: flex; gap: 8px; }
@@ -124,6 +126,7 @@
         <button id="send">发送</button>
       </div>
       <div id="artifacts" hidden></div>
+      <button id="earlier" hidden>加载更早</button>
       <div id="events"></div>
     </div>
   </main>
@@ -213,11 +216,12 @@
 
     // 连续同类型事件折叠成一行：流式输出会刷出成百条碎片，逐条铺开会把页面拉爆
     let fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
-    const renderEvent = (sessionId, ev, source) => {
-      if (sessionId !== activeSession) return
-      const last = seenSeq.get(sessionId) ?? -1
-      if (!Number.isInteger(ev?.seq) || ev.seq <= last) return   // 幂等渲染
-      seenSeq.set(sessionId, ev.seq)
+    // 首屏只拉最近这么多条；更早的靠「加载更早」按需反向补读
+    const EARLIER_WINDOW = 50
+    let evBuf = new Map()      // seq -> ev（仅当前会话，供补读后整屏重绘）
+    let windowStart = -1       // 屏幕最早一条的 seq；> 0 表示前面还有
+    // 只画一条，不做去重/记账：重绘时也走它
+    const paint = (ev, source) => {
       const type = ev?.type ?? ev?.t ?? 'event'
       // Host 会把超过软上限的事件降级成「元数据 + 正文前缀」，这里别把 marker 当正文铺开
       const truncated = ev?.data?.truncated === true
@@ -272,6 +276,61 @@
         fold = { type, from: ev.seq, to: ev.seq, count: 1, div: appended, pre }
       }
       $('events').appendChild(appended)
+    }
+
+    /** 收到一条事件：去重 → 记账 → 入缓冲 → 画出来。 */
+    const renderEvent = (sessionId, ev, source) => {
+      if (sessionId !== activeSession) return
+      const last = seenSeq.get(sessionId) ?? -1
+      if (!Number.isInteger(ev?.seq) || ev.seq <= last) return   // 幂等渲染
+      seenSeq.set(sessionId, ev.seq)
+      evBuf.set(ev.seq, ev)
+      if (windowStart === -1 || ev.seq < windowStart) windowStart = ev.seq
+      paint(ev, source)
+      updateEarlier()
+    }
+
+    /** 「加载更早」只在窗口起点 > 0 时出现；补到 0 就收起。 */
+    const updateEarlier = () => {
+      const btn = $('earlier')
+      if (!btn) return
+      btn.hidden = !(activeSession && windowStart > 0)
+    }
+
+    /** 整屏重绘：补读到更早的事件后，按 seq 重排一次，比往 DOM 前面插更可靠。 */
+    const rerender = () => {
+      $('events').innerHTML = ''
+      fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
+      for (const seq of [...evBuf.keys()].sort((a, b) => a - b)) paint(evBuf.get(seq), 'replay')
+      updateEarlier()
+    }
+
+    /** 往上翻一页（50 条）。补读走 session/backfill，取的是紧邻窗口前面那一段。 */
+    const loadEarlier = async () => {
+      if (!client || !activeSession || windowStart <= 0) return
+      const btn = $('earlier')
+      btn.disabled = true
+      const label = btn.textContent
+      btn.textContent = '加载中…'
+      try {
+        const data = await client.backfill({ sessionId: activeSession, beforeSeq: windowStart, limit: 50 })
+        let added = 0
+        for (const ev of data.events ?? []) {
+          if (!Number.isInteger(ev?.seq)) continue
+          if (!evBuf.has(ev.seq)) added++
+          evBuf.set(ev.seq, ev)
+        }
+        if (data.events?.length) windowStart = data.events[0].seq
+        else windowStart = 0            // 前面没有了
+        if (added) rerender()
+        else updateEarlier()
+      } catch (e) {
+        say(`加载更早失败：${e.message}`, true)
+      } finally {
+        btn.disabled = false
+        btn.textContent = label
+        updateEarlier()
+      }
     }
 
     const openClient = (base, deviceId, token) => {
@@ -477,6 +536,11 @@
     const openStream = async (sessionId) => {
       activeSession = sessionId
       seenSeq.set(sessionId, -1)
+      evBuf = new Map()
+      // 首屏窗口：索引里有 lastSeq 就只拉最近 50 条，否则退回全量（老会话不认识 lastSeq 时）
+      const meta = client?.getSession?.(sessionId) ?? null
+      const known = Number.isInteger(meta?.lastSeq) ? meta.lastSeq : -1
+      windowStart = known > EARLIER_WINDOW ? known - EARLIER_WINDOW : -1
       artifactRows = []
       renderArtifacts()
       // 切换会话必须清空折叠状态与旧事件，否则会跨会话合并、并残留上一个会话的内容
@@ -485,10 +549,14 @@
       $('stream').hidden = false
       $('streamTitle').textContent = `事件流 · ${sessionId}`
       for (const el of document.querySelectorAll('.row')) el.classList.remove('active')
-      client.follow(sessionId, { sinceSeq: -1 })
+      // sinceSeq = 窗口起点：Relay 缓冲里若有，会直接补这个小窗口；没有则触发一次引导补齐
+      client.follow(sessionId, { sinceSeq: windowStart })
       void refreshArtifacts(sessionId)
+      updateEarlier()
       $('conn').textContent = connState(client.snapshot())
     }
+
+    $('earlier').addEventListener('click', () => { void loadEarlier() })
 
     $('save').addEventListener('click', () => { void connect() })
     // 忘掉这台电脑：清掉本机令牌与设备 ID，回到未配对状态（此前只能靠清浏览器数据）
@@ -498,6 +566,8 @@
       client = null
       for (const k of ['wbsync.token', 'wbsync.deviceId', 'wbsync.base']) localStorage.removeItem(k)
       activeSession = null
+      evBuf = new Map()
+      windowStart = -1
       artifactRows = []
       renderArtifacts()
       pendingApprovals.clear()

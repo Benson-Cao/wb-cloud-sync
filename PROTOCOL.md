@@ -10,7 +10,7 @@
 # 04 接口协议与数据模型（PROTOCOL.md）
 
 > 协议版本：`wbsync/1`
-> Owner：架构师 ｜ 状态：**修订 r7（发起人裁定采纳；四方会签已于 2026-11-10 取消）** ｜ 协议版本：`wbsync/1`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限与超大事件降级。均不升主版本）
+> Owner：架构师 ｜ 状态：**修订 r8（发起人裁定采纳；四方会签已于 2026-11-10 取消）** ｜ 协议版本：`wbsync/1`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`。均不升主版本）
 > **本文是跨组件唯一契约源**。任何字段变更必须同时更新本文件、版本号与 CHANGELOG。
 > 字段名以锁定的 DSH commit 实际类型为准；W1 Spike 已完成实测回填（见 §3）。上游升级前须重跑全量契约测试（见 `07`）。
 
@@ -348,6 +348,26 @@ ctx.on('approval/request', (request, next) => Promise<ApprovalOutcome>)   // 瀑
 
 **暂不从工具调用里猜路径**：宿主自己都要求「malformed calls contribute nothing」「reads/deletes 不计入」，我们没有那套参数校验与工具白名单，硬凑只会把中间产物、被删文件、读过的文件全当成「交付」。等宿主暴露 change summary 或产物清单接口再接，见 `05` W8 遗留项。
 
+### 5.7 首屏窗口与反向补读（r8 新增）
+
+手机打开会话时**不再全量补齐**。真机 874 条事件按 48 KiB/页要走数十到上百个往返，首屏要等好几秒；而用户 99% 的情况只想看最近发生了什么。
+
+- **窗口**：`follow(sessionId, { sinceSeq: lastSeq - 50 })`，`lastSeq` 取自 `/api/sessions` 索引行。索引里没有 `lastSeq`（老数据）才退回 `-1` 全量。
+- **反向补读**：`POST /d/<deviceId>/session/backfill`，请求 `{ sessionId, beforeSeq, limit }`，返回紧邻窗口前面的那一段：
+
+| 字段 | 含义 |
+|---|---|
+| `events[]` | `seq < beforeSeq` 的最后 `limit` 条（按 `seq` 升序） |
+| `fromSeq` / `toSeq` | 本段的起止 seq |
+| `hasMoreEarlier` | 最早一条 `seq > 0` 即前面还有；界面据此决定要不要继续显示「加载更早」 |
+| `bytes` | 本段字节数（同样受 48 KiB 预算约束） |
+
+**预算从后往前砍**：超预算时丢的是更早的那些，紧邻窗口的最新几条必须留下——否则用户点十次「加载更早」都看不到紧接着的那几条。
+
+**兼容旧 Host**：旧插件不认 `session/backfill`（白名单内但没实现，回 403 `ENDPOINT_NOT_ALLOWED`）。客户端退回「`follow` 从 `beforeSeq-limit-1` 取一页再筛掉 `>= beforeSeq`」，按钮不会变砖；响应里带 `via: 'follow'` 标明这是降级路径。
+
+**为什么不用 `follow` 硬拉**：`follow` 只能从某点**向后**走，补“更早”会把后面的全部重发一遍；要凑 50 条历史得翻好几页。反向读一次请求就够。
+
 ---
 
 ## 6. Host 本地接口（`ctx.webServer` 具名路由）
@@ -454,6 +474,7 @@ allowedEndpoints:
 - **r1（2026-11-07）**：按 W1 Spike 实测澄清事件契约、幂等映射与 Idempotency 归属；仅新增可选字段与说明，无删除/改名，兼容 `wbsync/1` 现有客户端；依据 ADR-007~009（待会签）。
 - **r2（2026-11-10）**：`SessionIndex.state` 扩充 `stopped` / `failed` 两个枚举值并给出 `turn/end.reason` 映射；新增 §5.4 正文可见性边界；修正「新增事件依赖 `ignorable`」的过时表述。无删除、无改名，兼容 `wbsync/1` 现有客户端；依据 WorkBuddy 对标复核与 ADR-010（待会签）。
 - **r3（2026-11-10）**：新增 `fileUploads/*` 附件上行端点（`POST /d/<deviceId>/fileUploads/upload`）与 §7 的白名单项、安全边界（Relay 内存中转、receipt 限 Agent 作用域）；`session/prompt` 的 `content` 允许 `{type:'file',receiptId}`（宿主 schema 原本已支持，本次仅明确手机侧用法）。无删除、无改名，兼容 `wbsync/1` 现有客户端；发起人裁定采纳（四方会签已取消）。
+- **r8（2026-11-11）**：新增 §5.7 首屏窗口与反向补读。手机打开会话默认只看最近 50 条（`sinceSeq = lastSeq - 50`），更早的按需调新增端点 `POST /session/backfill`（`{sessionId, beforeSeq, limit}` → `{events, fromSeq, toSeq, hasMoreEarlier, bytes}`）。端点落在既有 `session/*` 白名单内，不新增帧；旧 Host 回 403 时客户端退回 `follow` 取一页，不破坏兼容。
 - **r7（2026-11-11）**：新增 §5.3 传输上限与超大事件降级。WS 单帧上限可配（默认 8 MiB）、Host 侧 1 MiB 软上限触发**事件降级**（保留 `seq`，正文摘成 `head`）、Relay 事件缓冲加 32 MiB 字节预算；修正「帧 ≤64KiB」与实测（最大 421 KiB）不符的表述。新增字段均为可选（`data.truncated` / `data.reason` / `data.bytes` / `data.head`），旧客户端只会看到一条普通事件，不破坏兼容。
 - **r6（2026-11-10）**：新增 `session/artifacts` 下行端点（§5.6）。位于既有 `session/*` 白名单内，**不新增帧、不新增字段、不改白名单规则**；Host 只读扫会话日志中的 `deliverables/presented` 事件，返回文件元数据。显式规定「文件字节不经 Relay」，导出/下载票未实现，需先立 ADR 再动这个信任边界。兼容 `wbsync/1` 现有客户端（旧端不调用该端点即无感）。
 - **r5（2026-11-10）**：新增 §5.5 审批转发。宿主 `approval/request` 瀑布经 Host 插件转成 `$events/request` 上行帧，Relay 存看板并广播 `approval/request` 给该设备所有手机，手机用 `POST /d/<id>/$events/result` 应答，补拉走 `GET /api/approvals`。新增帧类型均为**新增可选**，旧客户端按白名单跳过、不参与审批即无感；不升主版本。依据宿主实测契约（`ApprovalOutcome` 四值）与渗透用例 S1–S16 的口径。
@@ -473,3 +494,4 @@ allowedEndpoints:
 | wbsync/1 r5 | 2026-11-10 | 新增 §5.5 审批转发（$events/request、approval/request、$events/result、/api/approvals）；手机离线或超时交还宿主，先答先得 | 架构师 |
 | wbsync/1 r6 | 2026-11-10 | 新增 §5.6 产物索引 `session/artifacts`（既有 `session/*` 白名单内）；只过元数据，文件字节不经 Relay | 架构师 |
 | wbsync/1 r7 | 2026-11-11 | §5.3 传输上限与降级：WS 帧上限可配（8 MiB）、事件 1 MiB 软上限降级、缓冲 32 MiB 字节预算；修正 ≤64KiB 的过时表述 | 架构师 |
+| wbsync/1 r8 | 2026-11-11 | 新增 §5.7 首屏窗口（最近 50 条）与反向补读 `session/backfill`；旧 Host 走 follow 降级 | 架构师 |
