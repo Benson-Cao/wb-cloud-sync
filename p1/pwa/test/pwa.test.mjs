@@ -513,3 +513,24 @@ test('D5 openWindow 默认要两份页预算（96 KiB），翻页则不带 bytes
   assert.equal(bodies[0].body.beforeSeq, 6)
   assert.equal(bodies[1].body.bytes, undefined, '翻页不覆盖预算，交给 Host 默认值')
 })
+
+test('P9 会话列表要带出「这台电脑在不在线」，供状态点用（W7）', async () => {
+  const hostId = 'pc-status-1'
+  const token = await pair(hostId)
+  const client = createPwaClient({ baseUrl: base, deviceId: hostId, token })
+
+  // 配对成功会把这台电脑标成在线（它刚生成了配对码），先看形状对不对
+  await client.refreshSessions()
+  const first = client.getHostStatus()
+  assert.equal(first.deviceId, hostId)
+  assert.equal(typeof first.online, 'boolean', '状态点必须拿到确定的布尔值，不能是 undefined')
+  assert.ok(first.lastSeenAt > 0, '带上最近活跃时间，界面才好说「离线多久了」')
+  assert.equal(client.snapshot().host.online, first.online, 'snapshot 里也要有，页面才有得画')
+
+  // 电脑真的掉线后，状态点必须跟着变（这里直接把 CP 标离线，等价于 WS 断开 + 心跳超时）
+  relay.cp.markDeviceOffline(hostId)
+  await client.refreshSessions()
+  assert.equal(client.getHostStatus().online, false, '电脑掉了还画「在线」，界面就是在骗人')
+
+  client.stop()
+})

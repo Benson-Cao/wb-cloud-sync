@@ -69,6 +69,8 @@ export function createPwaClient({
   const base = String(baseUrl).replace(/\/$/, '')
   const sessions = new Map()   // sessionId -> 会话索引行（最近一次刷新的缓存）
   const follows = new Map()    // sessionId -> 订阅记录
+  // 这台电脑的在线状态（W7 状态点）：null = 还没探过，别画成离线
+  let hostStatus = { deviceId, online: null, lastSeenAt: null }
   let stopped = false
 
   const notify = (notice) => { try { onNotice?.(notice) } catch { /* 回调异常不影响客户端 */ } }
@@ -89,6 +91,11 @@ export function createPwaClient({
     }
     sessions.clear()
     for (const row of payload.data?.rows ?? []) sessions.set(row.sessionId, row)
+    // 状态点靠这一句更新：sessions 响应里带 host.online（协议 r10）
+    if (payload.data?.host) {
+      hostStatus = { ...hostStatus, ...payload.data.host }
+      notify({ type: 'host', ...hostStatus })
+    }
     notify({ type: 'sessions', rows: [...sessions.values()] })
     emitState()
     return [...sessions.values()]
@@ -569,6 +576,7 @@ export function createPwaClient({
 
   const snapshot = () => ({
     deviceId,
+    host: { ...hostStatus },
     stopped,
     sessions: [...sessions.values()],
     follows: [...follows.values()].map((r) => ({
@@ -584,6 +592,7 @@ export function createPwaClient({
 
   return {
     refreshSessions, createSession, cancelTurn, submitPrompt, uploadAttachment,
+    getHostStatus: () => ({ ...hostStatus }),
     listApprovals, answerApproval, getArtifacts, backfill, openWindow,
     follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null,
   }

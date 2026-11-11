@@ -603,6 +603,8 @@ export function createRelay(options = {}) {
         // 之前令牌直接落在这台 Host 行上，第二台手机配对就会把第一台顶掉。
         const prev = cp.getDevice(c.deviceId)
         if (prev?.tombstone) return fail(res, 401, 'UNAUTHORIZED', '设备已吊销')
+        // 配对成功即把 CP 标成在线：这台电脑刚刚生成了配对码，它显然是开着的。
+        // 这个「在线」只活到 WS 注册或 45s 心跳窗口结束——之后由真实连接接管。
         cp.upsertDevice({
           deviceId: c.deviceId,
           state: 'online',
@@ -705,8 +707,18 @@ export function createRelay(options = {}) {
         }
         const rawPinned = url.searchParams.get('pinned')
         const pinned = rawPinned === null ? null : rawPinned === 'true'
+        const host = cp.getDevice(deviceId)
         return ok(res, {
           deviceId,
+          // 状态点（W7）：手机切到这台电脑时就能知道它连没连上，不必再单独打一次 /health，
+          // 也避免了「先显示在线、再弹 HOST_OFFLINE」这种自相矛盾的界面。
+          host: {
+            deviceId,
+            name: host?.deviceName ?? null,
+            platform: host?.platform ?? null,
+            online: isOnline(deviceId),
+            lastSeenAt: host?.lastSeenAt ?? null,
+          },
           rows: cp.listSessions({ ownerDeviceId: deviceId, pinned }),
         })
       }

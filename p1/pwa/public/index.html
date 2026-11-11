@@ -22,6 +22,9 @@
     }
     header h1 { font-size: 16px; margin: 0; font-weight: 600; }
     header .conn { font-size: 12px; color: #9a9a9a; }
+    /* 多电脑切换：窄屏也要挤得下，所以给个上限并允许省略 */
+    header #profile { max-width: 38%; background: #111; color: #cfe4ff; border: 1px solid #2c2c2c;
+                      border-radius: 8px; padding: 6px 8px; font-size: 13px; }
     button {
       background: #2b4a75; color: #cfe4ff; border: 0; border-radius: 8px;
       padding: 8px 14px; font-size: 14px; cursor: pointer;
@@ -107,6 +110,8 @@
 <body>
   <header>
     <h1>WBSync 会话</h1>
+    <!-- 多台电脑（W7）：下拉里每一条 = 一份配对档案；点号是这台电脑的在线状态 -->
+    <select id="profile" title="切换电脑"></select>
     <span class="conn" id="conn">未连接</span>
     <button id="refresh">刷新</button>
   </header>
@@ -157,9 +162,82 @@
     let approvalsPulled = false          // 已按「进入 following」补拉过一次，避免每次状态抖动都打接口
     let restoredLastSession = false      // 「回到上次会话」只做一次：重连不该把人从当前会话里拽走
 
-    $('relayBase').value = localStorage.getItem('wbsync.base') ?? ''
-    // 已配对过（localStorage 有令牌）就不再展示配对码输入，避免误触重新配对
-    if (localStorage.getItem('wbsync.token')) $('pairCode').placeholder = '已配对（留空直接连接）'
+    /* ------------------------------------------------ 多电脑档案（W7） */
+    // 一台手机可以配多台电脑：每台一份「档案」（地址 + 目标 Host + 令牌 + 本机身份）。
+    // 切换电脑 = 切这份档案；令牌是逐台电脑各一枚，不会互相顶掉（r9）。
+    const PROFILES_KEY = 'wbsync.profiles'
+    const ACTIVE_KEY = 'wbsync.activeHost'
+    const loadProfiles = () => {
+      try {
+        const raw = JSON.parse(localStorage.getItem(PROFILES_KEY) ?? '[]')
+        if (Array.isArray(raw)) return raw.filter((p) => p && p.base && p.hostDeviceId && p.token)
+      } catch { /* 坏数据当没有，别让页面起不来 */ }
+      return []
+    }
+    let profiles = loadProfiles()
+    // 老版本只存单台电脑的那几个键：迁移成一条档案，别让人重配一遍
+    if (!profiles.length && localStorage.getItem('wbsync.token')) {
+      const base = localStorage.getItem('wbsync.base')
+      const hostDeviceId = localStorage.getItem('wbsync.deviceId')
+      const token = localStorage.getItem('wbsync.token')
+      if (base && hostDeviceId && token) {
+        profiles = [{
+          base, hostDeviceId, token,
+          phoneId: localStorage.getItem('wbsync.phoneId'), label: null, online: null,
+        }]
+        localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles))
+        localStorage.setItem(ACTIVE_KEY, hostDeviceId)
+      }
+    }
+    let activeProfile = profiles.find((p) => p.hostDeviceId === localStorage.getItem(ACTIVE_KEY)) ?? profiles[0] ?? null
+    const saveProfiles = () => {
+      try { localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles)) } catch { /* 隐私模式 */ }
+      if (activeProfile) {
+        try { localStorage.setItem(ACTIVE_KEY, activeProfile.hostDeviceId) } catch { /* 同上 */ }
+      }
+    }
+    /** 新增或更新一份档案。同一台电脑重配只换令牌，不会多出一条。 */
+    const upsertProfile = (patch) => {
+      const i = profiles.findIndex((p) => p.hostDeviceId === patch.hostDeviceId)
+      if (i === -1) profiles.push({ online: null, label: null, ...patch })
+      else profiles[i] = { ...profiles[i], ...patch }
+      activeProfile = profiles.find((p) => p.hostDeviceId === patch.hostDeviceId) ?? profiles[0] ?? null
+      saveProfiles()
+      renderProfiles()
+    }
+    const removeProfile = (hostDeviceId) => {
+      profiles = profiles.filter((p) => p.hostDeviceId !== hostDeviceId)
+      activeProfile = profiles[0] ?? null
+      saveProfiles()
+      renderProfiles()
+    }
+    /** 状态点：● 在线 / ○ 离线 / ? 还没探过（别把「不知道」画成「离线」）。 */
+    const dotOf = (p) => (p.online === true ? '●' : p.online === false ? '○' : '?')
+    const renderProfiles = () => {
+      const sel = $('profile')
+      sel.innerHTML = ''
+      if (!profiles.length) {
+        const opt = document.createElement('option')
+        opt.textContent = '未配对'
+        opt.value = ''
+        sel.appendChild(opt)
+        sel.disabled = true
+        return
+      }
+      sel.disabled = false
+      for (const p of profiles) {
+        const opt = document.createElement('option')
+        opt.value = p.hostDeviceId
+        // 名字优先用电脑自报的名字，没有就退化到地址——地址一定认得出来
+        opt.textContent = `${dotOf(p)} ${p.label || p.base.replace(/^https?:\/\//, '')}`
+        sel.appendChild(opt)
+      }
+      if (activeProfile) sel.value = activeProfile.hostDeviceId
+    }
+
+    $('relayBase').value = activeProfile?.base ?? localStorage.getItem('wbsync.base') ?? ''
+    // 已配对过（有档案）就不再展示配对码输入，避免误触重新配对
+    if (activeProfile) $('pairCode').placeholder = '已配对（留空直接连接）'
 
     const say = (text, isError = false) => {
       const el = $('status')
@@ -443,6 +521,7 @@
           renderList(rows); $('list').classList.remove('hint'); $('status').hidden = true
           $('newbar').hidden = false   // 已连接才亮「新建会话」（Host 离线时协议要求入口置灰）
           void refreshApprovals()      // 推送只保证「更快」，拉取才保证「断线期间的不漏」
+          syncProfileStatus()
           // 回到上次那个会话：刷新页面 / 重开 PWA 后不必每次都从列表里再点一遍。
           // 只做一次，且那个会话必须还在索引里（被删了就老实停在列表）。
           if (!restoredLastSession) {
@@ -453,6 +532,35 @@
           }
         })
         .catch((e) => say(`连接失败：${e.message}`, true))
+    }
+
+    /** 把当前连接探到的电脑状态记回档案（只更新在线/名字，不碰令牌）。 */
+    const syncProfileStatus = () => {
+      const host = client?.getHostStatus?.()
+      if (!host || !activeProfile || host.deviceId !== activeProfile.hostDeviceId) return
+      activeProfile.online = host.online === true
+      if (host.name) activeProfile.label = host.name
+      saveProfiles()
+      renderProfiles()
+    }
+
+    /** 切到另一台电脑：断开旧的订阅，按新档案重连。 */
+    const switchProfile = (hostDeviceId) => {
+      const next = profiles.find((p) => p.hostDeviceId === hostDeviceId)
+      if (!next || next === activeProfile) return
+      saveScroll()                       // 先记住旧会话读到哪
+      client?.stop()
+      client = null
+      activeProfile = next
+      saveProfiles()
+      renderProfiles()
+      activeSession = null
+      evBuf = new Map(); evOrigin = new Map(); windowStart = -1
+      $('events').innerHTML = ''
+      $('stream').hidden = true
+      $('relayBase').value = next.base
+      say(`已切到 ${next.label || next.base}`)
+      openClient(next.base, next.hostDeviceId, next.token)
     }
 
     /** 渲染待审批卡片。设备级：不随 activeSession 变化。 */
@@ -533,8 +641,8 @@
       const base = $('relayBase').value.trim().replace(/\/$/, '')
       const code = $('pairCode').value.trim()
       if (!base) { say('需要 Relay 地址。', true); return }
-      let token = localStorage.getItem('wbsync.token')
-      let deviceId = localStorage.getItem('wbsync.deviceId')
+      // 同一地址可能已经是一份档案：有就复用它的本机身份，没有就是「新增一台电脑」
+      let profile = profiles.find((p) => p.base === base) ?? null
       if (code) {
         // 连点两下会把码白白吃掉：/pair 一消费就作废，第二次必然报「码错误或过期」，
         // 而真正的原因（第一次已经用掉了）根本看不出来。
@@ -545,21 +653,21 @@
         try {
           // phoneId 是「本机身份」：带上它重配只轮换自己那枚令牌，不会占掉第二台手机的名额
           const r = await pairWithRelay({
-            baseUrl: base, code, phoneId: localStorage.getItem('wbsync.phoneId'),
+            baseUrl: base, code, phoneId: profile?.phoneId ?? null,
             // 只给管理台看「这是谁的手机」用，不参与任何判定；取不到就退回「浏览器」
             clientName: (/iPad/i.test(navigator.userAgent) ? 'iPad'
               : /iPhone/i.test(navigator.userAgent) ? 'iPhone'
                 : /Android/i.test(navigator.userAgent) ? 'Android 手机' : '浏览器'),
           })
-          token = r.deviceToken
-          deviceId = r.deviceId
-          localStorage.setItem('wbsync.base', base)
-          localStorage.setItem('wbsync.deviceId', deviceId)
-          localStorage.setItem('wbsync.token', token)
-          if (r.phoneId) localStorage.setItem('wbsync.phoneId', r.phoneId)
+          // 写档案（不是写全局键）：后配的电脑不会覆盖先配的那台
+          upsertProfile({
+            base, hostDeviceId: r.deviceId, token: r.deviceToken,
+            phoneId: r.phoneId ?? profile?.phoneId ?? null,
+          })
+          profile = activeProfile
           $('pairCode').value = ''
           $('pairCode').placeholder = '已配对（留空直接连接）'
-          say(`已配对：${deviceId}`)
+          say(`已配对：${r.deviceId}`)
         } catch (e) {
           // 配对码是一次性的：/pair 成功即消费，输错码要回 PC 重新生成
           say(`配对失败：${e.message}（配对码一次性，请回 PC 重新生成）`, true)
@@ -569,9 +677,8 @@
           $('save').disabled = false
         }
       }
-      if (!token || !deviceId) { say('输入 PC 端生成的 6 位配对码完成配对。', true); return }
-      localStorage.setItem('wbsync.base', base)
-      openClient(base, deviceId, token)
+      if (!profile) { say('输入 PC 端生成的 6 位配对码完成配对。', true); return }
+      openClient(profile.base, profile.hostDeviceId, profile.token)
     }
 
     /**
@@ -694,9 +801,13 @@
     $('noise').addEventListener('click', () => { showNoise = !showNoise; rerender() })
 
     $('save').addEventListener('click', () => { void connect() })
-    // 忘掉这台电脑：清掉本机令牌与设备 ID，回到未配对状态（此前只能靠清浏览器数据）
+    $('profile').addEventListener('change', (e) => switchProfile(e.target.value))
+    // 忘掉**当前这台**电脑：只删这一份档案，别的电脑不受影响（多电脑时代的前提）
     $('forget').addEventListener('click', () => {
-      if (!window.confirm('清除本机保存的令牌与设备 ID？清除后需要重新配对。')) return
+      const target = activeProfile
+      if (!target) { say('当前没有已配对的电脑。', true); return }
+      const name = target.label || target.base
+      if (!window.confirm(`忘掉这台电脑（${name}）？本机需要重新配对才能再连它。`)) return
       client?.stop()
       client = null
       for (const k of ['wbsync.token', 'wbsync.deviceId', 'wbsync.base', 'wbsync.phoneId', 'wbsync.lastSession']) localStorage.removeItem(k)
@@ -717,7 +828,8 @@
       $('pairCode').value = ''
       $('pairCode').placeholder = '6 位配对码'
       $('conn').textContent = '未连接'
-      say('已忘掉这台电脑，请重新配对')
+      if (target) removeProfile(target.hostDeviceId)
+      say(profiles.length ? `已忘掉 ${name}，还剩 ${profiles.length} 台电脑` : '已忘掉所有电脑，请重新配对')
     })
     $('refresh').addEventListener('click', () => client?.refreshSessions().catch((e) => say(`刷新失败：${e.message}`, true)))
     $('create').addEventListener('click', async () => {
@@ -769,6 +881,7 @@
         $('send').disabled = false
       }
     })
+    renderProfiles()
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {})
   </script>
 </body>

@@ -193,5 +193,13 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
 
   // 配对码一次性：连点两下会把码白白吃掉，第二次只会看到误导性的「码已过期」
   assert.match(page, /if \(pairing\) return/, '配对中要挡住连点')
+
+  // 多台电脑（W7）：切换、状态点、按电脑忘掉
+  assert.match(page, /id="profile"/, '要有电脑切换入口')
+  assert.match(page, /const switchProfile = /, '切换电脑要断开旧订阅再按新档案重连')
+  assert.match(page, /wbsync\.profiles/, '档案要存成列表，否则后配的电脑会盖掉先配的')
+  assert.match(page, /const dotOf = /, '状态点要分开「在线/离线/没探过」三种')
+  assert.match(page, /p\.online === true \? '●'/, '没探过不能画成离线')
+  assert.match(page, /client\?\.getHostStatus/, '在线状态来自 sessions 响应，不另打接口')
   assert.match(page, /\$\('save'\)\.disabled = true/, '配对期间按钮要置灰，否则用户会以为没反应再点一次')
 })
