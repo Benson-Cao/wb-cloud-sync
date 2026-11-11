@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-11T12:15:54.769Z",
+  "capturedAt": "2026-11-11T12:38:00.867Z",
   "git": {
-    "head": "4ed3d429ee6626064f08445740c81ea7781b5689",
+    "head": "5a1470ed9b3a8af1f6dba77c93e47d2f677af008",
     "branch": "main",
     "worktreeClean": true
   },
@@ -10,27 +10,27 @@
   "freshness": {
     "status": "CURRENT",
     "dataChanged": [],
-    "signoffChanged": [
-      "SIGN-OFF.md"
-    ],
+    "signoffChanged": [],
     "artifactChanged": [],
-    "narrativeChanged": [],
+    "narrativeChanged": [
+      "PROTOCOL.md"
+    ],
     "notes": [],
-    "previousCapturedAt": "2026-11-11T12:08:54.707Z",
-    "previousGitHead": "837e83d83eff81682fb6b4121ecf4c048193ad18",
+    "previousCapturedAt": "2026-11-11T12:15:54.769Z",
+    "previousGitHead": "4ed3d429ee6626064f08445740c81ea7781b5689",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：会签材料：SIGN-OFF.md",
-      "capturedAt": "2026-11-11T12:08:54.707Z",
-      "gitHead": "837e83d83eff81682fb6b4121ecf4c048193ad18",
+      "previousStatus": "DRIFTED",
+      "previousReason": "描述文字变化（不阻断）：PROTOCOL.md",
+      "capturedAt": "2026-11-11T12:15:54.769Z",
+      "gitHead": "4ed3d429ee6626064f08445740c81ea7781b5689",
       "dataChanged": [],
-      "signoffChanged": [
-        "SIGN-OFF.md"
-      ],
+      "signoffChanged": [],
       "artifactChanged": [],
-      "narrativeChanged": []
+      "narrativeChanged": [
+        "PROTOCOL.md"
+      ]
     }
   },
   "fingerprints": {
@@ -59,11 +59,11 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "fbaab683bfeccecff293af4091207df5b2c03c2160c7b4d8f88eb4ff64618e9f"
+      "PROTOCOL.md": "2501d36c07a644babbd23b2289a9de3b7a62a2dbfe5f7272baf5d7b8fd137a1a"
     }
   },
   "secretScan": {
-    "filesScanned": 114,
+    "filesScanned": 115,
     "patterns": [
       "github-classic",
       "github-fine-grained",
