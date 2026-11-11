@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-11T11:56:12.340Z",
+  "capturedAt": "2026-11-11T12:01:19.727Z",
   "git": {
-    "head": "553f1a06624cfc1e462e7d7991ee0de3537dea6c",
+    "head": "77e27068a5ebb8f091f83bc91278b0da2b0ceaa5",
     "branch": "main",
     "worktreeClean": true
   },
@@ -14,23 +14,27 @@
       "SIGN-OFF.md"
     ],
     "artifactChanged": [],
-    "narrativeChanged": [],
+    "narrativeChanged": [
+      "PROTOCOL.md"
+    ],
     "notes": [],
-    "previousCapturedAt": "2026-11-11T11:38:08.290Z",
-    "previousGitHead": "f47cb626f8ac8712c8e14126f7b941fb16ecac32",
+    "previousCapturedAt": "2026-11-11T11:56:12.340Z",
+    "previousGitHead": "553f1a06624cfc1e462e7d7991ee0de3537dea6c",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "STALE",
       "previousReason": "已变化（阻断）：会签材料：SIGN-OFF.md",
-      "capturedAt": "2026-11-11T11:38:08.290Z",
-      "gitHead": "f47cb626f8ac8712c8e14126f7b941fb16ecac32",
+      "capturedAt": "2026-11-11T11:56:12.340Z",
+      "gitHead": "553f1a06624cfc1e462e7d7991ee0de3537dea6c",
       "dataChanged": [],
       "signoffChanged": [
         "SIGN-OFF.md"
       ],
       "artifactChanged": [],
-      "narrativeChanged": []
+      "narrativeChanged": [
+        "PROTOCOL.md"
+      ]
     }
   },
   "fingerprints": {
@@ -47,7 +51,7 @@
     },
     "signoff": {
       "SECURITY-REVIEW.md": "654740fe43c975e8a6fe2ee4dd2205b14e79c0641fa4874947fc0ce6acd529c0",
-      "SIGN-OFF.md": "c9fc51f5370bdf8647f814a7336c934f7a8e90dc25279dd246b2503ac946e849",
+      "SIGN-OFF.md": "c2f96c934bdcf2db7d5ef0584be360ead6d5742a3c6e5c54d02a104d9228e95c",
       "SIGN-OFF-PROCEDURE.md": "2c279eb54b44ff3b5fab18c121c53b68b8f3f23da27e0f98fdf18abbb17fd1df",
       "SIGNOFF-WAIVER.md": "920af35df5a96b39d83d401e99d01957d558479b3ad52df1e0cafa12d7c60336",
       "01-charter.md": "3740d12f8192aa94945b9f4de6a7b4a0ecc18a4c3fcd174bd054df45a98d83df",
@@ -59,7 +63,7 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "d26f74b070310d8344e45846dff4f0f90e9bfb3131fc5a993d3f71565633e385"
+      "PROTOCOL.md": "16233963540773319c0ecf885a57ccf7adaaeede30b1e8eede51243d5d1596ff"
     }
   },
   "secretScan": {
