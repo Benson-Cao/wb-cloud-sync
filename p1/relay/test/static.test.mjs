@@ -146,4 +146,11 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   // 大事件降级：别把 marker 当正文铺开，也别让人以为事件丢了
   assert.match(page, /ev\?\.data\?\.truncated/, '降级事件要单独识别')
   assert.match(page, /超过单帧上限未转发/, '要说明「正文没转发」而不是静默显示空内容')
+
+  // 转录渲染：消息成气泡、工具有摘要、正文一律 textContent
+  assert.match(page, /transcript\.js/, '页面必须引用转录纯函数模块')
+  assert.match(page, /\.msg\.user[\s\S]*?\.msg\.assistant/, '用户/助手气泡要有区分样式')
+  assert.match(page, /classifyEvent\(ev\)/, '渲染要按归类走，而不是一律铺 JSON')
+  assert.match(page, /createElement\('details'\)/, '工具结果要折叠，不能把整段输出铺在流里')
+  assert.match(page, /body\.textContent = messageText\(ev\)/, '消息正文必须用 textContent，杜绝 HTML 注入')
 })
