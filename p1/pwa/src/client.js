@@ -400,6 +400,25 @@ export function createPwaClient({
    * 附件上行：文件 → base64 → 宿主 `fileUploads`，拿回 receiptId 供同一会话的 prompt 引用。
    * 只走白名单 `fileUploads/upload`；本客户端不缓存文件内容。
    */
+  /**
+   * 拉某个会话的产物索引。只回元数据（路径 / 描述 / seq），文件字节不经 Relay。
+   * 走的是既有 `session/*` 下行通道，不需要新协议帧。
+   */
+  const getArtifacts = async ({ sessionId } = {}) => {
+    if (!sessionId) throw Object.assign(new Error('拉产物缺 sessionId'), { code: 'INVALID_ARGUMENT' })
+    const r = await fetchImpl(`${base}/d/${encodeURIComponent(deviceId)}/session/artifacts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ sessionId, clientId }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      throw Object.assign(new Error(`拉取产物失败：${code}`), { code, status: r.status })
+    }
+    return Array.isArray(payload.data?.rows) ? payload.data.rows : []
+  }
+
   /** 拉取待审批清单：推送只是「更快」，拉取才是「不漏」（断线期间错过的靠这条补）。 */
   const listApprovals = async () => {
     const r = await fetchImpl(`${base}/api/approvals?deviceId=${encodeURIComponent(deviceId)}`, {
@@ -475,7 +494,7 @@ export function createPwaClient({
 
   return {
     refreshSessions, createSession, cancelTurn, submitPrompt, uploadAttachment,
-    listApprovals, answerApproval,
+    listApprovals, answerApproval, getArtifacts,
     follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null,
   }
 }

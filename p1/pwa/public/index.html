@@ -65,6 +65,15 @@
     .card .acts { display: flex; gap: 8px; }
     .card button.allow { background: #2b6a3f; border-color: #2b6a3f; }
     .card button.deny { background: #8b3030; border-color: #8b3030; }
+
+    /* 产物卡片：只有元数据，点一下复制路径；文件字节留在电脑上 */
+    #artifacts { display: grid; gap: 6px; margin: 10px 0; }
+    #artifacts[hidden] { display: none; }
+    #artifacts .head { color: #9fb0c8; font-size: 13px; margin-bottom: 2px; }
+    .art { display: flex; align-items: center; gap: 8px; border: 1px solid #2f3d50; border-radius: 8px; padding: 8px 10px; background: #141c26; }
+    .art .name { font-weight: 600; word-break: break-all; }
+    .art .desc { color: #9fb0c8; font-size: 12px; word-break: break-word; }
+    .art button { margin-left: auto; }
   </style>
 </head>
 <body>
@@ -97,6 +106,7 @@
         <input id="file" type="file" />
         <button id="send">发送</button>
       </div>
+      <div id="artifacts" hidden></div>
       <div id="events"></div>
     </div>
   </main>
@@ -187,7 +197,10 @@
         baseUrl: base,
         deviceId,
         token,
-        onEvent: ({ sessionId, ev, source }) => renderEvent(sessionId, ev, source),
+        onEvent: ({ sessionId, ev, source }) => {
+          renderEvent(sessionId, ev, source)
+          if (ev?.type === 'deliverables/presented') scheduleArtifactRefresh(sessionId)
+        },
         onNotice: (n) => {
           if (n.type === 'sessions') renderList(n.rows)
           if (n.type === 'approval') { pendingApprovals.set(n.approvalId, n); renderApprovals() }
@@ -316,9 +329,72 @@
       openClient(base, deviceId, token)
     }
 
+    /**
+     * 产物卡片：只渲染 Host 给的元数据，绝不把文件字节搬过来。
+     * 用 textContent 而不是 innerHTML——路径由宿主的日志来，不该被当成 HTML 执行。
+     */
+    let artifactRows = []
+    let artifactTimer = null
+    const renderArtifacts = () => {
+      const box = $('artifacts')
+      box.innerHTML = ''
+      if (!artifactRows.length) { box.hidden = true; return }
+      box.hidden = false
+      const head = document.createElement('div')
+      head.className = 'head'
+      head.textContent = `本会话产物 · ${artifactRows.length} 个（文件仍留在电脑工作区，点卡片复制路径）`
+      box.appendChild(head)
+
+      for (const a of artifactRows) {
+        const row = document.createElement('div')
+        row.className = 'art'
+        const name = document.createElement('span')
+        name.className = 'name'
+        name.textContent = a.name ?? a.path ?? '未命名'
+        row.appendChild(name)
+        if (a.description) {
+          const desc = document.createElement('span')
+          desc.className = 'desc'
+          desc.textContent = a.description
+          row.appendChild(desc)
+        }
+        const copy = document.createElement('button')
+        copy.textContent = '复制路径'
+        copy.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(a.path ?? '')
+            say('路径已复制')
+          } catch {
+            say(`路径：${a.path ?? ''}`)
+          }
+        }
+        row.appendChild(copy)
+        box.appendChild(row)
+      }
+    }
+
+    /** 主动问一次 Host：显式呈现过的文件在会话日志里，晚连 / 缓冲被裁也能补回来。 */
+    const refreshArtifacts = async (sessionId = activeSession) => {
+      if (!client || !sessionId) return
+      try {
+        const rows = await client.getArtifacts({ sessionId })
+        if (sessionId !== activeSession) return   // 用户已经切走了，旧响应别盖上来
+        artifactRows = rows
+        renderArtifacts()
+      } catch { /* 产物读不到不打断事件流 */ }
+    }
+
+    /** 连续几条呈现事件合并成一次刷新，避免回放时把 Host 打一串重复请求。 */
+    const scheduleArtifactRefresh = (sessionId) => {
+      if (artifactTimer) clearTimeout(artifactTimer)
+      artifactTimer = setTimeout(() => { artifactTimer = null; void refreshArtifacts(sessionId) }, 300)
+    }
+
     const openStream = async (sessionId) => {
       activeSession = sessionId
       seenSeq.set(sessionId, -1)
+      artifactRows = []
+      renderArtifacts()
       // 切换会话必须清空折叠状态与旧事件，否则会跨会话合并、并残留上一个会话的内容
       fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
       $('events').innerHTML = ''
@@ -326,6 +402,7 @@
       $('streamTitle').textContent = `事件流 · ${sessionId}`
       for (const el of document.querySelectorAll('.row')) el.classList.remove('active')
       client.follow(sessionId, { sinceSeq: -1 })
+      void refreshArtifacts(sessionId)
       $('conn').textContent = connState(client.snapshot())
     }
 
@@ -337,6 +414,10 @@
       client = null
       for (const k of ['wbsync.token', 'wbsync.deviceId', 'wbsync.base']) localStorage.removeItem(k)
       activeSession = null
+      artifactRows = []
+      renderArtifacts()
+      pendingApprovals.clear()
+      renderApprovals()
       fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
       $('events').innerHTML = ''
       $('stream').hidden = true

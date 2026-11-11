@@ -4,6 +4,25 @@
 
 ---
 
+## [P2 W8] · 2026-11-11 16:4x · 产物卡片 / 列表（协议 r6，只过元数据）
+
+继续从 asar 取证：产物在宿主里叫 `deliverables`，会话日志里有显式交付事件
+
+```jsonc
+{ "type": "deliverables/presented", "seq": 3, "data": {
+  "turn": 1, "callId": "call-1", "files": [{ "path": "out/a.pdf", "description": "成品" }]
+}}
+```
+
+- **为什么不让手机从事件流里攒卡片**：Relay 事件缓冲在内存里（capacity 1000），长会话会把早期交付事件裁掉；手机晚连、Relay 重启、缓冲被裁时卡片就空了。会话日志是 append-only 真源。所以新增 `POST /d/<id>/session/artifacts`（落在**既有** `session/*` 白名单内，无新帧、无新字段），Host 用 `sessionPersistence.open(id,'read')` 只读分页扫日志，返回 `{seq, turn, callId, index, path, name, description}`。和 `session/follow` 是同一条补齐逻辑。
+- **扫描有界**：页数上限 20、行数上限 200、达到上限如实报 `truncated:true`；`seq` 不是连续整数时停止翻页，不靠猜 offset 继续读；句柄 `finally` 必还。畸形事件（缺 turn/callId/files、路径空白、描述非字符串）一律跳过，**不猜路径、不编文件名**。
+- **边界没松**：只过元数据，**文件字节一个都不进 Relay / CP**（ADR-010 / 04 §5.4）。卡片能做的只有「看到有什么」和「复制路径」；打开/导出归桌面端。导出 PDF/DOCX/MD 与临时下载票**明确未做**，要做必须先立 ADR 处理「工作区文件是否允许经过 Relay」——不能顺手把 `rows[]` 变成文件传输通道。TC-6.2/6.4 已如实标注未做。
+- PWA 侧：新增 `#artifacts` 卡片区（`#artifacts[hidden]` 同样提权，和 `[hidden]` 那个坑同源）、`client.getArtifacts()`；进会话拉一次、遇到 `deliverables/presented` 事件 300ms 合并刷新、切走会话后旧响应不盖上来、路径用 `textContent` 渲染不注入 HTML。SW 升 `wbsync-shell-v12`。
+- 打包器收录 `artifacts.js`；bundle 重建并 `--check` 通过。协议升 **r6**（`docs/04` §5.6 + 变更表，`PROTOCOL.md` 同步再生）。
+- 测试 213 → **224 全绿**（AF1–AF9 纯解析与分页、P-AF1–2 插件分派含「会话不可读回 404，不谎报空表」、S6 静态断言扩到产物区）。
+
+---
+
 ## [P2 W8] · 2026-11-10 23:2x · 审批转发（协议 r5）：手机上真的能批工具调用了
 
 先取证再动手。`app.asar` 里挖到宿主的审批契约（不是猜的）：

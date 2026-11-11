@@ -25,6 +25,7 @@ import { createReplayAdapter } from './replay.js'
 import { createSessionIndexReporter } from './sessions.js'
 import { createHostAdapters } from './host-adapters.js'
 import { createApprovalBridge } from './approvals.js'
+import { createArtifactIndex } from './artifacts.js'
 
 export const name = 'wbsync-host-dev'
 export const inject = ['webServer', 'sessionPersistence']
@@ -111,6 +112,13 @@ export function apply(ctx, config = {}) {
     createSession: cfg.createSession ?? hostAdapters.createSession,
     // 适配器返回对象上的方法必须在包装层逐个转发，否则下行分派拿到 undefined
     uploadAttachment: cfg.uploadAttachment ?? hostAdapters.uploadAttachment,
+    // 产物索引：与 replay 共用同一个只读句柄，扫 append-only 日志里的显式呈现事件
+    listArtifacts: cfg.listArtifacts ?? (openSession
+      ? createArtifactIndex({ openSession, pageSize: cfg.artifactPageSize, maxPages: cfg.artifactMaxPages })
+      : async () => ({
+        ok: false, code: 'NOT_AVAILABLE',
+        message: '没有可用的只读句柄（未注入 sessionPersistence / openSession）',
+      })),
     replay: cfg.replay ?? (openSession
       ? createReplayAdapter({ openSession, pageSize: cfg.replayPageSize })
       : async () => ({
@@ -210,6 +218,14 @@ export function apply(ctx, config = {}) {
           sessionId: body?.sessionId, data: body?.data, name: body?.name,
         })
         const { status, body: payload } = unwrap(r, { receiptId: null })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/artifacts') {
+        // 只回元数据（路径 / 描述 / seq），文件字节绝不经过 Relay（ADR-010）
+        const r = await adapters.listArtifacts({ sessionId: body?.sessionId })
+        const { status, body: payload } = unwrap(r, {
+          sessionId: body?.sessionId ?? null, rows: [], count: 0, truncated: true,
+        })
         return send({ t: 'http/response', reqId, status, body: payload })
       }
       if (endpoint === '$events/result') {

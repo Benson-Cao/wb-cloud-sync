@@ -806,3 +806,65 @@ test('P-AP2 未知/已应答的审批 id → 409 APPROVAL_GONE；非法 outcome 
     await relay.stop()
   }
 })
+
+/* ------------------------------------------------------------ W8 产物索引 */
+
+test('P-AF1 session/artifacts 下行分派：只回元数据，不夹带文件字节', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  const seen = []
+  try {
+    const plugin = apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-af', autoConnect: true,
+      listArtifacts: async (args) => {
+        seen.push(args)
+        return {
+          ok: true,
+          value: {
+            sessionId: args.sessionId, count: 1, truncated: false,
+            rows: [{ seq: 3, turn: 1, callId: 'c', index: 0, path: 'out/a.pdf', name: 'a.pdf', description: '成品' }],
+          },
+        }
+      },
+    })
+    await waitFor(() => plugin.state.connected, '已连接')
+    relay.send({
+      t: 'http/request', reqId: 'r-af', method: 'POST',
+      endpoint: 'session/artifacts', body: { sessionId: 'session-af' },
+    })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '产物响应')
+    const resp = framesOf(relay, 'http/response')[0]
+    assert.equal(resp.status, 200)
+    assert.equal(resp.body.data.rows.length, 1)
+    assert.equal(resp.body.data.rows[0].name, 'a.pdf')
+    assert.equal(JSON.stringify(resp.body).includes('base64'), false, '不许带任何文件内容')
+    assert.deepEqual(seen, [{ sessionId: 'session-af' }])
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('P-AF2 会话不可读：如实回 404 SESSION_UNREADABLE，不谎报空产物表', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  try {
+    const plugin = apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-af2', autoConnect: true,
+      listArtifacts: async () => ({ ok: false, code: 'SESSION_UNREADABLE', message: '会话不可读' }),
+    })
+    await waitFor(() => plugin.state.connected, '已连接')
+    relay.send({
+      t: 'http/request', reqId: 'r-af2', method: 'POST',
+      endpoint: 'session/artifacts', body: { sessionId: 'gone' },
+    })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '错误响应')
+    const resp = framesOf(relay, 'http/response')[0]
+    assert.equal(resp.status, 404, 'SESSION_UNREADABLE 在 STATUS_BY_CODE 里映射成 404')
+    assert.equal(resp.body.error.code, 'SESSION_UNREADABLE')
+    assert.equal(resp.body.data, undefined, '失败时不许夹带一个空 rows 假装成功')
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})

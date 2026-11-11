@@ -134,4 +134,12 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /APPROVAL_GONE/, '先答先得：409 要按「已在电脑上处理」处理，不能报成失败')
   assert.match(page, /refreshApprovals/, '必须能拉全量待审批（推送会丢，拉取才不漏）')
   assert.match(page, /approvalsPulled/, '重连回来要补拉一次审批')
+
+  // W8 产物卡片：只搬元数据，且 [hidden] 同样要提权
+  assert.match(page, /id="artifacts"/, '必须有产物区')
+  assert.match(page, /#artifacts\[hidden\][\s\S]*?display:\s*none/, 'display:grid 会盖掉 [hidden]')
+  assert.match(page, /getArtifacts/, '必须能向 Host 拉产物索引')
+  assert.match(page, /deliverables\/presented/, '出现呈现事件时要刷新产物卡片')
+  assert.match(page, /textContent/, '路径来自宿主日志，必须用 textContent 渲染，不许当 HTML 执行')
+  assert.match(page, /sessionId !== activeSession/, '切走会话后旧响应不许盖上来')
 })
