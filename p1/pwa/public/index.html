@@ -229,6 +229,8 @@
     // 首屏只拉最近这么多条；更早的靠「加载更早」按需反向补读
     const EARLIER_WINDOW = 50
     let evBuf = new Map()      // seq -> ev（仅当前会话，供补读后整屏重绘）
+    // seq -> 'live' | 'replay'：重绘时不能把来源一起抹掉，否则「补齐」标记会变成谎言
+    let evOrigin = new Map()
     let windowStart = -1       // 屏幕最早一条的 seq；> 0 表示前面还有
     let showNoise = false      // 插件内部流量（plugin:*）默认隐藏，避免把首屏糊成 JSON
     let noiseHidden = 0        // 本轮渲染隐藏了几条，用来提示按钮
@@ -304,6 +306,7 @@
       if (!Number.isInteger(ev?.seq) || ev.seq <= last) return   // 幂等渲染
       seenSeq.set(sessionId, ev.seq)
       evBuf.set(ev.seq, ev)
+      evOrigin.set(ev.seq, source === 'replay' ? 'replay' : 'live')
       if (windowStart === -1 || ev.seq < windowStart) windowStart = ev.seq
       paint(ev, source)
       updateEarlier()
@@ -321,6 +324,8 @@
     const updateNoiseLabel = () => {
       const btn = $('noise')
       if (!btn) return
+      // 没有插件事件时不放按钮：空按钮比隐藏更吵
+      btn.hidden = !showNoise && noiseHidden === 0
       btn.classList.toggle('on', showNoise)
       btn.textContent = showNoise
         ? '隐藏插件事件'
@@ -332,7 +337,9 @@
       $('events').innerHTML = ''
       fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
       noiseHidden = 0
-      for (const seq of [...evBuf.keys()].sort((a, b) => a - b)) paint(evBuf.get(seq), 'replay')
+      for (const seq of [...evBuf.keys()].sort((a, b) => a - b)) {
+        paint(evBuf.get(seq), evOrigin.get(seq) ?? 'replay')
+      }
       updateEarlier()
       updateNoiseLabel()
     }
@@ -351,6 +358,8 @@
           if (!Number.isInteger(ev?.seq)) continue
           if (!evBuf.has(ev.seq)) added++
           evBuf.set(ev.seq, ev)
+          // 翻上来的都是补读，标 replay；已有的保持原来源
+          if (!evOrigin.has(ev.seq)) evOrigin.set(ev.seq, 'replay')
         }
         if (data.events?.length) windowStart = data.events[0].seq
         else windowStart = 0            // 前面没有了
@@ -570,6 +579,7 @@
       activeSession = sessionId
       seenSeq.set(sessionId, -1)
       evBuf = new Map()
+      evOrigin = new Map()
       windowStart = -1
       noiseHidden = 0
       artifactRows = []
@@ -615,6 +625,7 @@
       for (const k of ['wbsync.token', 'wbsync.deviceId', 'wbsync.base']) localStorage.removeItem(k)
       activeSession = null
       evBuf = new Map()
+      evOrigin = new Map()
       windowStart = -1
       artifactRows = []
       renderArtifacts()

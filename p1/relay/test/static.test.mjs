@@ -174,4 +174,9 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /shortType\(ev\)/, '摘要去掉 plugin: 前缀，保留可辨认的 translator/request')
   assert.match(page, /querySelector\('summary'\)/, '折叠行更新 summary（原始事件现在是 details 折叠）')
   assert.match(page, /createElement\('details'\)/, '原始事件默认折叠，别把 JSON 直接铺满屏')
+
+  // 重绘不能抹掉来源：切一次噪声开关，「· 补齐」就会变成所有行的标签
+  assert.match(page, /paint\(evBuf\.get\(seq\), evOrigin\.get\(seq\)/, '重绘必须按 seq 取回原来源，不能一律当 replay')
+  assert.match(page, /evOrigin\.set\(ev\.seq, source === 'replay'/, '收到事件时就要记来源，晚了就取不回来')
+  assert.match(page, /btn\.hidden = !showNoise && noiseHidden === 0/, '没有插件事件时不放按钮')
 })
