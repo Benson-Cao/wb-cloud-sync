@@ -82,3 +82,17 @@ export function turnEndReason(ev) {
   }
   return map[kind] ?? kind
 }
+
+/**
+ * 插件内部流量：`plugin:<name>/<event>`（例如 translator 的请求/结果往返）。
+ * 它们不是对话内容，却常常一条几十 KB——首屏最容易被这类事件糊满。
+ * 判定只看命名空间前缀，不猜插件语义：认不出就老老实实当内部流量。
+ */
+export const isPluginEvent = (ev) =>
+  typeof ev?.type === 'string' && ev.type.startsWith('plugin:')
+
+/** 给折叠行用的短标签：`plugin:translator/request` → `translator/request`。 */
+export const shortType = (ev) => {
+  const type = typeof ev?.type === 'string' ? ev.type : 'event'
+  return type.startsWith('plugin:') ? type.slice('plugin:'.length) : type
+}

@@ -76,3 +76,16 @@ test('T8 data.text 与 data.message.text 兜底；content 为空数组时继续�
   assert.equal(messageText({ type: 'assistant/message', data: { message: { text: '嵌套文本' } } }), '嵌套文本')
   assert.equal(messageText({ type: 'assistant/message', data: { message: { content: [] }, text: '兜底' } }), '兜底')
 })
+
+test('T9 plugin:* 属于插件内部流量；摘要去掉前缀但不改原始判定', async () => {
+  const { isPluginEvent, shortType } = await import('../src/transcript.js')
+  assert.equal(isPluginEvent({ type: 'plugin:translator/request' }), true)
+  assert.equal(isPluginEvent({ type: 'plugin:x' }), true)
+  assert.equal(isPluginEvent({ type: 'assistant/message' }), false)
+  assert.equal(isPluginEvent({ type: 'plugin' }), false, '没有冒号就不是命名空间事件')
+  assert.equal(isPluginEvent({}), false)
+  assert.equal(isPluginEvent(null), false)
+  assert.equal(shortType({ type: 'plugin:translator/request' }), 'translator/request')
+  assert.equal(shortType({ type: 'tool/result' }), 'tool/result')
+  assert.equal(shortType({}), 'event')
+})

@@ -65,6 +65,13 @@
     .divider { color: #6b7c92; font-size: 12px; text-align: center; margin: 10px 0; }
     #earlier { display: block; width: 100%; margin: 0 0 10px; background: #1b2431; border: 1px solid #3a4658; color: #9fb0c8; }
     #earlier[hidden] { display: none; }
+    .streambar { display: flex; gap: 8px; margin-bottom: 10px; }
+    .streambar button { flex: 1; background: #1b2431; border: 1px solid #3a4658; color: #9fb0c8; }
+    .streambar button[hidden] { display: none; }
+    .streambar button.on { border-color: #4da3ff; color: #cfe3ff; }
+    /* 不认识的原始事件默认折叠：首屏不该被 JSON 淹没，想看再点开 */
+    .ev > details > summary { cursor: pointer; color: #8ab8e8; }
+    .ev > details > pre { max-height: 260px; overflow: auto; }
     .hint { color: #777; font-size: 13px; padding: 16px 0; }
     #setup { padding: 12px 16px; background: #1d1d1d; border-bottom: 1px solid #2c2c2c;
              display: flex; gap: 8px; }
@@ -126,7 +133,10 @@
         <button id="send">发送</button>
       </div>
       <div id="artifacts" hidden></div>
-      <button id="earlier" hidden>加载更早</button>
+      <div class="streambar">
+        <button id="earlier" hidden>加载更早</button>
+        <button id="noise">显示插件事件</button>
+      </div>
       <div id="events"></div>
     </div>
   </main>
@@ -134,7 +144,7 @@
   <script type="module">
     import { createPwaClient } from '../src/client.js'
     import { pairWithRelay } from '../src/pairing.js'
-    import { classifyEvent, messageText } from '../src/transcript.js'
+    import { classifyEvent, isPluginEvent, messageText, shortType } from '../src/transcript.js'
 
     const $ = (id) => document.getElementById(id)
     let client = null
@@ -220,9 +230,12 @@
     const EARLIER_WINDOW = 50
     let evBuf = new Map()      // seq -> ev（仅当前会话，供补读后整屏重绘）
     let windowStart = -1       // 屏幕最早一条的 seq；> 0 表示前面还有
+    let showNoise = false      // 插件内部流量（plugin:*）默认隐藏，避免把首屏糊成 JSON
+    let noiseHidden = 0        // 本轮渲染隐藏了几条，用来提示按钮
     // 只画一条，不做去重/记账：重绘时也走它
     const paint = (ev, source) => {
       const type = ev?.type ?? ev?.t ?? 'event'
+      if (isPluginEvent(ev) && !showNoise) { noiseHidden++; return }
       // Host 会把超过软上限的事件降级成「元数据 + 正文前缀」，这里别把 marker 当正文铺开
       const truncated = ev?.data?.truncated === true
       const detail = truncated
@@ -262,17 +275,23 @@
         appended.textContent = `— 本轮${info.reason ?? '结束'} · seq ${ev.seq}${source === 'replay' ? ' · 补齐' : ''} —`
         fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
       } else {
+        // 不认识的事件：一行摘要 + 折叠的原始 JSON。首屏不该被 JSON 淹没。
+        const label = `${shortType(ev)}${source === 'replay' ? ' · 补齐' : ''}`
         if (fold.type === type && fold.div) {
           fold.to = ev.seq
           fold.count++
-          fold.div.querySelector('code').textContent = `#${fold.from}–#${fold.to} ${type} ×${fold.count}`
+          fold.div.querySelector('summary').textContent = `#${fold.from}–#${fold.to} ${label} ×${fold.count}`
           fold.pre.textContent = detail   // 折叠行始终显示最后一条的摘要
           return
         }
         appended.className = 'ev'
-        appended.innerHTML = `<code>#${ev.seq} ${type}${source === 'replay' ? ' · 补齐' : ''}</code><pre></pre>`
-        const pre = appended.querySelector('pre')
+        const box = document.createElement('details')
+        const sum = document.createElement('summary')
+        sum.textContent = `#${ev.seq} ${label}`
+        const pre = document.createElement('pre')
         pre.textContent = detail
+        box.appendChild(sum); box.appendChild(pre)
+        appended.appendChild(box)
         fold = { type, from: ev.seq, to: ev.seq, count: 1, div: appended, pre }
       }
       $('events').appendChild(appended)
@@ -288,6 +307,7 @@
       if (windowStart === -1 || ev.seq < windowStart) windowStart = ev.seq
       paint(ev, source)
       updateEarlier()
+      updateNoiseLabel()
     }
 
     /** 「加载更早」只在窗口起点 > 0 时出现；补到 0 就收起。 */
@@ -297,12 +317,24 @@
       btn.hidden = !(activeSession && windowStart > 0)
     }
 
+    /** 插件事件开关：只影响显示，不影响数据——事件一直在 evBuf 里，随时能翻出来。 */
+    const updateNoiseLabel = () => {
+      const btn = $('noise')
+      if (!btn) return
+      btn.classList.toggle('on', showNoise)
+      btn.textContent = showNoise
+        ? '隐藏插件事件'
+        : (noiseHidden ? `显示插件事件（已隐藏 ${noiseHidden} 条）` : '显示插件事件')
+    }
+
     /** 整屏重绘：补读到更早的事件后，按 seq 重排一次，比往 DOM 前面插更可靠。 */
     const rerender = () => {
       $('events').innerHTML = ''
       fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
+      noiseHidden = 0
       for (const seq of [...evBuf.keys()].sort((a, b) => a - b)) paint(evBuf.get(seq), 'replay')
       updateEarlier()
+      updateNoiseLabel()
     }
 
     /** 往上翻一页（50 条）。补读走 session/backfill，取的是紧邻窗口前面那一段。 */
@@ -539,6 +571,7 @@
       seenSeq.set(sessionId, -1)
       evBuf = new Map()
       windowStart = -1
+      noiseHidden = 0
       artifactRows = []
       renderArtifacts()
       // 切换会话必须清空折叠状态与旧事件，否则会跨会话合并、并残留上一个会话的内容
@@ -566,10 +599,12 @@
       client.follow(sessionId, { sinceSeq: after })
       void refreshArtifacts(sessionId)
       updateEarlier()
+      updateNoiseLabel()
       $('conn').textContent = connState(client.snapshot())
     }
 
     $('earlier').addEventListener('click', () => { void loadEarlier() })
+    $('noise').addEventListener('click', () => { showNoise = !showNoise; rerender() })
 
     $('save').addEventListener('click', () => { void connect() })
     // 忘掉这台电脑：清掉本机令牌与设备 ID，回到未配对状态（此前只能靠清浏览器数据）

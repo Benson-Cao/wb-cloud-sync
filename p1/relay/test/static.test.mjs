@@ -167,4 +167,11 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /client\.backfill\(/, '「加载更早」必须走反向补读，不能拿 follow 硬拉')
   assert.match(page, /const rerender = /, '补到更早事件后要按 seq 整体重绘，避免 DOM 前插乱序')
   assert.match(page, /client\.openWindow\(/, '首屏窗口交给 Host 按字节裁，客户端不再数 50 条')
+
+  // 插件内部流量（plugin:*）默认不糊首屏：真机截图里 translator 往返把整屏占满
+  assert.match(page, /isPluginEvent\(ev\)/, 'plugin:* 要判定成内部流量')
+  assert.match(page, /id="noise"/, '要有「显示插件事件」开关——隐藏不等于丢弃')
+  assert.match(page, /shortType\(ev\)/, '摘要去掉 plugin: 前缀，保留可辨认的 translator/request')
+  assert.match(page, /querySelector\('summary'\)/, '折叠行更新 summary（原始事件现在是 details 折叠）')
+  assert.match(page, /createElement\('details'\)/, '原始事件默认折叠，别把 JSON 直接铺满屏')
 })
