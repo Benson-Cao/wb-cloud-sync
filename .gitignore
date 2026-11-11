@@ -11,3 +11,8 @@ node_modules/
 # 例外：预打好的可安装 tarball 需要随仓库分发
 !dist/
 !dist/*.tgz
+
+# CP 落盘文件（默认在 ~/.wbsync/，但允许 WBSYNC_CP_FILE 指到仓库里）
+.data/
+*.cp.json
+cp.json.corrupt-*

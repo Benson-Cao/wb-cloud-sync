@@ -11,6 +11,7 @@ pnpm --dir p1/relay test                # 或 node --test p1/relay/test/*.test.m
 
 # 真机联调：启动 Relay（监听 0.0.0.0，控制台打印所有可用的局域网地址）
 node p1/relay/run.mjs                    # PORT=8787；WBSYNC_HOST_TOKEN / WBSYNC_ADMIN_TOKEN 可选
+                                         # CP 落盘默认 ~/.wbsync/cp.json（WBSYNC_CP_FILE 可改；:memory: 关闭）
 # 手机浏览器打开打印出的 http://<局域网IP>:<PORT>/app 即壳页面
 ```
 

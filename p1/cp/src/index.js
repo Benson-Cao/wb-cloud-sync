@@ -3,8 +3,11 @@
  * ---------------------------------------------------------------
  * 为什么要有这一层：Relay 原本把设备表、会话索引、消费位点全揣在进程内存里，
  * 于是「重启即失忆」「多实例各自为政」。协议 §2 把这几张表定义在 CP（Postgres）上，
- * Relay 只做转发。本文件是**单机开发期的内存实现**，接口按 Postgres 表 1:1 设计，
- * P2 换成真库时替换实现、不动调用方。
+ * Relay 只做转发。本文件是**单机期的实现**：内存表 + 可选的文件落盘（`persist.js`），
+ * 接口按 Postgres 表 1:1 设计，P2 换成真库时替换实现、不动调用方。
+ *
+ * 落盘只覆盖**设备与会话索引**（重启后配对不掉是硬需求）；租约与位点故意仍在内存里，
+ * 理由见 `persist.js` 与协议 §2 的说明。
  *
  * 四张表（字段与 PROTOCOL.md §2 一致）：
  *   Device       设备注册表（令牌只存 SHA-256 摘要、吊销用墓碑防复活）
@@ -24,6 +27,8 @@ export const LEASE_TTL_MS = 30_000
 export const DEVICE_OFFLINE_MS = 45_000
 /** 一台 Host 最多绑定几台手机（r9）。上限的意义不是容量而是收敛：列表页要能一眼看完。 */
 export const MAX_PHONES_PER_HOST = 8
+/** 墓碑保留多久（与 docs/10 运维口径一致：30 天前已吊销的设备加载时清理）。 */
+export const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000
 export const SESSION_STATES = ['running', 'awaiting', 'completed', 'stopped', 'failed', 'unreadable']
 
 export class ControlPlaneError extends Error {
@@ -57,12 +62,95 @@ export function createControlPlane({
   leaseTtlMs = LEASE_TTL_MS,
   offlineAfterMs = DEVICE_OFFLINE_MS,
   maxPhonesPerHost = MAX_PHONES_PER_HOST,
+  tombstoneTtlMs = TOMBSTONE_TTL_MS,
   newId = () => randomUUID(),
+  // 可选落盘：传 createFileStore(...) 的结果即可。不传 = 纯内存（测试 / 单机试跑）
+  persist = null,
 } = {}) {
   const devices = new Map()     // deviceId -> Device（Host 与手机各占一行，用 role 区分）
   const sessions = new Map()    // sessionId -> SessionIndex
   const leases = new Map()      // sessionId -> RouteLease
   const cursors = new Map()     // `${clientId}|${sessionId}` -> Cursor
+
+  /* ------------------------------------------------------------ 落盘 */
+
+  /**
+   * 只存**事实**：设备（含令牌摘要）与会话索引。
+   * 租约（TTL 30s）与消费位点（客户端 sinceSeq 才是权威，协议 #5b）故意不存 ——
+   * 把它们写进磁盘只会制造「服务端记录比手机更权威」的错觉。
+   */
+  const snapshot = () => ({
+    devices: [...devices.values()].map(cloneDevice),
+    sessions: [...sessions.values()].map(cloneSession),
+  })
+
+  /** 每次改了事实就排一次写；去抖在 store 里做，这里不管频率。 */
+  const touch = () => { persist?.save?.(snapshot) }
+
+  /**
+   * 从快照恢复。三条判断都写死在这儿，免得以后「顺手放宽」：
+   *   1. **一律按离线起身**——重启那一刻谁也不在线，`lastSeenAt` 落在 45s 窗口内
+   *      也不该报 online，否则手机会在电脑其实没连的情况下拿到「在线」。
+   *   2. 墓碑只留 30 天。久到没人记得的设备留着只会让 `listDevices` 越来越长。
+   *   3. 会话与手机的归属设备不存在（或已吊销）就丢掉，不留幽灵行。
+   */
+  const hydrate = (snap) => {
+    const result = { devices: 0, sessions: 0, droppedDevices: 0, droppedSessions: 0 }
+    if (!snap || typeof snap !== 'object') return result
+    const t = now()
+    for (const raw of Array.isArray(snap.devices) ? snap.devices : []) {
+      const id = typeof raw?.deviceId === 'string' ? raw.deviceId : null
+      if (!id) continue
+      const tombstone = raw.tombstone === true
+      if (tombstone && t - num(raw.lastSeenAt, 0) > tombstoneTtlMs) { result.droppedDevices++; continue }
+      devices.set(id, {
+        deviceId: id,
+        role: raw.role === 'phone' ? 'phone' : 'host',
+        boundHostId: typeof raw.boundHostId === 'string' ? raw.boundHostId : null,
+        accountId: raw.accountId ?? null,
+        deviceName: raw.deviceName ?? null,
+        platform: raw.platform ?? null,
+        capabilities: Array.isArray(raw.capabilities) ? [...raw.capabilities] : [],
+        tokenDigest: typeof raw.tokenDigest === 'string' ? raw.tokenDigest : null,
+        allowMobile: raw.allowMobile !== false,
+        state: 'offline',
+        lastSeenAt: num(raw.lastSeenAt, t),
+        tombstone,
+      })
+      result.devices++
+    }
+    // 宿主没了/被吊销，它名下的手机也跟着作废：光留一行手机，鉴权时又会被 Host 检查挡回去
+    for (const [id, row] of devices) {
+      if (row.role !== 'phone') continue
+      const host = devices.get(row.boundHostId)
+      if (host && !host.tombstone) continue
+      devices.delete(id)
+      result.droppedDevices++
+    }
+    for (const raw of Array.isArray(snap.sessions) ? snap.sessions : []) {
+      const id = typeof raw?.sessionId === 'string' ? raw.sessionId : null
+      const owner = typeof raw?.ownerDeviceId === 'string' ? raw.ownerDeviceId : null
+      if (!id || !owner) continue
+      const host = devices.get(owner)
+      if (!host || host.tombstone) { result.droppedSessions++; continue }
+      sessions.set(id, {
+        sessionId: id,
+        accountId: raw.accountId ?? null,
+        ownerDeviceId: owner,
+        workspace: raw.workspace ?? null,
+        title: raw.title ?? null,
+        pinned: raw.pinned === true,
+        pinnedOrder: num(raw.pinnedOrder, 0) ?? 0,
+        state: SESSION_STATES.includes(raw.state) ? raw.state : 'stopped',
+        lastSeq: num(raw.lastSeq),
+        lastActiveAt: num(raw.lastActiveAt),
+        headerRef: raw.headerRef ? { ...raw.headerRef } : null,
+        updatedAt: num(raw.updatedAt, t),
+      })
+      result.sessions++
+    }
+    return result
+  }
 
   /* ------------------------------------------------------------ Device */
 
@@ -91,6 +179,7 @@ export function createControlPlane({
       tombstone: false,
     }
     devices.set(deviceId, row)
+    touch()
     return cloneDevice(row)
   }
 
@@ -99,6 +188,7 @@ export function createControlPlane({
     const row = devices.get(deviceId)
     if (!row || row.tombstone) throw new ControlPlaneError('UNAUTHORIZED', '设备不存在或已吊销')
     row.tokenDigest = sha256Hex(deviceToken)
+    touch()
     return cloneDevice(row)
   }
 
@@ -158,6 +248,7 @@ export function createControlPlane({
       tombstone: false,
     }
     devices.set(phoneId, row)
+    touch()
     return cloneDevice(row)
   }
 
@@ -168,6 +259,7 @@ export function createControlPlane({
       throw new ControlPlaneError('UNAUTHORIZED', '手机不存在或已吊销')
     }
     row.tokenDigest = sha256Hex(deviceToken)
+    touch()
     return cloneDevice(row)
   }
 
@@ -203,6 +295,7 @@ export function createControlPlane({
     row.tombstone = true
     row.tokenDigest = null
     row.state = 'offline'
+    touch()
     return cloneDevice(row)
   }
 
@@ -240,6 +333,7 @@ export function createControlPlane({
     // 吊销设备时把它名下的会话与租约一并清掉，避免手机端看见幽灵会话
     for (const [id, s] of sessions) if (s.ownerDeviceId === deviceId) sessions.delete(id)
     for (const [id, l] of leases) if (l.deviceId === deviceId) leases.delete(id)
+    touch()
     return cloneDevice(row)
   }
 
@@ -279,6 +373,7 @@ export function createControlPlane({
       headerRef: raw.headerRef ? { ...raw.headerRef } : null,
       updatedAt: now(),
     })
+    touch()
     return { upserted: 1, removed: 0 }
   }
 
@@ -299,6 +394,7 @@ export function createControlPlane({
       const row = sessions.get(id)
       if (row && row.ownerDeviceId === ownerDeviceId) { sessions.delete(id); removed++ }
     }
+    if (removed) touch()          // 只删不改时 putSession 没被调到，这里补一次
     return { upserted, removed }
   }
 
@@ -322,6 +418,7 @@ export function createControlPlane({
         removed++
       }
     }
+    if (removed) touch()
     return { upserted, removed }
   }
 
@@ -346,6 +443,7 @@ export function createControlPlane({
     if (patch.title !== undefined) row.title = patch.title
     if (SESSION_STATES.includes(patch.state)) row.state = patch.state
     row.updatedAt = now()
+    touch()
     return cloneSession(row)
   }
 
@@ -439,6 +537,12 @@ export function createControlPlane({
     cursors: cursors.size,
   })
 
+  /**
+   * 建好之后立刻从磁盘恢复一次：这一步之后，`verifyClientToken` 就能认出上一进程
+   * 发出去的令牌，手机不必因为运维重启而重新配对。
+   */
+  const restored = persist ? hydrate(persist.load?.() ?? null) : null
+
   return {
     // device
     getDevice, upsertDevice, setDeviceToken, verifyDeviceToken, heartbeatDevice,
@@ -452,6 +556,11 @@ export function createControlPlane({
     // cursor
     putCursor, getCursor, listCursors,
     stats,
+    // 落盘（有 persist 才有意义；没有也返回安全的空实现）
+    snapshot,
+    hydrate,
+    restoredSnapshot: restored,
+    flush: () => (persist?.flush ? persist.flush() : true),
     config: { leaseTtlMs, offlineAfterMs },
   }
 }
