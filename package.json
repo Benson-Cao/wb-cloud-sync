@@ -29,6 +29,9 @@
     }
   },
   "scripts": {
-    "verify": "node spike/check-plugin.mjs && node spike/probe-host.mjs"
+    "verify": "node spike/check-plugin.mjs && node spike/probe-host.mjs",
+    "test": "node --test p1/cp/test/*.test.mjs p1/relay/test/*.test.mjs p1/host-plugin/test/*.test.mjs p1/pwa/test/*.test.mjs",
+    "beta-check": "node scripts/beta-check.mjs",
+    "gate": "node scripts/gate-check.mjs --check"
   }
 }
