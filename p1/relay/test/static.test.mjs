@@ -153,4 +153,11 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /classifyEvent\(ev\)/, '渲染要按归类走，而不是一律铺 JSON')
   assert.match(page, /createElement\('details'\)/, '工具结果要折叠，不能把整段输出铺在流里')
   assert.match(page, /body\.textContent = messageText\(ev\)/, '消息正文必须用 textContent，杜绝 HTML 注入')
+
+  // 会话列表（真机 2026-11-11 截图取证）：标题回退 + 徽章不被顶出屏幕
+  assert.match(page, /\.row > div \{ min-width: 0/, '内层不设 min-width:0 时，长标题会把状态徽章顶出屏幕')
+  assert.match(page, /\.badge \{[\s\S]*?white-space: nowrap/, '徽章文案不许换行/截断')
+  assert.match(page, /workspaceName\(r\.workspace\)/, '没有标题时回退工作区目录名，而不是一串 session-id')
+  assert.match(page, /title\.textContent = r\.title/, '标题走 textContent（工作区路径来自 Host，不能当 HTML）')
+  assert.match(page, /STATE_LABEL\[r\.state\]/, '状态要映射中文，不直接暴露 stopped/failed 内部值')
 })

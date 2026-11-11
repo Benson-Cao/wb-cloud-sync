@@ -4,6 +4,28 @@
 
 ---
 
+## [P1 W4 / PWA] · 2026-11-11 20:0x · 修「打开老会话白屏」+ 列表标题/徽章
+
+真机截图暴露三个问题，其中一个是功能性的。
+
+**① 打开老会话一片空白**（`9a4c6770…`，seq 256，界面什么都没有）。根因不在 Host，在**补齐的触发条件**：
+
+- Relay 重启后事件缓冲为空，`subscribe()` 走 else 分支，发 `{ fromSeq:-1, toSeq:-1, complete:true }`；
+- 客户端只在 `complete === false`（检测到缺口）时才去 Host 补；
+- 于是「Relay 没有 + 客户端不去问」= 白屏。而 Host 日志里明明有 256 条。
+
+`complete:true` 的真实含义是「**从我这儿看，你的位置往后没有缺口**」，不是「这段历史不存在」。修法：客户端在 `complete === true && toSeq === -1 && lastSeq === -1` 时主动去 Host 补一次，并用 `bootstrapped` 标记只补一次（补齐后会重新订阅，不设限会来回循环）。空会话也只补一次就停（D2 钉住）。
+
+**② 列表标题是一串 `session-xxxx`**：索引里 `title` 常为 null。改为「title → 工作区目录名 → 短 id」三级回退，副行给短 id + seq + 时间。
+
+**③ 状态徽章被顶出屏幕**（截图右侧 `stopp…` 被裁）：`.row` 是 flex，内层 div 没有 `min-width:0`，长标题把徽章挤出去。补 `min-width:0` + 徽章 `white-space:nowrap`，并把 `stopped/failed/awaiting/running` 映射成中文＋配色。
+
+- 列表渲染从 `innerHTML` 拼接改成 DOM API + `textContent`——工作区路径来自 Host，不能当 HTML。
+- 测试 249 → **251**（D1 缓冲空仍能补出历史 / D2 空会话只补一次）；静态断言补 5 条（含 `min-width:0` 与标题回退）。SW 升 `wbsync-shell-v16`。
+- 纯 PWA 改动，手机下拉刷新即可，不需要重启 DSH / Relay。
+
+---
+
 ## [P1 W4 / PWA] · 2026-11-11 19:4x · 事件流从「一坨 JSON」变成能读的对话
 
 之前在手机上看会话，看到的是 `<pre>{"type":"assistant/message","data":{...}}</pre>`——技术上没错，但拿它当遥控器读对话是不可能的。

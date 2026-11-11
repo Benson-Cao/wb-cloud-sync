@@ -34,9 +34,15 @@
       margin-bottom: 8px; background: #1a1a1a; cursor: pointer;
     }
     .row.active { border-color: #4da3ff; }
+    /* 内容区必须能收缩：内层 div 不设 min-width:0 时，长标题会把右侧状态徽章顶出屏幕 */
+    .row > div { min-width: 0; flex: 1 1 auto; }
     .row .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .row .meta { font-size: 12px; color: #9a9a9a; }
-    .badge { font-size: 12px; border-radius: 6px; padding: 2px 8px; background: #262626; color: #bbb; flex: none; }
+    .row .meta { font-size: 12px; color: #9a9a9a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge { font-size: 12px; border-radius: 6px; padding: 2px 8px; background: #262626; color: #bbb; flex: none; white-space: nowrap; }
+    .badge.running { background: #1f3a2b; color: #7fd18c; }
+    .badge.awaiting { background: #3d3320; color: #d9a03a; }
+    .badge.failed { background: #3d2323; color: #e07a7a; }
+    .badge.stopped { background: #262626; color: #9a9a9a; }
     .badge.running { background: #1d3a25; color: #7fd18c; }
     .badge.awaiting { background: #3a341d; color: #e0c67a; }
     .badge.failed { background: #3a1d1d; color: #e07a7a; }
@@ -160,6 +166,20 @@
       return `${f.sessionId.slice(0, 18)}… · ${STATUS_TEXT[f.status] ?? f.status} · ${seq}`
     }
 
+    // 会话列表用到的映射与小工具（徽章文案、短 id、工作区目录名）
+    const STATE_LABEL = {
+      running: '运行中', awaiting: '等待输入', stopped: '已停止',
+      failed: '失败', completed: '已完成', unreadable: '不可读',
+    }
+    const shortId = (id) => String(id ?? '').replace(/^session-/, '').slice(0, 8)
+    const workspaceName = (p) => {
+      if (typeof p !== 'string' || !p.trim()) return null
+      const clean = p.replace(/[\\/]+$/, '')
+      const at = Math.max(clean.lastIndexOf('\\'), clean.lastIndexOf('/'))
+      const tail = at === -1 ? clean : clean.slice(at + 1)
+      return tail || null
+    }
+
     const renderList = (rows) => {
       const box = $('list')
       box.classList.remove('hint')
@@ -168,10 +188,24 @@
       for (const r of rows) {
         const div = document.createElement('div')
         div.className = 'row' + (r.sessionId === activeSession ? ' active' : '')
-        div.innerHTML = `
-          <div><div class="title">${r.title ?? r.sessionId}</div>
-          <div class="meta">seq ${r.lastSeq ?? '?'} · ${r.lastActiveAt ? new Date(r.lastActiveAt).toLocaleString() : '—'}</div></div>
-          <span class="badge ${r.state ?? ''}">${r.state ?? 'unknown'}</span>`
+
+        const left = document.createElement('div')
+        const title = document.createElement('div')
+        title.className = 'title'
+        // 索引里 title 常常是 null（宿主还没生成标题）。退回工作区目录名，比一串 session-xxx 好认；
+        // 都拿不到才用短 id。全部 textContent——工作区路径来自 Host，不能当 HTML 拼。
+        title.textContent = r.title || workspaceName(r.workspace) || shortId(r.sessionId)
+        const meta = document.createElement('div')
+        meta.className = 'meta'
+        const when = r.lastActiveAt ? new Date(r.lastActiveAt).toLocaleString() : '—'
+        meta.textContent = `${shortId(r.sessionId)} · seq ${r.lastSeq ?? '?'} · ${when}`
+        left.appendChild(title); left.appendChild(meta)
+
+        const badge = document.createElement('span')
+        badge.className = `badge ${r.state ?? ''}`
+        badge.textContent = STATE_LABEL[r.state] ?? (r.state ?? '未知')
+
+        div.appendChild(left); div.appendChild(badge)
         div.addEventListener('click', () => openStream(r.sessionId))
         box.appendChild(div)
       }

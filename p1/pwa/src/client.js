@@ -253,6 +253,14 @@ export function createPwaClient({
       }
       if (msg.t === 'session/replay') {
         notify({ type: 'replay', sessionId: rec.sessionId, fromSeq: msg.fromSeq, toSeq: msg.toSeq, complete: msg.complete })
+        // Relay 缓冲里一条都没有（刚重启过就是这样）：complete:true 只说明「从你的位置往后
+        // 没有缺口」，不等于「这段历史不存在」。必须去 Host 日志补一次——否则打开老会话是白屏，
+        // 而 Host 明明有几百条事件。只补一次：补齐后会重新订阅，不设限会来回循环。
+        if (msg.complete === true && msg.toSeq === -1 && rec.lastSeq === -1 && !rec.bootstrapped) {
+          rec.bootstrapped = true
+          void refill(rec)
+          return
+        }
         if (msg.complete === false && rec.status !== 'gap') {
           rec.status = 'gap'
           rec.expectedSeq = msg.toSeq + 1
@@ -302,6 +310,8 @@ export function createPwaClient({
       ws: null,
       closing: false,
       refilling: false,
+      // 已经为「打开时 Relay 缓冲为空」去 Host 补过一次；只补一次，避免补齐后重订阅再触发
+      bootstrapped: false,
       reconnectTimer: null,
       nextAttemptAt: null,
     }

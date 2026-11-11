@@ -380,3 +380,60 @@ test('C2 Host 说 hasMore 但一页都没推进：立刻停，不打满 200 次�
   assert.equal(notices.filter((n) => n.type === 'refill-failed').at(-1).reason, 'NO_PROGRESS')
   client.stop()
 })
+
+/* ------------------------------------------- 真机 2026-11-11：打开老会话白屏 */
+
+test('D1 打开老会话时 Relay 缓冲为空：自动去 Host 补历史，而不是白屏', async () => {
+  const token = await pair('pc-open')
+  let calls = 0
+  const host = await registerHost('pc-open', {
+    replayHandler: async ({ sessionId }) => {
+      calls++
+      const events = [0, 1, 2].map((i) => ({ seq: i, type: 'assistant/message', data: { text: `第${i}条` } }))
+      return {
+        ok: true, data: {
+          sessionId, events, count: events.length,
+          fromSeq: 0, toSeq: 2, complete: true, hasMore: false,
+        },
+      }
+    },
+  })
+  void host   // 故意不发任何 session/event：Relay 缓冲为空，正是重启后的真实状态
+
+  const got = []
+  const client = createPwaClient({
+    baseUrl: base, deviceId: 'pc-open', token, reconnectBaseMs: 40,
+    onEvent: ({ ev, source }) => got.push({ seq: ev.seq, source }),
+  })
+  client.follow('s-open', { sinceSeq: -1 })
+  await waitFor(() => got.length >= 3, 4000, '从 Host 补出 3 条历史')
+  assert.deepEqual(got.map((g) => g.seq), [0, 1, 2])
+  assert.equal(got[0].source, 'replay')
+  assert.equal(calls, 1, '只补一次：补齐后重订阅不该再触发')
+  client.stop()
+})
+
+test('D2 Host 也没有历史：补一次就停，不卡在补齐循环里', async () => {
+  const token = await pair('pc-empty')
+  let calls = 0
+  const host = await registerHost('pc-empty', {
+    replayHandler: async ({ sessionId, sinceSeq }) => {
+      calls++
+      return {
+        ok: true, data: {
+          sessionId, events: [], count: 0, fromSeq: null, toSeq: sinceSeq,
+          complete: true, hasMore: false,
+        },
+      }
+    },
+  })
+  void host
+  const client = createPwaClient({ baseUrl: base, deviceId: 'pc-empty', token, reconnectBaseMs: 40 })
+  client.follow('s-empty', { sinceSeq: -1 })
+  await wait(700)
+  assert.ok(calls <= 1, `空会话只应补一次，实际 ${calls} 次`)
+  const snap = client.snapshot().follows[0]
+  assert.equal(snap.status, 'following')
+  assert.equal(snap.lastSeq, -1, '没有事件就别假装有')
+  client.stop()
+})
