@@ -222,8 +222,11 @@ export function createControlPlane({
     }
     const prev = devices.get(phoneId)
     if (prev) {
-      if (prev.tombstone) throw new ControlPlaneError('UNAUTHORIZED', '该手机已被吊销')
-      // 同一个 phoneId 不能改挂到别的 Host——否则拿着旧身份就能蹭进另一台电脑
+      // **墓碑不是黑名单**：收回手机挡的是「拿着旧令牌自己连回来」，不是「主人重新接纳它」。
+      // 配对码是 PC 主人在设备上亲手生成的授权动作，拿合法码回来就该允许重新配对；
+      // 令牌在收回时已被清空，重配只会拿到新令牌，旧令牌依旧不可用。
+      // （Host 那条路不同：`host/register` 不带任何人工动作，所以那边仍然拒绝墓碑复活。）
+      // 同一个 phoneId 也不能改挂到别的 Host——否则拿着旧身份就能蹭进另一台电脑。
       if (prev.role !== 'phone' || prev.boundHostId !== hostId) {
         throw new ControlPlaneError('UNAUTHORIZED', '设备身份与绑定关系不一致')
       }

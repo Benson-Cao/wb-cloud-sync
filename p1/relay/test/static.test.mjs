@@ -190,4 +190,8 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /activeSession && activeSession !== sessionId\) saveScroll/, '切走前先存位置，DOM 一清就只剩 0')
   assert.match(page, /id="back"/, '要有「← 列表」返回条')
   assert.match(page, /const backToList = /, '返回列表要记住位置并保留选中行')
+
+  // 配对码一次性：连点两下会把码白白吃掉，第二次只会看到误导性的「码已过期」
+  assert.match(page, /if \(pairing\) return/, '配对中要挡住连点')
+  assert.match(page, /\$\('save'\)\.disabled = true/, '配对期间按钮要置灰，否则用户会以为没反应再点一次')
 })

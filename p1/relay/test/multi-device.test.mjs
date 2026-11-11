@@ -181,3 +181,24 @@ test('M5 同一台手机重配：旧令牌作废，重配不新增一台手机',
   assert.equal(relay.cp.listPhones(host).length, 1, '重配不新增一台手机')
   assert.equal(again.json.data.protocol, PROTOCOL)
 })
+
+test('M6 收回之后，同一台手机拿新配对码可以回来（墓碑不是永久黑名单）', async () => {
+  const host = 'pc-multi-6'
+  const phoneId = 'phone-revive01'
+  const first = await pair(host, phoneId, 'Pixel')
+  await hostOnline(host)
+  assert.equal((await call(`/api/sessions?deviceId=${host}`, { token: first.json.data.deviceToken })).status, 200)
+
+  await call('/admin/revoke-client', { method: 'POST', token: ADMIN, body: { deviceId: host, clientId: phoneId } })
+  assert.equal((await call(`/api/sessions?deviceId=${host}`, { token: first.json.data.deviceToken })).status, 401,
+    '收回后旧令牌立刻失效')
+
+  // 真机踩过的坑：手机本地还留着这个 phoneId，被收回后**再也配不回去**，
+  // 界面上还只显示「配对码错误或过期」（第二次点，码已被第一次消费）
+  const again = await pair(host, phoneId, 'Pixel')
+  assert.equal(again.status, 200, `收回后应允许重新配对：${again.text}`)
+  assert.equal(relay.cp.listPhones(host).length, 1, '重配不新增一台手机')
+  assert.equal((await call(`/api/sessions?deviceId=${host}`, { token: again.json.data.deviceToken })).status, 200)
+  assert.equal((await call(`/api/sessions?deviceId=${host}`, { token: first.json.data.deviceToken })).status, 401,
+    '新令牌发出后，旧令牌依然无效')
+})

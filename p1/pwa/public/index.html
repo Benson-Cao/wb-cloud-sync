@@ -528,6 +528,7 @@
     }
 
     /** 有码走配对，没码用已存令牌直连（刷新 / 回访场景）。 */
+    let pairing = false
     const connect = async () => {
       const base = $('relayBase').value.trim().replace(/\/$/, '')
       const code = $('pairCode').value.trim()
@@ -535,6 +536,11 @@
       let token = localStorage.getItem('wbsync.token')
       let deviceId = localStorage.getItem('wbsync.deviceId')
       if (code) {
+        // 连点两下会把码白白吃掉：/pair 一消费就作废，第二次必然报「码错误或过期」，
+        // 而真正的原因（第一次已经用掉了）根本看不出来。
+        if (pairing) return
+        pairing = true
+        $('save').disabled = true
         say('配对中…')
         try {
           // phoneId 是「本机身份」：带上它重配只轮换自己那枚令牌，不会占掉第二台手机的名额
@@ -558,6 +564,9 @@
           // 配对码是一次性的：/pair 成功即消费，输错码要回 PC 重新生成
           say(`配对失败：${e.message}（配对码一次性，请回 PC 重新生成）`, true)
           return
+        } finally {
+          pairing = false
+          $('save').disabled = false
         }
       }
       if (!token || !deviceId) { say('输入 PC 端生成的 6 位配对码完成配对。', true); return }

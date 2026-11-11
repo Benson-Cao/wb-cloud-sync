@@ -378,8 +378,14 @@ test('吊销单台手机不影响 Host 与另一台；吊销 Host 连坐名下�
   assert.equal(cp.verifyClientToken('pc-1', 'tok-b').ok, true)
   assert.equal(cp.getDevice('pc-1').tombstone, false, 'Host 不受影响')
   assert.deepEqual(cp.listPhones('pc-1').map((p) => p.deviceId), ['ph-b'])
-  // 被吊销的手机拿着自己的身份重配也不许复活（墓碑），此时 Host 仍活着
-  assert.throws(() => cp.upsertPhone({ phoneId: 'ph-a', hostId: 'pc-1' }), (e) => e.code === 'UNAUTHORIZED')
+  // 收回的手机拿着自己的身份回来**重新配对**是允许的（配对码是人工授权），
+  // 但重配之前旧令牌一定是失效的——墓碑挡的是令牌复活，不是人
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-a').ok, false, '收回后旧令牌已失效')
+  assert.equal(cp.upsertPhone({ phoneId: 'ph-a', hostId: 'pc-1' }).tombstone, false, '允许重新配对')
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-a').ok, false, '没发新令牌之前，旧令牌仍然无效')
+  cp.setPhoneToken('ph-a', 'tok-a2')
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-a2').ok, true, '重新配对拿到的令牌可用')
+  cp.revokePhone('ph-a')   // 复原，后面还要验 Host 连坐
 
   cp.revokeDevice('pc-1')
   assert.equal(cp.verifyClientToken('pc-1', 'tok-b').ok, false, 'Host 被吊销，手机令牌同时失效')
