@@ -534,13 +534,11 @@
     }
 
     const openStream = async (sessionId) => {
+      if (!client) return
       activeSession = sessionId
       seenSeq.set(sessionId, -1)
       evBuf = new Map()
-      // 首屏窗口：索引里有 lastSeq 就只拉最近 50 条，否则退回全量（老会话不认识 lastSeq 时）
-      const meta = client?.getSession?.(sessionId) ?? null
-      const known = Number.isInteger(meta?.lastSeq) ? meta.lastSeq : -1
-      windowStart = known > EARLIER_WINDOW ? known - EARLIER_WINDOW : -1
+      windowStart = -1
       artifactRows = []
       renderArtifacts()
       // 切换会话必须清空折叠状态与旧事件，否则会跨会话合并、并残留上一个会话的内容
@@ -549,8 +547,23 @@
       $('stream').hidden = false
       $('streamTitle').textContent = `事件流 · ${sessionId}`
       for (const el of document.querySelectorAll('.row')) el.classList.remove('active')
-      // sinceSeq = 窗口起点：Relay 缓冲里若有，会直接补这个小窗口；没有则触发一次引导补齐
-      client.follow(sessionId, { sinceSeq: windowStart })
+
+      // 首屏窗口交给 Host 按**字节预算**裁（最近一页），不再由客户端数 50 条：
+      // 固定条数管不住体积，50 条大事件能有 2 MB。拿不到 lastSeq 才退回条数窗口。
+      const meta = client.getSession?.(sessionId) ?? null
+      const known = Number.isInteger(meta?.lastSeq) ? meta.lastSeq : -1
+      let after = -1
+      let win = null
+      try { win = await client.openWindow({ sessionId, lastSeq: known }) } catch { win = null }
+      if (win?.events?.length) {
+        for (const ev of win.events) renderEvent(sessionId, ev, 'replay')
+        after = win.toSeq
+      } else {
+        windowStart = known > EARLIER_WINDOW ? known - EARLIER_WINDOW : -1
+        after = windowStart
+      }
+      // 从这里往后接实时流：窗口内的已经画过，不重复
+      client.follow(sessionId, { sinceSeq: after })
       void refreshArtifacts(sessionId)
       updateEarlier()
       $('conn').textContent = connState(client.snapshot())

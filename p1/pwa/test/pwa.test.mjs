@@ -467,3 +467,31 @@ test('D3 旧 Host 不认 session/backfill：退回 follow 取一页，不把「�
   assert.equal(calls.filter((c) => c === 'backfill').length, 1)
   assert.equal(calls.filter((c) => c === 'follow').length, 1)
 })
+
+test('D4 openWindow：按 lastSeq 反向开窗；不知道 lastSeq 就返回 null 让调用方退回全量', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    const body = init?.body ? JSON.parse(init.body) : null
+    calls.push({ tail: String(url).split('/').pop(), body })
+    return {
+      ok: true, status: 200,
+      json: async () => ({
+        ok: true,
+        data: {
+          events: [{ seq: 9, data: {} }, { seq: 10, data: {} }],
+          fromSeq: 9, toSeq: 10, hasMoreEarlier: true, bytes: 64,
+        },
+      }),
+    }
+  }
+  const client = createPwaClient({ baseUrl: 'http://x', deviceId: 'd', token: 't', fetchImpl })
+  const win = await client.openWindow({ sessionId: 's', lastSeq: 10 })
+  assert.equal(win.toSeq, 10)
+  assert.equal(win.hasMoreEarlier, true)
+  assert.equal(calls[0].tail, 'backfill')
+  assert.equal(calls[0].body.beforeSeq, 11, 'beforeSeq = lastSeq + 1，含最后一条')
+  assert.equal(calls[0].body.limit, 200, '条数上限只是保险，体积由 Host 按字节裁')
+
+  const none = await client.openWindow({ sessionId: 's', lastSeq: -1 })
+  assert.equal(none, null, '不知道 lastSeq 时不猜，交给 follow(-1)')
+})

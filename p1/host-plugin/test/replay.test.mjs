@@ -328,8 +328,9 @@ test('BF4 超字节预算时砍更早的、留下紧邻窗口的那几条', asyn
   const events = Array.from({ length: 20 }, (_, i) => ({ seq: i, data: { text: 'x'.repeat(10_000) } }))
   const backfill = createBackfillReader({ openSession: async () => makeHandle(events), maxBytes: 48 * 1024 })
   const r = await backfill({ sessionId: 's', beforeSeq: 20, limit: 20 })
-  assert.ok(r.value.events.length > 0 && r.value.events.length < 20, `实际 ${r.value.events.length}`)
-  assert.ok(r.value.bytes <= 48 * 1024)
+  // 有 8 条下限：允许超预算，但不能把 20 条全给出来，也不能超过 4× 预算
+  assert.ok(r.value.events.length >= 8 && r.value.events.length < 20, `实际 ${r.value.events.length}`)
+  assert.ok(r.value.bytes <= 48 * 1024 * 4, `实际 ${r.value.bytes}B`)
   assert.equal(r.value.events.at(-1).seq, 19, '最后一条必须紧邻窗口（不能砍掉最新的）')
   assert.equal(r.value.hasMoreEarlier, true)
 })
@@ -341,4 +342,16 @@ test('BF5 缺 sessionId → SESSION_UNREADABLE；open 抛错也不外泄异常',
   const r = await backfill({ sessionId: 'gone', beforeSeq: 10 })
   assert.equal(r.ok, false)
   assert.equal(r.code, 'SESSION_UNREADABLE')
+})
+
+test('BF6 条数下限：大事件把预算吃满时仍给到 8 条，但不超过 4× 预算', async () => {
+  const { createBackfillReader } = await import('../src/replay.js')
+  // 每条 5 KiB，预算 12 KiB：纯按字节只够 2 条，靠下限补到 8 条
+  const events = Array.from({ length: 40 }, (_, i) => ({ seq: i, data: { text: 'y'.repeat(5000) } }))
+  const backfill = createBackfillReader({ openSession: async () => makeHandle(events), maxBytes: 12 * 1024 })
+  const r = await backfill({ sessionId: 's', beforeSeq: 40, limit: 40 })
+  assert.equal(r.value.events.length, 8, `期望补到下限 8 条，实际 ${r.value.events.length}`)
+  assert.ok(r.value.bytes > 12 * 1024, '为了凑够条数允许超预算')
+  assert.ok(r.value.bytes <= 12 * 1024 * 4, '但不得超过 4× 预算')
+  assert.equal(r.value.events.at(-1).seq, 39, '永远保留紧邻窗口的那条')
 })

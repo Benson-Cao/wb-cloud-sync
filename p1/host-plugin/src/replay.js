@@ -215,9 +215,15 @@ export function createBackfillReader({ openSession, maxBytes = DEFAULT_REPLAY_MA
 
       const picked = []
       let bytes = 0
+      // 字节预算之外还有**条数下限**：如果最新那几条都是几十 KB 的巨型事件，
+      // 光按预算只能拿到 1~2 条，手机上一屏都撑不满、上下文全没了。
+      // 所以不足 8 条时允许超预算，但不超过 4×（防 8 条 × 1 MiB 把帧撑爆）。
+      const minRows = Math.min(8, batch.length)
+      const hardCap = budget * 4
       for (let i = batch.length - 1; i >= 0; i--) {
         const size = eventBytes(batch[i])
-        if (picked.length && bytes + size > budget) break
+        const overBudget = picked.length > 0 && bytes + size > budget
+        if (overBudget && (picked.length >= minRows || bytes + size > hardCap)) break
         picked.unshift(batch[i])
         bytes += size
       }

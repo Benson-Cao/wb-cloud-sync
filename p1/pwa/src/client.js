@@ -470,6 +470,24 @@ export function createPwaClient({
   }
 
   /**
+   * 首屏窗口：让 Host 按**字节预算**裁「最近一页」，而不是客户端拍脑袋数 50 条。
+   * 固定条数管不住体积（50 条 × 40 KB = 2 MB），固定字节才能同时管带宽和阅读量。
+   * 返回 null 表示「不知道 lastSeq」，调用方退回 follow(-1) 全量/引导补齐。
+   */
+  const openWindow = async ({ sessionId, lastSeq, limit = 200 } = {}) => {
+    if (!sessionId) throw Object.assign(new Error('开窗缺 sessionId'), { code: 'INVALID_ARGUMENT' })
+    if (!Number.isInteger(lastSeq) || lastSeq < 0) return null
+    const data = await backfill({ sessionId, beforeSeq: lastSeq + 1, limit })
+    const events = Array.isArray(data.events) ? data.events : []
+    return {
+      events,
+      toSeq: events.length ? events[events.length - 1].seq : null,
+      hasMoreEarlier: data.hasMoreEarlier === true,
+      via: data.via ?? 'backfill',
+    }
+  }
+
+  /**
    * 拉某个会话的产物索引。只回元数据（路径 / 描述 / seq），文件字节不经 Relay。
    * 走的是既有 `session/*` 下行通道，不需要新协议帧。
    */
@@ -563,7 +581,7 @@ export function createPwaClient({
 
   return {
     refreshSessions, createSession, cancelTurn, submitPrompt, uploadAttachment,
-    listApprovals, answerApproval, getArtifacts, backfill,
+    listApprovals, answerApproval, getArtifacts, backfill, openWindow,
     follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null,
   }
 }
