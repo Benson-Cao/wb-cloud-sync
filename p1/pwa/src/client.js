@@ -52,6 +52,9 @@ export function createPwaClient({
   reconnectBaseMs = 500,
   reconnectMaxMs = 15_000,
   refillPageSize = 500,
+  // Host 按 ≤48 KiB/页 裁帧（真机大正文会话一页只有几条），874 条会话需要上百页。
+  // 旧上限 8 会让补齐在 REFILL_LIMIT 处停下；这里放宽并保留「无进展即停」的兜底。
+  maxRefillPages = 200,
   onEvent = null,        // ({ sessionId, ev, source }) source: 'live' | 'replay'
   onNotice = null,       // ({ type, sessionId, ... })  gap / replay / reconnect / refill-failed / sessions
   onStateChange = null,  // (snapshot) => void
@@ -107,7 +110,8 @@ export function createPwaClient({
   }
 
   const refillRun = async (rec) => {
-    for (let attempt = 0; attempt < 8; attempt++) {
+    for (let attempt = 0; attempt < Math.max(1, maxRefillPages); attempt++) {
+      const beforeSeq = rec.lastSeq
       if (stopped || rec.status === 'closed') return
       rec.status = 'refilling'
       emitState()
@@ -162,7 +166,14 @@ export function createPwaClient({
         connect(rec)
         return
       }
-      // hasMore：带着新 lastSeq 翻下一页
+      // hasMore：带着新 lastSeq 翻下一页。若 Host 说还有更多但这一页一条都没推进，
+      // 立刻停住——否则 200 次循环会把 Relay 打一圈而游标原地不动。
+      if (rec.lastSeq === beforeSeq) {
+        rec.status = 'gap'
+        emitState()
+        notify({ type: 'refill-failed', sessionId: rec.sessionId, reason: 'NO_PROGRESS' })
+        return
+      }
     }
     // 翻页超限：放弃本次补齐，停在 gap（不静默跳过）
     rec.status = 'gap'

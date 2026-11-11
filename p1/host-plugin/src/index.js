@@ -60,6 +60,7 @@ const errBody = (code, message, retryable = false) =>
 const STATUS_BY_CODE = {
   SESSION_UNREADABLE: 404,
   NOT_AVAILABLE: 501,
+  FRAME_TOO_LARGE: 413,
   WRITER_UNAVAILABLE: 409,
 }
 const unwrap = (r, fallback = {}) => (r?.ok === false
@@ -120,7 +121,11 @@ export function apply(ctx, config = {}) {
         message: '没有可用的只读句柄（未注入 sessionPersistence / openSession）',
       })),
     replay: cfg.replay ?? (openSession
-      ? createReplayAdapter({ openSession, pageSize: cfg.replayPageSize })
+      ? createReplayAdapter({
+        openSession,
+        pageSize: cfg.replayPageSize,
+        maxBytes: cfg.replayMaxBytes,
+      })
       : async () => ({
         ok: false, code: 'NOT_AVAILABLE',
         message: '没有可用的只读句柄（未注入 sessionPersistence / openSession）',

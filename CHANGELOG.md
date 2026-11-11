@@ -4,6 +4,27 @@
 
 ---
 
+## [P1 W4 / 真机] · 2026-11-11 16:5x · DSH 重启验收，压出补齐帧撑爆 WS 的缺陷
+
+用户重启 DSH 后做真机验证，先确认 r5/r6 已生效，再顺手把补齐链路压了一遍——结果压出一个只有真机尺度才暴露的问题。
+
+**版本生效的证据链**（不只比字符串，逐层证伪）：
+- 部署的 `index.js` 与仓库 bundle **sha256 完全一致**；DSH 进程启动 16:47:14 晚于文件落盘 16:36:20，即重启后加载的确实是新 bundle。
+- 插件本地 `/__wbsync/status`（web 端口 55088）：`connected:true`、`reconnects:0`、`indexCount:18`、`indexStats.mode:'diff'`；`/admin` 显示 `transport:'ws'`。
+- 真 Relay 内直接打 `/d/<id>/session/artifacts`：**200**，扫了 875 / 667 条事件、返回元数据行（这是 DSH 进程内的真插件在应答，不是 mock）。
+- 用**已部署的那份** bundle 在独立 Relay 上跑通 r5 + r6：产物 `季度报告.pdf` 正常返回、审批瀑布经 `$events/result` 收敛为 `allowed-once` 且 `next()` 零调用。
+
+**压出的真缺陷：`session/follow` 大正文会话 504**。真机量化：`sinceSeq=800` 的 74 条事件 = **454 KiB**（平均 6.1 KiB/条，正文里带整段文件内容），按旧版固定 500 条/页推算约 **3 MiB** > Relay WS `MAX_PAYLOAD`(1 MiB) → 服务端 1009 `frame too large` 断连 → 在途请求熬到 10s 回 `NO_PROGRESS`，插件 `reconnects` 从 0 涨到 2。协议 §5.3 更要求 ≤64 KiB，差了 47 倍。
+
+- **修法**：`replay.js` 改用 **≤48 KiB/页字节预算**裁页（UTF-8 实算，中文不低估），`hasMore` 指路下一页；至少给一条防 `sinceSeq` 死循环；单条 >768 KiB 回明确 `FRAME_TOO_LARGE` 413 而不是静默断连；新增 `bytes` / `oversized` 可观测字段。
+- **连带修**：客户端补齐翻页上限 8 → 200（48 KiB/页下 874 条会话需要上百页），并加「`hasMore` 但游标不推进立刻停」兜底，防 200 次空转打 Relay。SW 升 `wbsync-shell-v13`。
+- **回归**：部署产物上复刻 100 条 ×6 KiB 大正文 → **13 页收完 100 条、单页最大 47.3 KiB、WS 全程在线**。（第一次跑出「1 页 100 条」的假通过，是因为忘了先部署新 bundle 就跑 smoke，抓到后按部署顺序重跑才得到真结果。）
+- **产物 `rows:[]` 也证伪过**：抽查真机 874 条会话，`deliverables/presented` 确实 0 条，`workspace/changes` 只有 `{turn:5}` 不带文件列表；事件字段 `{type,seq,time,data,...}` 与解析器一致。所以空列表是**真结果**不是解析假阴性。暂不从工具调用里猜路径，理由写进 `04` §5.6。
+- 测试 224 → **232 全绿**（replay B1–B6 字节预算 / 翻页 / 硬上限；PWA C1–C2 多页补齐与无进展保护）。
+- **部署状态**：新 bundle 已覆盖到已装插件目录（备份 `index.js.bak-*`）。**修复要再重启一次 DSH 才生效**——插件代码在进程内存里，不会热替换。
+
+---
+
 ## [P2 W8] · 2026-11-11 16:4x · 产物卡片 / 列表（协议 r6，只过元数据）
 
 继续从 asar 取证：产物在宿主里叫 `deliverables`，会话日志里有显式交付事件

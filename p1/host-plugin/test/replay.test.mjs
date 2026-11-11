@@ -198,3 +198,89 @@ test('分页参数被夹到合法区间：上限 5000，下限 1，缺省/非法
 test('createReplayAdapter 必须有 openSession', () => {
   assert.throws(() => createReplayAdapter({}), /openSession/)
 })
+
+/* ------------------------------------------- 真机 2026-11-11：补齐帧字节预算 */
+
+test('B1 大正文事件按字节预算裁页：单页不超预算，hasMore 指路下一页', async () => {
+  // 复刻真机尺度：每条 6 KiB，旧版 500 条一页 ≈ 3 MiB，会被 Relay WS 1009 断连
+  const big = Array.from({ length: 20 }, (_, i) => ({
+    seq: i, type: 'assistant/message', data: { text: 'x'.repeat(6000) },
+  }))
+  const h = makeHandle(big)
+  const a = createReplayAdapter({ openSession: async () => h, pageSize: 500, maxBytes: 48 * 1024 })
+  const r = await a({ sessionId: 's', sinceSeq: -1 })
+  assert.equal(r.ok, true)
+  assert.ok(r.value.count < 20, '不能一页把 20 条大正文全吐出去')
+  assert.ok(r.value.count >= 1, '至少给一条，否则客户端 sinceSeq 永远推不动')
+  assert.ok(r.value.bytes <= 48 * 1024, `实际 ${r.value.bytes}B 超过预算`)
+  assert.equal(r.value.hasMore, true)
+  assert.equal(r.value.toSeq, r.value.count - 1)
+  assert.equal(r.value.expectedSeq, r.value.count, '下一页起点应是最后一条 + 1')
+  assert.equal(h.closed, 1)
+})
+
+test('B2 连续翻页能收完，最后一页 hasMore=false / complete=true（不误判 gap）', async () => {
+  const big = Array.from({ length: 20 }, (_, i) => ({
+    seq: i, type: 'assistant/message', data: { text: 'y'.repeat(6000) },
+  }))
+  const a = createReplayAdapter({ openSession: async () => makeHandle(big), pageSize: 500, maxBytes: 48 * 1024 })
+  let since = -1
+  const got = []
+  let pages = 0
+  for (; pages < 10; pages++) {
+    const r = await a({ sessionId: 's', sinceSeq: since })
+    assert.equal(r.ok, true)
+    got.push(...r.value.events)
+    if (!r.value.hasMore) {
+      assert.equal(r.value.complete, true, '全部翻完不能报缺口')
+      break
+    }
+    since = r.value.toSeq
+  }
+  assert.deepEqual(got.map((e) => e.seq), Array.from({ length: 20 }, (_, i) => i))
+  assert.ok(pages >= 2, '应该分了多页')
+})
+
+test('B3 单条就超预算：仍返回这一条并标 oversized，不空转死循环', async () => {
+  const huge = [{ seq: 0, type: 'assistant/message', data: { text: 'z'.repeat(200_000) } }]
+  const a = createReplayAdapter({ openSession: async () => makeHandle(huge), maxBytes: 48 * 1024 })
+  const r = await a({ sessionId: 's', sinceSeq: -1 })
+  assert.equal(r.value.count, 1)
+  assert.equal(r.value.oversized, true)
+  assert.ok(r.value.bytes > 48 * 1024)
+  assert.equal(r.value.hasMore, false, '后面没有更多了')
+})
+
+test('B4 字节截断不掩盖真缺口：仍如实报 expectedSeq', async () => {
+  const big = Array.from({ length: 10 }, (_, i) => ({
+    seq: i === 9 ? 12 : i,   // seq 9 缺失 → 9 处是洞
+    type: 'assistant/message', data: { text: 'w'.repeat(6000) },
+  }))
+  const a = createReplayAdapter({ openSession: async () => makeHandle(big), pageSize: 500, maxBytes: 48 * 1024 })
+  const r = await a({ sessionId: 's', sinceSeq: -1 })
+  assert.equal(r.value.count > 0, true)
+  assert.equal(r.value.complete, false)
+  // 第一页还没走到缺口，hasMore 指路；下一页会收敛到 gap
+  assert.equal(r.value.hasMore, true)
+})
+
+test('B5 eventBytes 用 UTF-8 实算，中文不按字符数低估', async () => {
+  const { eventBytes, pickWithinBudget } = await import('../src/replay.js')
+  const ev = { seq: 0, data: { text: '中文'.repeat(1000) } }
+  const expected = Buffer.byteLength(JSON.stringify(ev), 'utf8')
+  assert.equal(eventBytes(ev), expected)
+  const pick = pickWithinBudget([ev], 10)
+  assert.equal(pick.events.length, 1)
+  assert.equal(pick.oversized, true)
+})
+
+test('B6 单条超过硬上限：回明确 FRAME_TOO_LARGE，不让 WS 被 1009 静默断连', async () => {
+  const monster = [{ seq: 0, type: 'assistant/message', data: { text: 'm'.repeat(900 * 1024) } }]
+  const h = makeHandle(monster)
+  const a = createReplayAdapter({ openSession: async () => h, maxBytes: 48 * 1024 })
+  const r = await a({ sessionId: 's', sinceSeq: -1 })
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'FRAME_TOO_LARGE')
+  assert.match(r.message, /超过/)
+  assert.equal(h.closed, 1, '失败也要还句柄')
+})

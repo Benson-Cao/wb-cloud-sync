@@ -314,3 +314,69 @@ test('B5 unfollow 后不再重连；stop 清理干净', async () => {
   assert.deepEqual(client.snapshot().follows, [])
   client.stop()
 })
+
+/* ------------------------------------------- 真机 2026-11-11：小页补齐 */
+
+test('C1 字节预算下每页只有 1 条：能连翻 20+ 页补齐，不再被旧的 8 页上限卡住', async () => {
+  const token = await pair('pc-manypages')
+  const replayCalls = []
+  const host = await registerHost('pc-manypages', {
+    replayHandler: async ({ sessionId, sinceSeq }) => {
+      const from = (Number.isInteger(sinceSeq) ? sinceSeq : -1) + 1
+      replayCalls.push(from)
+      const events = from <= 25 ? [{ seq: from, data: {} }] : []
+      return {
+        ok: true, data: {
+          sessionId, events, count: events.length,
+          fromSeq: events[0]?.seq ?? null, toSeq: events.at(-1)?.seq ?? sinceSeq,
+          complete: !events.length || from >= 25,
+          hasMore: from < 25,
+        },
+      }
+    },
+  })
+  // 让 Relay 的缓冲起点落在 5，客户端 sinceSeq=-1 订阅时必然收到 gap → 触发补齐
+  for (const seq of [5, 6, 7]) host.send({ t: 'session/event', sessionId: 's-many', ev: { seq } })
+  await wait(120)
+
+  const replayed = []
+  const client = createPwaClient({
+    baseUrl: base, deviceId: 'pc-manypages', token, reconnectBaseMs: 40,
+    onEvent: ({ ev, source }) => { if (source === 'replay') replayed.push(ev.seq) },
+  })
+  client.follow('s-many', { sinceSeq: -1 })
+  await waitFor(() => replayed.length >= 26, 6000, '26 条分 26 页补齐')
+  assert.deepEqual(replayed, Array.from({ length: 26 }, (_, i) => i))
+  assert.ok(replayCalls.length > 8, `旧上限 8 页会卡住，实际翻了 ${replayCalls.length} 页`)
+  client.stop()
+})
+
+test('C2 Host 说 hasMore 但一页都没推进：立刻停，不打满 200 次空转', async () => {
+  const token = await pair('pc-noprogress')
+  let hits = 0
+  const host = await registerHost('pc-noprogress', {
+    replayHandler: async ({ sessionId, sinceSeq }) => {
+      hits++
+      return {
+        ok: true, data: {
+          sessionId, events: [], count: 0, fromSeq: null, toSeq: sinceSeq,
+          complete: true, hasMore: true,
+        },
+      }
+    },
+  })
+  for (const seq of [5]) host.send({ t: 'session/event', sessionId: 's-nop', ev: { seq } })
+  await wait(120)
+
+  const notices = []
+  const client = createPwaClient({
+    baseUrl: base, deviceId: 'pc-noprogress', token, reconnectBaseMs: 40,
+    onNotice: (n) => notices.push(n),
+  })
+  client.follow('s-nop', { sinceSeq: -1 })
+  await waitFor(() => notices.some((n) => n.type === 'refill-failed'), 2000, '无进展通知')
+  await wait(200)
+  assert.ok(hits <= 2, `应立刻停下，实际打了 ${hits} 次`)
+  assert.equal(notices.filter((n) => n.type === 'refill-failed').at(-1).reason, 'NO_PROGRESS')
+  client.stop()
+})

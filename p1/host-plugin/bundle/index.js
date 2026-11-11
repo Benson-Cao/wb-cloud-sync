@@ -37,6 +37,46 @@ import { randomUUID } from 'node:crypto'
 
 const DEFAULT_PAGE_SIZE = 500
 const MAX_PAGE_SIZE = 5000
+/**
+ * 单帧字节预算。真机取证（2026-11-11，胎教Agent 会话）：74 条事件就有 454 KiB，
+ * 平均 6.1 KiB/条，按旧版 500 条一页推算约 3 MiB —— 超过 Relay WS 的
+ * MAX_PAYLOAD(1 MiB) 会被 1009 断连，在途补齐请求只能熬到 504 NO_PROGRESS。
+ * 协议 §5.3 更要求 ≤64KiB，这里留 16 KiB 给帧封装与外层字段，取 48 KiB。
+ */
+const DEFAULT_REPLAY_MAX_BYTES = 48 * 1024
+/**
+ * 硬安全网：单条事件本身超过这个数就不发了。否则 Relay WS 会以 1009 断连，
+ * 手机只看到 10s 后的 504，根本不知道是哪条事件把连接撑爆的。
+ * 宁可回一个明确的 FRAME_TOO_LARGE，也不要静默断连。
+ */
+const HARD_FRAME_LIMIT_BYTES = 768 * 1024
+
+const encoder = new TextEncoder()
+/** 单条事件序列化后的字节数（用 UTF-8 实算，不按字符数猜）。 */
+const eventBytes = (ev) => encoder.encode(JSON.stringify(ev)).length
+
+/**
+ * 纯函数：按字节预算裁一页，保证「至少给一条」——单条就超预算时若一条都不给，
+ * 客户端的 sinceSeq 永远推不动，会变成无限重试。
+ * 返回 oversized 让调用方知道这一页是硬塞过去的，不是预算内正常页。
+ */
+function pickWithinBudget(events, maxBytes = DEFAULT_REPLAY_MAX_BYTES) {
+  const budget = Math.max(1, Number(maxBytes) || DEFAULT_REPLAY_MAX_BYTES)
+  const picked = []
+  let bytes = 0
+  for (const ev of events ?? []) {
+    const size = eventBytes(ev)
+    if (picked.length && bytes + size > budget) break
+    picked.push(ev)
+    bytes += size
+  }
+  return {
+    events: picked,
+    bytes,
+    oversized: picked.length === 1 && bytes > budget,
+    truncatedByBytes: picked.length < (events?.length ?? 0),
+  }
+}
 
 const isSeq = (v) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
 
@@ -61,11 +101,12 @@ function contiguousPrefix(events, sinceSeq) {
  * 创建 `replay` 适配器。
  * @param openSession (sessionId) => Promise<handle>，正式版绑 `ctx.sessionPersistence.open(id,'read')`
  */
-function createReplayAdapter({ openSession, pageSize = DEFAULT_PAGE_SIZE } = {}) {
+function createReplayAdapter({ openSession, pageSize = DEFAULT_PAGE_SIZE, maxBytes = DEFAULT_REPLAY_MAX_BYTES } = {}) {
   if (typeof openSession !== 'function') {
     throw new TypeError('createReplayAdapter 需要 openSession(sessionId)')
   }
   const limit = Math.min(Math.max(1, Number(pageSize) || DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE)
+  const budget = Math.max(1, Number(maxBytes) || DEFAULT_REPLAY_MAX_BYTES)
 
   /** 多读一条：用它判断「后面还有没有」，避免为了 hasMore 再打一次句柄。 */
   const readPage = async (handle, offset) => {
@@ -100,10 +141,21 @@ function createReplayAdapter({ openSession, pageSize = DEFAULT_PAGE_SIZE } = {})
       }
 
       const { events: contiguous, expectedSeq } = contiguousPrefix(page.events, from)
-      // 多读的那一条只用来判断「后面还有没有」，不发给手机：单页严格不超过 limit。
-      const events = contiguous.slice(0, limit)
-      const truncated = contiguous.length > limit
-      const gapped = !truncated && expectedSeq !== null
+      // 先按条数封顶，再按**字节预算**裁：真机会话正文可能一条就几十 KB，
+      // 只数条数会让 http/response 帧超过 Relay WS 的 1 MiB 上限而被 1009 断连。
+      const pageSlice = contiguous.slice(0, limit)
+      const picked = pickWithinBudget(pageSlice, budget)
+      if (picked.oversized && picked.bytes > HARD_FRAME_LIMIT_BYTES) {
+        return {
+          ok: false, code: 'FRAME_TOO_LARGE',
+          message: `单条事件 ${picked.bytes} 字节超过 ${HARD_FRAME_LIMIT_BYTES} 上限，补齐无法继续（seq ${pageSlice[0]?.seq ?? '?'}）`,
+        }
+      }
+      const events = picked.events
+      const truncatedByCount = contiguous.length > limit
+      const truncated = truncatedByCount || picked.truncatedByBytes
+      // 字节截断不能掩盖真缺口：只被条数截断时才把 expectedSeq 当「还有更多」。
+      const gapped = expectedSeq !== null && !truncatedByCount
       const last = events.length ? events[events.length - 1].seq : from
 
       return {
@@ -112,10 +164,12 @@ function createReplayAdapter({ openSession, pageSize = DEFAULT_PAGE_SIZE } = {})
           sessionId,
           events,
           count: events.length,
+          bytes: picked.bytes,
+          ...(picked.oversized ? { oversized: true } : {}),
           fromSeq: events.length ? events[0].seq : null,
           toSeq: last,
           complete: !truncated && !gapped,
-          expectedSeq: truncated ? last + 1 : (gapped ? expectedSeq : null),
+          expectedSeq: gapped ? expectedSeq : (truncated ? last + 1 : null),
           hasMore: truncated,
           eventState: page.eventState,
         },
@@ -1091,6 +1145,7 @@ const errBody = (code, message, retryable = false) =>
 const STATUS_BY_CODE = {
   SESSION_UNREADABLE: 404,
   NOT_AVAILABLE: 501,
+  FRAME_TOO_LARGE: 413,
   WRITER_UNAVAILABLE: 409,
 }
 const unwrap = (r, fallback = {}) => (r?.ok === false
@@ -1151,7 +1206,11 @@ function __apply(ctx, config = {}) {
         message: '没有可用的只读句柄（未注入 sessionPersistence / openSession）',
       })),
     replay: cfg.replay ?? (openSession
-      ? createReplayAdapter({ openSession, pageSize: cfg.replayPageSize })
+      ? createReplayAdapter({
+        openSession,
+        pageSize: cfg.replayPageSize,
+        maxBytes: cfg.replayMaxBytes,
+      })
       : async () => ({
         ok: false, code: 'NOT_AVAILABLE',
         message: '没有可用的只读句柄（未注入 sessionPersistence / openSession）',
