@@ -142,4 +142,8 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /deliverables\/presented/, '出现呈现事件时要刷新产物卡片')
   assert.match(page, /textContent/, '路径来自宿主日志，必须用 textContent 渲染，不许当 HTML 执行')
   assert.match(page, /sessionId !== activeSession/, '切走会话后旧响应不许盖上来')
+
+  // 大事件降级：别把 marker 当正文铺开，也别让人以为事件丢了
+  assert.match(page, /ev\?\.data\?\.truncated/, '降级事件要单独识别')
+  assert.match(page, /超过单帧上限未转发/, '要说明「正文没转发」而不是静默显示空内容')
 })

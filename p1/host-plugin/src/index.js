@@ -63,6 +63,32 @@ const STATUS_BY_CODE = {
   FRAME_TOO_LARGE: 413,
   WRITER_UNAVAILABLE: 409,
 }
+
+/**
+ * 单帧软上限：超过就降级转发。
+ * 取值依据：真机 874 条事件实测最大 421 KiB、p99 97 KiB，留约 2.4 倍余量到 1 MiB。
+ * 再大就让手机只收元数据 + 正文前缀，绝不把连接撑爆（1009 断连会伪装成 504）。
+ */
+export const EVENT_FRAME_SOFT_LIMIT = 1024 * 1024
+// 名字别叫 encoder：replay.js 里也有一个，bundle 内联到同一作用域会撞名（打包器会拦）
+const frameEncoder = new TextEncoder()
+const byteLen = (text) => frameEncoder.encode(text).length
+
+/**
+ * 降级：保留 `seq` / `type` / `time` 等顶层元数据（客户端游标与渲染都靠它），只摘正文。
+ * 丢 `seq` 会让客户端判缺口，反而卡进补齐循环——所以「降级」而不是「丢弃」。
+ */
+export const degradeEvent = (ev, bytes) => ({
+  ...ev,
+  data: {
+    truncated: true,
+    reason: 'EVENT_TOO_LARGE',
+    bytes,
+    head: (() => {
+      try { return JSON.stringify(ev?.data ?? null).slice(0, 1500) } catch { return null }
+    })(),
+  },
+})
 const unwrap = (r, fallback = {}) => (r?.ok === false
   ? {
     status: STATUS_BY_CODE[r.code] ?? 409,
@@ -81,6 +107,7 @@ export function apply(ctx, config = {}) {
     dropped: 0,
     downlinks: 0,
     reconnects: 0,
+    oversized: 0,   // 超过单帧软上限、被降级转发的事件数（正文摘成 head 预览）
     lastSeq: new Map(),
     reconnectTimer: null,
     heartbeatTimer: null,
@@ -183,7 +210,18 @@ export function apply(ctx, config = {}) {
     if (typeof ev?.seq === 'number') {
       state.lastSeq.set(sessionId, Math.max(state.lastSeq.get(sessionId) ?? -1, ev.seq))
     }
-    if (send({ t: 'session/event', sessionId, ev })) state.forwarded++
+    // 单条事件太大就先降级：真机实测最大 421 KiB，但长回复/大文件正文可以更大。
+    // 硬发会让 Relay 以 1009 断连（在途请求熬成 504），且手机端收到几 MB 帧也卡。
+    // seq 必须保留——丢了 seq 客户端会判缺口，反而卡在补齐循环里。
+    let payload = ev
+    let frame = { t: 'session/event', sessionId, ev }
+    const bytes = byteLen(JSON.stringify(frame))
+    if (bytes > EVENT_FRAME_SOFT_LIMIT) {
+      state.oversized++
+      payload = degradeEvent(ev, bytes)
+      frame = { t: 'session/event', sessionId, ev: payload }
+    }
+    if (send(frame)) state.forwarded++
     else state.dropped++
   }
 
@@ -356,6 +394,7 @@ export function apply(ctx, config = {}) {
           dropped: state.dropped,
           downlinks: state.downlinks,
           reconnects: state.reconnects,
+          oversized: state.oversized,
           replayReady: Boolean(openSession),
           indexReady: Boolean(collectIndex),
           indexCount: state.indexCount,

@@ -33,7 +33,7 @@ const encodeFrame = (opcode, payload) => {
 }
 
 /** 从缓冲区切一个完整帧；不完整返回 null。 */
-const tryParseFrame = (buf) => {
+const tryParseFrame = (buf, maxPayload = MAX_PAYLOAD) => {
   if (buf.length < 2) return null
   const fin = (buf[0] & 0x80) !== 0
   const opcode = buf[0] & 0x0f
@@ -47,11 +47,11 @@ const tryParseFrame = (buf) => {
   } else if (len === 127) {
     if (buf.length < 10) return null
     const big = buf.readBigUInt64BE(2)
-    if (big > BigInt(MAX_PAYLOAD)) throw new Error('FRAME_TOO_LARGE')
+    if (big > BigInt(maxPayload)) throw new Error('FRAME_TOO_LARGE')
     len = Number(big)
     offset = 10
   }
-  if (len > MAX_PAYLOAD) throw new Error('FRAME_TOO_LARGE')
+  if (len > maxPayload) throw new Error('FRAME_TOO_LARGE')
   let maskKey = null
   if (masked) {
     if (buf.length < offset + 4) return null
@@ -68,7 +68,9 @@ const tryParseFrame = (buf) => {
  * 完成握手并返回连接对象。调用方负责先把 socket 从 http server 的
  * upgrade 事件里接过来。
  */
-export function upgradeToWebSocket(req, socket, head, handlers = {}) {
+export function upgradeToWebSocket(req, socket, head, handlers = {}, options = {}) {
+  // 帧上限可配：真机单条事件最大 421 KiB，固定 1 MiB 的天花板迟早会被长回复顶破
+  const maxPayload = Math.max(1024, Number(options.maxPayload) || MAX_PAYLOAD)
   const key = req.headers['sec-websocket-key']
   if (!key || req.headers.upgrade?.toLowerCase() !== 'websocket') {
     socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
@@ -84,7 +86,19 @@ export function upgradeToWebSocket(req, socket, head, handlers = {}) {
   ].join('\r\n'))
 
   let open = true
+  let notified = false
   let buffer = Buffer.alloc(0)
+  /**
+   * onClose 只通知一次，且**服务端主动关也要通知**。
+   * 之前只在 socket 'close' 里调，而 conn.close() 先把 open 置 false，
+   * 于是 onEnd 直接 return —— 设备一直留在 CP 的「在线」窗口里，
+   * 手机请求被投进降级队列干等 10s。超限 1009、吊销、server stopping 都踩这条路径。
+   */
+  const notifyClose = () => {
+    if (notified) return
+    notified = true
+    handlers.onClose?.()
+  }
 
   const conn = {
     isOpen: () => open,
@@ -103,12 +117,13 @@ export function upgradeToWebSocket(req, socket, head, handlers = {}) {
       payload.write(reason, 2)
       try { socket.write(encodeFrame(OP.CLOSE, payload)) } catch { /* 对端已断 */ }
       socket.end()
+      notifyClose()
     },
   }
 
   const handleFrame = (frame) => {
     if (!frame.fin) return conn.close(1003, 'fragmentation unsupported')
-    if (frame.opcode === OP.CLOSE) { open = false; try { socket.end() } catch { /* 已关 */ } handlers.onClose?.(); return }
+    if (frame.opcode === OP.CLOSE) { open = false; try { socket.end() } catch { /* 已关 */ } notifyClose(); return }
     if (frame.opcode === OP.PING) { if (open) socket.write(encodeFrame(OP.PONG, frame.payload)); return }
     if (frame.opcode === OP.PONG) return
     if (frame.opcode === OP.TEXT) return handlers.onMessage?.(frame.payload.toString('utf8'))
@@ -120,7 +135,7 @@ export function upgradeToWebSocket(req, socket, head, handlers = {}) {
     buffer = Buffer.concat([buffer, chunk])
     try {
       for (;;) {
-        const frame = tryParseFrame(buffer)
+        const frame = tryParseFrame(buffer, maxPayload)
         if (!frame) return
         buffer = buffer.subarray(frame.consumed)
         handleFrame(frame)
@@ -132,9 +147,8 @@ export function upgradeToWebSocket(req, socket, head, handlers = {}) {
   }
 
   const onEnd = () => {
-    if (!open) return
     open = false
-    handlers.onClose?.()
+    notifyClose()
   }
 
   socket.on('data', onData)

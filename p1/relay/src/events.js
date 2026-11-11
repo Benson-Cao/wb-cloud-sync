@@ -11,14 +11,16 @@
  *
  * 只存**转发缓冲**，不写盘、不解析 `ev` 内部结构（ADR-010 / 04 §5.4）。
  */
-export function createEventHub({ capacity = 1000 } = {}) {
-  const sessions = new Map()   // sessionId -> { bySeq: Map<seq, ev>, delivered, maxSeq, startedAt }
+export function createEventHub({ capacity = 1000, maxBytes = 32 * 1024 * 1024 } = {}) {
+  const sessions = new Map()   // sessionId -> { bySeq, sizeOf, bytes, delivered, maxSeq, startedAt }
   const subs = new Map()       // sessionId -> Set<conn>
+  // 下限只用来挡明显写错的配置；设 4 KiB 而不是 64 KiB，否则小预算测试/调参会静默失效
+  const byteBudget = Math.max(4 * 1024, Number(maxBytes) || 32 * 1024 * 1024)
 
   const sessionOf = (id) => {
     let s = sessions.get(id)
     if (!s) {
-      s = { bySeq: new Map(), delivered: -1, maxSeq: -1, startedAt: 0 }
+      s = { bySeq: new Map(), sizeOf: new Map(), bytes: 0, delivered: -1, maxSeq: -1, startedAt: 0 }
       sessions.set(id, s)
     }
     return s
@@ -35,10 +37,24 @@ export function createEventHub({ capacity = 1000 } = {}) {
     return reached
   }
 
+  /**
+   * 按条数与**字节**双重裁剪，只裁 `delivered` 之前的旧条目。
+   * 只按条数裁是不够的：真机取证单条事件最大 421 KiB（p99 97 KiB），
+   * 1000 条 × 400 KiB 就是 400 MB，长会话能把 Relay 内存吃穿。
+   */
   const trim = (s) => {
-    if (s.bySeq.size <= capacity) return
-    const cutoff = s.delivered - capacity
-    for (const seq of [...s.bySeq.keys()]) if (seq <= cutoff) s.bySeq.delete(seq)
+    if (s.bySeq.size <= capacity && s.bytes <= byteBudget) return
+    for (const seq of [...s.bySeq.keys()]) {
+      if (s.bySeq.size <= capacity && s.bytes <= byteBudget) break
+      if (seq > s.delivered) break          // 未广播的连续前缀一律保留
+      s.bySeq.delete(seq)
+      s.bytes -= s.sizeOf.get(seq) ?? 0
+      s.sizeOf.delete(seq)
+    }
+  }
+
+  const byteSize = (ev) => {
+    try { return Buffer.byteLength(JSON.stringify(ev), 'utf8') } catch { return 0 }
   }
 
   return {
@@ -53,6 +69,9 @@ export function createEventHub({ capacity = 1000 } = {}) {
       }
       if (s.bySeq.has(ev.seq)) return { rejected: 'DUPLICATE', delivered: s.delivered }
       s.bySeq.set(ev.seq, ev)
+      const size = byteSize(ev)
+      s.sizeOf.set(ev.seq, size)
+      s.bytes += size
       if (ev.seq > s.maxSeq) s.maxSeq = ev.seq
 
       let advanced = 0
@@ -116,16 +135,19 @@ export function createEventHub({ capacity = 1000 } = {}) {
 
     stats() {
       let buffered = 0
-      for (const s of sessions.values()) buffered += s.bySeq.size
+      let bufferedBytes = 0
+      for (const s of sessions.values()) { buffered += s.bySeq.size; bufferedBytes += s.bytes }
       let subscribers = 0
       for (const set of subs.values()) subscribers += set.size
-      return { sessions: sessions.size, buffered, subscribers }
+      return { sessions: sessions.size, buffered, bufferedBytes, subscribers }
     },
 
     /** 测试用：读某会话的游标状态。 */
     snapshot(sessionId) {
       const s = sessions.get(sessionId)
-      return s ? { delivered: s.delivered, maxSeq: s.maxSeq, startedAt: s.startedAt, buffered: s.bySeq.size } : null
+      return s
+        ? { delivered: s.delivered, maxSeq: s.maxSeq, startedAt: s.startedAt, buffered: s.bySeq.size, bytes: s.bytes }
+        : null
     },
   }
 }

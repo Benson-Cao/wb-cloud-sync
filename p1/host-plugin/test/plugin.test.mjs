@@ -868,3 +868,51 @@ test('P-AF2 会话不可读：如实回 404 SESSION_UNREADABLE，不谎报空产
     await relay.stop()
   }
 })
+
+/* ------------------------------------------------ 真机 2026-11-11：大事件降级 */
+
+test('P-EV1 超过单帧软上限的事件降级转发：保留 seq/type，正文摘成 head，帧远小于上限', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  try {
+    const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-ev', autoConnect: true })
+    await waitFor(() => plugin.state.connected, '已连接')
+
+    const huge = { seq: 7, type: 'assistant/message', time: 1, data: { text: 'x'.repeat(1_300_000) } }
+    ctx.emit('session/event', { header: { id: 's-big' } }, huge)
+    await waitFor(() => framesOf(relay, 'session/event').length === 1, '事件帧')
+
+    const frame = framesOf(relay, 'session/event')[0]
+    assert.equal(frame.sessionId, 's-big')
+    assert.equal(frame.ev.seq, 7, 'seq 必须保留：丢了客户端会判缺口，卡进补齐循环')
+    assert.equal(frame.ev.type, 'assistant/message')
+    assert.equal(frame.ev.time, 1)
+    assert.equal(frame.ev.data.truncated, true)
+    assert.equal(frame.ev.data.reason, 'EVENT_TOO_LARGE')
+    assert.ok(frame.ev.data.bytes > 1024 * 1024, `记录原始字节，实际 ${frame.ev.data.bytes}`)
+    assert.ok(frame.ev.data.head.length > 0, '要留一小段正文前缀供人辨认')
+    assert.ok(Buffer.byteLength(JSON.stringify(frame)) < 64 * 1024, '降级后的帧要小到能安全过任何 WS')
+    assert.equal(plugin.state.oversized, 1)
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('P-EV2 正常大小的事件原样转发，一个字都不许改', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  try {
+    const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-ev2', autoConnect: true })
+    await waitFor(() => plugin.state.connected, '已连接')
+    const small = { seq: 1, type: 'assistant/message', data: { text: '你好' } }
+    ctx.emit('session/event', { header: { id: 's-small' } }, small)
+    await waitFor(() => framesOf(relay, 'session/event').length === 1, '事件帧')
+    const frame = framesOf(relay, 'session/event')[0]
+    assert.deepEqual(frame.ev, small, '未超限的事件必须原样透传')
+    assert.equal(plugin.state.oversized, 0)
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})

@@ -44,6 +44,10 @@ const DEFAULTS = {
   requestTimeoutMs: 10_000,    // 10s 无进度防悬挂
   registerTimeoutMs: 10_000,   // WS 连上后必须在 10s 内发 host/register，否则关闭
   maxBodyBytes: 1_048_576,
+  // WS 单帧上限。真机实测单条事件最大 421 KiB（p99 97 KiB），旧的 1 MiB 天花板
+  // 会被长回复/大会话摘要顶破，然后以 1009 静默断连、在途请求熬成 504。
+  maxFrameBytes: 8 * 1024 * 1024,
+  eventBufferBytes: 32 * 1024 * 1024,
 }
 
 /** 定长比较，避免按字符比密钥时的时序泄漏（`===` 会在首字节不同处提前返回）。 */
@@ -275,7 +279,7 @@ export function createRelay(options = {}) {
     queue: new Map(),        // deviceId -> 待转发帧（无 WS 时的降级通道）
     pending: new Map(),      // reqId -> { resolve, timer }
     sockets: new Map(),      // deviceId -> WS 连接（正式通道）
-    hub: createEventHub({ capacity: cfg.eventBuffer ?? 1000 }),  // 事件缓冲 + 订阅广播
+    hub: createEventHub({ capacity: cfg.eventBuffer ?? 1000, maxBytes: cfg.eventBufferBytes }),  // 事件缓冲 + 订阅广播
     // 审批看板：Host 判、Relay 存、手机拉。存的是**已下发过的原帧**，所以手机断线期间
     // 的审批不会丢——重连后 `GET /api/approvals` 就能补回来。
     approvals: new Map(),    // approvalId -> { deviceId, payload, expiresAt, createdAt }
@@ -824,7 +828,7 @@ export function createRelay(options = {}) {
           state.hub.unsubscribe(conn)
           untrackPhoneConn(deviceId, conn)   // 审批通知要发到这台设备的所有手机连接
         },
-      })
+      }, { maxPayload: cfg.maxFrameBytes })
       if (!conn) { socket.destroy(); return }
       trackPhoneConn(deviceId, conn)
       state.hub.subscribe(sessionId, Number.isInteger(sinceSeq) ? sinceSeq : -1, conn)
@@ -878,7 +882,7 @@ export function createRelay(options = {}) {
         // WS 断开即视为离线，不等 45s 心跳窗口；HTTP 心跳可把状态再拉回 online
         cp.markDeviceOffline(deviceId)
       },
-    })
+    }, { maxPayload: cfg.maxFrameBytes })
     if (!conn) return socket.destroy()
 
     // 升级请求本身**不带凭据**（令牌在 register 帧里才校验），所以必须给

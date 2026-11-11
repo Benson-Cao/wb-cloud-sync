@@ -173,7 +173,11 @@
       if (!Number.isInteger(ev?.seq) || ev.seq <= last) return   // 幂等渲染
       seenSeq.set(sessionId, ev.seq)
       const type = ev?.type ?? ev?.t ?? 'event'
-      const detail = JSON.stringify(ev.data ?? ev, null, 1).slice(0, 400)
+      // Host 会把超过软上限的事件降级成「元数据 + 正文前缀」，这里别把 marker 当正文铺开
+      const truncated = ev?.data?.truncated === true
+      const detail = truncated
+        ? `（该事件正文 ${Math.round((ev.data.bytes ?? 0) / 1024)} KiB，超过单帧上限未转发；完整内容在电脑上）`
+        : JSON.stringify(ev.data ?? ev, null, 1).slice(0, 400)
       if (fold.type === type && fold.div) {
         fold.to = ev.seq
         fold.count++
