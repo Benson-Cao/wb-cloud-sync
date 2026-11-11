@@ -1,42 +1,36 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-11T14:31:44.866Z",
+  "capturedAt": "2026-11-11T14:44:31.559Z",
   "git": {
-    "head": "4cf8b2a881c07c8f67a7d8c65c3f2e1bafc30fd5",
+    "head": "7a30a2ddb268b54e00e3abd1666560a7ba90b376",
     "branch": "main",
     "worktreeClean": true
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [
-      "package.json"
-    ],
+    "dataChanged": [],
     "signoffChanged": [],
-    "artifactChanged": [
-      "dist-tarball"
+    "artifactChanged": [],
+    "narrativeChanged": [
+      "PROTOCOL.md"
     ],
-    "narrativeChanged": [],
-    "notes": [
-      "发布物已重建（仅记录，不影响判定）：dist-tarball"
-    ],
-    "previousCapturedAt": "2026-11-11T12:54:37.704Z",
-    "previousGitHead": "bf48f2dc1ccaa03bfe58284f27e6d182a1ce61a6",
+    "notes": [],
+    "previousCapturedAt": "2026-11-11T14:31:44.866Z",
+    "previousGitHead": "4cf8b2a881c07c8f67a7d8c65c3f2e1bafc30fd5",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：运行代码/证据：package.json",
-      "capturedAt": "2026-11-11T12:54:37.704Z",
-      "gitHead": "bf48f2dc1ccaa03bfe58284f27e6d182a1ce61a6",
-      "dataChanged": [
-        "package.json"
-      ],
+      "previousStatus": "DRIFTED",
+      "previousReason": "描述文字变化（不阻断）：PROTOCOL.md",
+      "capturedAt": "2026-11-11T14:31:44.866Z",
+      "gitHead": "4cf8b2a881c07c8f67a7d8c65c3f2e1bafc30fd5",
+      "dataChanged": [],
       "signoffChanged": [],
-      "artifactChanged": [
-        "dist-tarball"
-      ],
-      "narrativeChanged": []
+      "artifactChanged": [],
+      "narrativeChanged": [
+        "PROTOCOL.md"
+      ]
     }
   },
   "fingerprints": {
@@ -65,7 +59,7 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "134a300935dfcb9d871170b59f30fd9e86d81cedc52297bab0f33130ad24c3a0"
+      "PROTOCOL.md": "bd384920407f386c1a3f3f719f8c9df7b6eaf3b4a754c0c72244a6f775812b3c"
     }
   },
   "secretScan": {
