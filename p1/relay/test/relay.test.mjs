@@ -26,7 +26,7 @@ const call = async (path, { method = 'GET', body, token } = {}) => {
   return { status: r.status, protocol: r.headers.get('x-protocol-version'), json: await r.json() }
 }
 
-const pair = async (deviceId = 'dev-1') => {
+const pair = async (deviceId = 'dev-1', extra = {}) => {
   const g = await call('/pair/generate', { method: 'POST', body: { deviceId } })
   assert.equal(g.status, 200)
   assert.match(g.json.data.code, /^\d{6}$/)
@@ -34,7 +34,8 @@ const pair = async (deviceId = 'dev-1') => {
   assert.equal(c.status, 200)
   const { challenge, pairSecret } = c.json.data
   const sig = createHmac('sha256', pairSecret).update(challenge).digest('hex')
-  const v = await call('/pair/verify', { method: 'POST', body: { challenge, sig, clientId: 'phone-1' } })
+  // r9：手机自报 phoneId（稳定身份），不报就由服务端生成
+  const v = await call('/pair/verify', { method: 'POST', body: { challenge, sig, ...extra } })
   return { token: v.json.data?.deviceToken, verify: v, generate: g, challenge: c }
 }
 
@@ -111,20 +112,48 @@ test('T4 HMAC 正确签发令牌，只落 SHA-256 摘要；错误签名 401', as
     method: 'POST', body: { challenge: c2.json.data.challenge, sig, clientId: 'p' },
   })
   assert.equal(v.status, 200)
-  const d = relay.cp.getDevice('hmac-dev')
-  assert.equal(d.tokenDigest, createHash('sha256').update(v.json.data.deviceToken).digest('hex'))
+  // r9：令牌落在**手机自己的设备行**上，不再写进 Host 行
+  const phones = relay.cp.listPhones('hmac-dev')
+  assert.equal(phones.length, 1, '配对一次就多一台手机')
+  assert.equal(phones[0].deviceId, v.json.data.deviceId, '回给手机的是它自己的 deviceId')
+  assert.equal(v.json.data.hostDeviceId, 'hmac-dev', 'Host 的 deviceId 单独回，URL 里用它')
+  assert.equal(phones[0].tokenDigest, createHash('sha256').update(v.json.data.deviceToken).digest('hex'))
   // 明文令牌不落盘：Relay 的传输状态与 CP 的设备行里都不该出现
   assert.ok(!JSON.stringify(relay.state).includes(v.json.data.deviceToken), '明文令牌不落盘（Relay 侧）')
   assert.ok(!JSON.stringify(relay.cp.listDevices()).includes(v.json.data.deviceToken), '明文令牌不落盘（CP 侧）')
 })
 
-test('T5 单活跃令牌：重新配对作废旧令牌', async () => {
-  const a = await pair('rotate-dev')
+test('T5 多台手机并存：互不作废；同一台手机重配只轮换自己那枚令牌', async () => {
+  const A = 'phone-aaaa1111'
+  const B = 'phone-bbbb2222'
+  const a = await pair('multi-dev', { phoneId: A, clientName: 'Pixel' })
   assert.equal(a.verify.status, 200)
-  const b = await pair('rotate-dev')
+  const b = await pair('multi-dev', { phoneId: B })
   assert.equal(b.verify.status, 200)
-  const old = await call('/d/rotate-dev/session/prompt', { method: 'POST', token: a.token, body: { text: 'x' } })
-  assert.equal(old.status, 401)
+
+  const read = (token) => call(`/api/sessions?deviceId=multi-dev`, { token })
+  assert.equal((await read(a.token)).status, 200, '第二台手机配对不该顶掉第一台')
+  assert.equal((await read(b.token)).status, 200)
+
+  // 同一台手机重配：只有它自己那枚失效（TC-5.6 逐台成立）
+  const a2 = await pair('multi-dev', { phoneId: A })
+  assert.equal((await read(a.token)).status, 401, '旧令牌必须失效')
+  assert.equal((await read(a2.token)).status, 200)
+  assert.equal((await read(b.token)).status, 200, '另一台手机不受牵连')
+
+  // 单独收回一台：电脑与另一台手机照旧
+  const rc = await call('/admin/revoke-client', {
+    method: 'POST', token: 'admin-secret', body: { deviceId: 'multi-dev', clientId: A },
+  })
+  assert.equal(rc.status, 200)
+  assert.equal((await read(a2.token)).status, 401, '被收回的手机立刻失效')
+  assert.equal((await read(b.token)).status, 200)
+  assert.equal(relay.cp.getDevice('multi-dev').tombstone, false, '电脑不受影响')
+
+  // 收回整台电脑：名下手机连坐
+  const rd = await call('/admin/revoke', { method: 'POST', token: 'admin-secret', body: { deviceId: 'multi-dev' } })
+  assert.equal(rd.status, 200)
+  assert.equal((await read(b.token)).status, 401, 'Host 被吊销，手机令牌同时失效')
 })
 
 test('T6 白名单外端点 403；在线桥闭环；HOST_OFFLINE 409；心跳 45s 超时', async () => {
@@ -173,14 +202,17 @@ test('T7 10s 无进度防悬挂：Host 不回响应 → 504 NO_PROGRESS', async 
 })
 
 test('T8 #5b 客户端 sinceSeq 只作观测记录，不参与补齐决策', async () => {
-  const p = await pair('cursor-dev')
+  // r9：Cursor 的 clientId 取**鉴权结果**（这台手机），不是 body 里自报的那个
+  const p = await pair('cursor-dev', { phoneId: 'phone-0009' })
   await call('/host/register', { method: 'POST', body: { deviceId: 'cursor-dev' } })
   const inflight = call('/d/cursor-dev/session/follow', {
-    method: 'POST', token: p.token, body: { sinceSeq: 42, clientId: 'phone-9', sessionId: 'session-1' },
+    method: 'POST', token: p.token, body: { sinceSeq: 42, clientId: 'i-am-someone-else', sessionId: 'session-1' },
   })
   await waitForQueue('cursor-dev')
   // CP 的 Cursor 主键是 (clientId, sessionId)，不是 deviceId
-  assert.equal(relay.cp.getCursor({ clientId: 'phone-9', sessionId: 'session-1' }).sinceSeq, 42)
+  assert.equal(relay.cp.getCursor({ clientId: 'phone-0009', sessionId: 'session-1' }).sinceSeq, 42)
+  assert.equal(relay.cp.getCursor({ clientId: 'i-am-someone-else', sessionId: 'session-1' }), null,
+    'body.clientId 不能用来改写别人的位点')
   const polled = await call('/host/poll?deviceId=cursor-dev')
   const frame = polled.json.data.frames[0]
   assert.equal(frame.body.sinceSeq, 42)

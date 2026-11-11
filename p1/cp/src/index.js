@@ -22,6 +22,8 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 
 export const LEASE_TTL_MS = 30_000
 export const DEVICE_OFFLINE_MS = 45_000
+/** 一台 Host 最多绑定几台手机（r9）。上限的意义不是容量而是收敛：列表页要能一眼看完。 */
+export const MAX_PHONES_PER_HOST = 8
 export const SESSION_STATES = ['running', 'awaiting', 'completed', 'stopped', 'failed', 'unreadable']
 
 export class ControlPlaneError extends Error {
@@ -54,9 +56,10 @@ export function createControlPlane({
   now = () => Date.now(),
   leaseTtlMs = LEASE_TTL_MS,
   offlineAfterMs = DEVICE_OFFLINE_MS,
+  maxPhonesPerHost = MAX_PHONES_PER_HOST,
   newId = () => randomUUID(),
 } = {}) {
-  const devices = new Map()     // deviceId -> Device
+  const devices = new Map()     // deviceId -> Device（Host 与手机各占一行，用 role 区分）
   const sessions = new Map()    // sessionId -> SessionIndex
   const leases = new Map()      // sessionId -> RouteLease
   const cursors = new Map()     // `${clientId}|${sessionId}` -> Cursor
@@ -72,6 +75,10 @@ export function createControlPlane({
     if (prev?.tombstone) throw new ControlPlaneError('UNAUTHORIZED', '设备已吊销')
     const row = {
       deviceId,
+      // role/boundHostId 一经创建不随注册报文改变：任何 Host 都能发 host/register，
+      // 若让它改这两列，就等于允许别人把一台手机「改挂」到自己名下。
+      role: prev?.role ?? input.role ?? 'host',
+      boundHostId: prev?.boundHostId ?? input.boundHostId ?? null,
       accountId: input.accountId ?? prev?.accountId ?? null,
       deviceName: input.deviceName ?? prev?.deviceName ?? null,
       platform: input.platform ?? prev?.platform ?? null,
@@ -101,6 +108,104 @@ export function createControlPlane({
     return safeEqualHex(sha256Hex(deviceToken), row.tokenDigest)
   }
 
+  /* ------------------------------------------------- Phone（r9 新增） */
+
+  /**
+   * 手机是**独立的设备行**，`boundHostId` 指向它配对的那台 Host。
+   *
+   * 为什么不是「Host 行上挂一串令牌」：那样一台手机重配就会把另一台的令牌一起顶掉，
+   * 或者反过来——为了不互相顶掉就得允许并存，而并存意味着重配不再作废旧令牌，
+   * 丢了手机只能全部重来。分开存之后两件事同时成立：
+   *   - 两台手机互不影响（各有一行、各有一枚令牌）；
+   *   - 同一台手机重配（同 phoneId）只作废它自己那枚令牌。
+   * 手机的 deviceId 由客户端生成并长期持有，所以「重配」在服务端就是同 id 覆盖。
+   */
+  const listPhones = (hostId) => [...devices.values()]
+    .filter((d) => d.role === 'phone' && d.boundHostId === hostId && !d.tombstone)
+    .map(cloneDevice)
+
+  const upsertPhone = ({ phoneId, hostId, label = null } = {}) => {
+    if (!phoneId || !hostId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 phoneId / hostId')
+    const host = devices.get(hostId)
+    if (!host || host.tombstone) {
+      throw new ControlPlaneError('HOST_OFFLINE', '目标 Host 未注册或已吊销', { retryable: true })
+    }
+    const prev = devices.get(phoneId)
+    if (prev) {
+      if (prev.tombstone) throw new ControlPlaneError('UNAUTHORIZED', '该手机已被吊销')
+      // 同一个 phoneId 不能改挂到别的 Host——否则拿着旧身份就能蹭进另一台电脑
+      if (prev.role !== 'phone' || prev.boundHostId !== hostId) {
+        throw new ControlPlaneError('UNAUTHORIZED', '设备身份与绑定关系不一致')
+      }
+    } else {
+      const bound = listPhones(hostId).length
+      if (bound >= maxPhonesPerHost) {
+        throw new ControlPlaneError('CLIENT_LIMIT', `该设备最多绑定 ${maxPhonesPerHost} 台手机`)
+      }
+    }
+    const row = {
+      deviceId: phoneId,
+      role: 'phone',
+      boundHostId: hostId,
+      accountId: host.accountId ?? null,
+      deviceName: label ?? prev?.deviceName ?? null,
+      platform: prev?.platform ?? 'mobile',
+      capabilities: prev?.capabilities ?? [],
+      tokenDigest: prev?.tokenDigest ?? null,
+      allowMobile: true,
+      state: 'online',
+      lastSeenAt: now(),
+      tombstone: false,
+    }
+    devices.set(phoneId, row)
+    return cloneDevice(row)
+  }
+
+  /** 写手机令牌：同 phoneId 覆盖 = 这台手机重配，旧令牌立即失效（TC-5.6 语义保留）。 */
+  const setPhoneToken = (phoneId, deviceToken) => {
+    const row = devices.get(phoneId)
+    if (!row || row.role !== 'phone' || row.tombstone) {
+      throw new ControlPlaneError('UNAUTHORIZED', '手机不存在或已吊销')
+    }
+    row.tokenDigest = sha256Hex(deviceToken)
+    return cloneDevice(row)
+  }
+
+  /**
+   * 手机侧鉴权：URL 里的 `deviceId` 是**目标 Host**，令牌却属于某台手机。
+   * 返回命中的手机身份（clientId）供位点与日志使用；`legacy` 表示令牌直接落在这台
+   * Host 行上（r9 之前配对的手机），仍然放行——否则升级一次全体手机掉线。
+   */
+  const verifyClientToken = (hostId, deviceToken) => {
+    const deny = { ok: false, clientId: null, legacy: false }
+    if (!hostId || !deviceToken) return deny
+    const host = devices.get(hostId)
+    if (!host || host.tombstone) return deny
+    const digest = sha256Hex(deviceToken)
+    if (host.tokenDigest && safeEqualHex(digest, host.tokenDigest)) {
+      return { ok: true, clientId: null, legacy: true }
+    }
+    const t = now()
+    for (const row of devices.values()) {
+      if (row.role !== 'phone' || row.tombstone || row.boundHostId !== hostId || !row.tokenDigest) continue
+      if (!safeEqualHex(digest, row.tokenDigest)) continue
+      row.lastSeenAt = t
+      row.state = 'online'
+      return { ok: true, clientId: row.deviceId, legacy: false }
+    }
+    return deny
+  }
+
+  /** 单独收回一台手机：Host 与其它手机不受影响。 */
+  const revokePhone = (phoneId) => {
+    const row = devices.get(phoneId)
+    if (!row || row.role !== 'phone') return null
+    row.tombstone = true
+    row.tokenDigest = null
+    row.state = 'offline'
+    return cloneDevice(row)
+  }
+
   const heartbeatDevice = (deviceId, ts = now()) => {
     const row = devices.get(deviceId)
     if (!row || row.tombstone) throw new ControlPlaneError('HOST_OFFLINE', '设备未注册或已吊销', { retryable: true })
@@ -120,9 +225,18 @@ export function createControlPlane({
   const revokeDevice = (deviceId) => {
     const row = devices.get(deviceId)
     if (!row) return null
+    if (row.role === 'phone') return revokePhone(deviceId)
     row.tombstone = true
     row.state = 'offline'
     row.tokenDigest = null
+    // 吊销 Host 等于收回它名下所有手机：留着手机行只会让「已吊销」变成半句话
+    for (const phone of devices.values()) {
+      if (phone.role === 'phone' && phone.boundHostId === deviceId) {
+        phone.tombstone = true
+        phone.tokenDigest = null
+        phone.state = 'offline'
+      }
+    }
     // 吊销设备时把它名下的会话与租约一并清掉，避免手机端看见幽灵会话
     for (const [id, s] of sessions) if (s.ownerDeviceId === deviceId) sessions.delete(id)
     for (const [id, l] of leases) if (l.deviceId === deviceId) leases.delete(id)
@@ -329,6 +443,8 @@ export function createControlPlane({
     // device
     getDevice, upsertDevice, setDeviceToken, verifyDeviceToken, heartbeatDevice,
     markDeviceOffline, revokeDevice, isDeviceAlive, listDevices,
+    // phone（r9）
+    upsertPhone, setPhoneToken, verifyClientToken, revokePhone, listPhones,
     // session index
     putSession, applySessionDiff, upsertSessions, getSession, listSessions, patchSession,
     // lease

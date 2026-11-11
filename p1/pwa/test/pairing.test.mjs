@@ -113,18 +113,26 @@ test('P7 回退路径签名与 node:crypto 等价（Relay 侧算法一致）', a
   assert.equal(bound.status, 200, '纯 JS 签名换得的令牌应绑定配对码登记的设备')
 })
 
-test('P8 重新配对作废旧令牌（单活跃令牌），新令牌可用、旧令牌失效', async () => {
+test('P8 重配轮换：带上 phoneId 只作废本机旧令牌，不带就是另一台新手机（r9）', async () => {
   const g1 = await call('/pair/generate', { method: 'POST', body: { deviceId: 'pc-re' } })
-  const old = await pairWithRelay({ baseUrl: base, code: g1.json.data.code })
+  const old = await pairWithRelay({ baseUrl: base, code: g1.json.data.code, phoneId: 'phone-re0001' })
   assert.ok(old.deviceToken)
+  assert.equal(old.deviceId, 'pc-re', 'deviceId 始终是目标 Host')
+  assert.equal(old.phoneId, 'phone-re0001', '回给本机的身份就是带上来的那个')
 
+  // 同一台手机重配：旧令牌失效（TC-5.6 逐台成立）
   const g2 = await call('/pair/generate', { method: 'POST', body: { deviceId: 'pc-re' } })
-  const fresh = await pairWithRelay({ baseUrl: base, code: g2.json.data.code })
+  const fresh = await pairWithRelay({ baseUrl: base, code: g2.json.data.code, phoneId: 'phone-re0001' })
   assert.notEqual(fresh.deviceToken, old.deviceToken)
-
   await wait(20)
-  const withOld = await call('/api/sessions?deviceId=pc-re', { token: old.deviceToken })
-  assert.equal(withOld.status, 401)
-  const withNew = await call('/api/sessions?deviceId=pc-re', { token: fresh.deviceToken })
-  assert.equal(withNew.status, 200)
+  assert.equal((await call('/api/sessions?deviceId=pc-re', { token: old.deviceToken })).status, 401)
+  assert.equal((await call('/api/sessions?deviceId=pc-re', { token: fresh.deviceToken })).status, 200)
+
+  // 不带 phoneId = 另一台手机：两枚令牌同时有效（这正是两台手机并存的前提）
+  const g3 = await call('/pair/generate', { method: 'POST', body: { deviceId: 'pc-re' } })
+  const other = await pairWithRelay({ baseUrl: base, code: g3.json.data.code })
+  assert.ok(other.phoneId && other.phoneId !== fresh.phoneId, '服务端会分配一个新身份')
+  assert.equal((await call('/api/sessions?deviceId=pc-re', { token: fresh.deviceToken })).status, 200,
+    '第二台手机配对不该顶掉第一台')
+  assert.equal((await call('/api/sessions?deviceId=pc-re', { token: other.deviceToken })).status, 200)
 })

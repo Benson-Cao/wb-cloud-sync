@@ -179,4 +179,15 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /paint\(evBuf\.get\(seq\), evOrigin\.get\(seq\)/, '重绘必须按 seq 取回原来源，不能一律当 replay')
   assert.match(page, /evOrigin\.set\(ev\.seq, source === 'replay'/, '收到事件时就要记来源，晚了就取不回来')
   assert.match(page, /btn\.hidden = !showNoise && noiseHidden === 0/, '没有插件事件时不放按钮')
+
+  // 阅读位置（W6 前置）：回到上次会话、按「距底」恢复、贴底跟随
+  assert.match(page, /wbsync\.lastSession/, '要记住上次看的会话，刷新后自动回去')
+  assert.match(page, /rows\.some\(\(r\) => r\.sessionId === last\)/, '上次的会话不在索引里就别硬开（被删了）')
+  assert.match(page, /wbsync\.gap\./, '读到哪里要按会话存，不能只存一个全局位置')
+  assert.match(page, /mainEl\.scrollHeight - mainEl\.scrollTop - mainEl\.clientHeight/,
+    '位置用「距底距离」记，绝对 scrollTop 在字节窗口下会错位')
+  assert.match(page, /followTail && source !== 'replay'/, '贴底跟随只跟实时事件，补读不该拽滚动条')
+  assert.match(page, /activeSession && activeSession !== sessionId\) saveScroll/, '切走前先存位置，DOM 一清就只剩 0')
+  assert.match(page, /id="back"/, '要有「← 列表」返回条')
+  assert.match(page, /const backToList = /, '返回列表要记住位置并保留选中行')
 })

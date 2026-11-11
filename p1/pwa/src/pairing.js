@@ -8,7 +8,13 @@
  *      `POST /pair`        → 换取一次性 challenge + per-challenge pairSecret
  *      （#2 裁定：pairSecret 一次性、不落盘、不参与令牌派生、不承担身份鉴别）；
  *      `POST /pair/verify` → 用 pairSecret 对 challenge 做 HMAC-SHA256，
- *      通过后换得 deviceToken（服务端只存 SHA-256 摘要，单活跃令牌）。
+ *      通过后换得 deviceToken（服务端只存 SHA-256 摘要）。
+ *
+ * r9 起有两个身份要分清：
+ *   - `deviceId` = **目标 Host**（URL 里 `/d/<deviceId>/…` 用的是它）；
+ *   - `phoneId`  = **这台手机自己**（服务端为它单独建一行，令牌挂在这行上）。
+ * 两台手机因此各持一枚令牌、互不作废；同一台手机重配时把 `phoneId` 带上，
+ * 服务端就只轮换它自己那枚令牌；不带上会被当成一台**新**手机（占一个名额）。
  *
  * HMAC 优先用 WebCrypto（`crypto.subtle`：HTTPS / localhost 安全上下文，Node ≥19
  * 全局 crypto 同接口）；**真机是局域网明文 HTTP**（如 `http://192.168.0.106:8787`），
@@ -45,6 +51,8 @@ const signHmac = async (subtle, secret, message) => {
 export async function pairWithRelay({
   baseUrl,
   code,
+  phoneId = null,       // 本机既有身份：带上就只轮换自己那枚令牌（r9）
+  clientName = null,    // 仅作管理台展示，不参与任何判定
   fetchImpl = globalThis.fetch,
   subtle = globalThis.crypto?.subtle,
 } = {}) {
@@ -78,11 +86,16 @@ export async function pairWithRelay({
   }
   const sig = await signHmac(subtle, challenge.pairSecret, challenge.challenge)
 
-  const done = await post('/pair/verify', { challenge: challenge.challenge, sig })
+  const verifyBody = { challenge: challenge.challenge, sig }
+  if (phoneId) verifyBody.phoneId = phoneId
+  if (clientName) verifyBody.clientName = clientName
+  const done = await post('/pair/verify', verifyBody)
   if (!done?.deviceToken) throw fail('INVALID_RESPONSE', '配对响应缺少 deviceToken')
   return {
     deviceToken: done.deviceToken,
-    deviceId: challenge.deviceId,      // 配对码登记时绑定的 Host 设备
+    // deviceId 保持「目标 Host」语义（页面里的 URL 全靠它），旧 Relay 只回 deviceId
+    deviceId: done.hostDeviceId ?? challenge.deviceId,
+    phoneId: done.deviceId ?? null,
     relayUrl: done.relayUrl ?? base,
   }
 }

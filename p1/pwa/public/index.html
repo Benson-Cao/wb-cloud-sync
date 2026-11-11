@@ -69,6 +69,8 @@
     .streambar button { flex: 1; background: #1b2431; border: 1px solid #3a4658; color: #9fb0c8; }
     .streambar button[hidden] { display: none; }
     .streambar button.on { border-color: #4da3ff; color: #cfe3ff; }
+    /* 「← 列表」按内容宽，把余下宽度留给翻页与噪声开关 */
+    .streambar #back { flex: 0 0 auto; }
     /* 不认识的原始事件默认折叠：首屏不该被 JSON 淹没，想看再点开 */
     .ev > details > summary { cursor: pointer; color: #8ab8e8; }
     .ev > details > pre { max-height: 260px; overflow: auto; }
@@ -134,6 +136,7 @@
       </div>
       <div id="artifacts" hidden></div>
       <div class="streambar">
+        <button id="back">← 列表</button>
         <button id="earlier" hidden>加载更早</button>
         <button id="noise">显示插件事件</button>
       </div>
@@ -152,6 +155,7 @@
     const seenSeq = new Map()   // sessionId -> 已渲染的最大 seq（幂等渲染）
     const pendingApprovals = new Map()   // approvalId -> { toolName, reason, sessionId, expiresAt }
     let approvalsPulled = false          // 已按「进入 following」补拉过一次，避免每次状态抖动都打接口
+    let restoredLastSession = false      // 「回到上次会话」只做一次：重连不该把人从当前会话里拽走
 
     $('relayBase').value = localStorage.getItem('wbsync.base') ?? ''
     // 已配对过（localStorage 有令牌）就不再展示配对码输入，避免误触重新配对
@@ -234,6 +238,36 @@
     let windowStart = -1       // 屏幕最早一条的 seq；> 0 表示前面还有
     let showNoise = false      // 插件内部流量（plugin:*）默认隐藏，避免把首屏糊成 JSON
     let noiseHidden = 0        // 本轮渲染隐藏了几条，用来提示按钮
+
+    /* ------------------------------------------------ 阅读位置（W6 前置） */
+    // 滚动容器是 <main>（列表与事件流同处一列），不是 window
+    const mainEl = document.querySelector('main')
+    const gapKey = (sid) => `wbsync.gap.${sid}`
+    /** 距底距离。存这个而不是 scrollTop：重进会话时内容长度会变（字节窗口），绝对位置没意义。 */
+    const bottomGap = () => mainEl.scrollHeight - mainEl.scrollTop - mainEl.clientHeight
+    const scrollToBottom = () => { mainEl.scrollTop = mainEl.scrollHeight }
+    let followTail = true      // 贴底跟随：只对「本来就看着底部」的人才跟
+    /** 记住当前会话读到哪（距底多少像素）。 */
+    const saveScroll = () => {
+      if (!activeSession) return
+      try { localStorage.setItem(gapKey(activeSession), String(Math.max(0, Math.round(bottomGap())))) } catch { /* 隐私模式禁用存储 */ }
+    }
+    /** 回到上次的位置；没有记录（第一次打开）就到底部看最新。 */
+    const restoreScroll = (sid) => {
+      let saved = null
+      try { saved = localStorage.getItem(gapKey(sid)) } catch { /* 同上 */ }
+      const gap = saved === null ? null : Number(saved)
+      if (gap === null || !Number.isFinite(gap)) { scrollToBottom(); followTail = true; return }
+      mainEl.scrollTop = Math.max(0, mainEl.scrollHeight - mainEl.clientHeight - gap)
+      followTail = gap < 48
+    }
+    // 用户自己往上翻时别把他拽回底部；滚回底部才恢复跟随
+    mainEl.addEventListener('scroll', () => { followTail = bottomGap() < 48 }, { passive: true })
+    // 切后台/关页也算「离开」，否则读到一半切走再回来会跳到底
+    addEventListener('pagehide', saveScroll)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') saveScroll()
+    })
     // 只画一条，不做去重/记账：重绘时也走它
     const paint = (ev, source) => {
       const type = ev?.type ?? ev?.t ?? 'event'
@@ -309,6 +343,8 @@
       evOrigin.set(ev.seq, source === 'replay' ? 'replay' : 'live')
       if (windowStart === -1 || ev.seq < windowStart) windowStart = ev.seq
       paint(ev, source)
+      // 实时事件到达时贴底跟随；补读（replay）不动滚动位置
+      if (followTail && source !== 'replay') scrollToBottom()
       updateEarlier()
       updateNoiseLabel()
     }
@@ -407,6 +443,14 @@
           renderList(rows); $('list').classList.remove('hint'); $('status').hidden = true
           $('newbar').hidden = false   // 已连接才亮「新建会话」（Host 离线时协议要求入口置灰）
           void refreshApprovals()      // 推送只保证「更快」，拉取才保证「断线期间的不漏」
+          // 回到上次那个会话：刷新页面 / 重开 PWA 后不必每次都从列表里再点一遍。
+          // 只做一次，且那个会话必须还在索引里（被删了就老实停在列表）。
+          if (!restoredLastSession) {
+            restoredLastSession = true
+            let last = null
+            try { last = localStorage.getItem('wbsync.lastSession') } catch { /* 隐私模式 */ }
+            if (!activeSession && last && rows.some((r) => r.sessionId === last)) void openStream(last)
+          }
         })
         .catch((e) => say(`连接失败：${e.message}`, true))
     }
@@ -493,12 +537,16 @@
       if (code) {
         say('配对中…')
         try {
-          const r = await pairWithRelay({ baseUrl: base, code })
+          // phoneId 是「本机身份」：带上它重配只轮换自己那枚令牌，不会占掉第二台手机的名额
+          const r = await pairWithRelay({
+            baseUrl: base, code, phoneId: localStorage.getItem('wbsync.phoneId'),
+          })
           token = r.deviceToken
           deviceId = r.deviceId
           localStorage.setItem('wbsync.base', base)
           localStorage.setItem('wbsync.deviceId', deviceId)
           localStorage.setItem('wbsync.token', token)
+          if (r.phoneId) localStorage.setItem('wbsync.phoneId', r.phoneId)
           $('pairCode').value = ''
           $('pairCode').placeholder = '已配对（留空直接连接）'
           say(`已配对：${deviceId}`)
@@ -576,7 +624,10 @@
 
     const openStream = async (sessionId) => {
       if (!client) return
+      // 离开上一个会话前先记住读到哪：DOM 马上就要被清空，晚一步就只剩 0
+      if (activeSession && activeSession !== sessionId) saveScroll()
       activeSession = sessionId
+      try { localStorage.setItem('wbsync.lastSession', sessionId) } catch { /* 隐私模式 */ }
       seenSeq.set(sessionId, -1)
       evBuf = new Map()
       evOrigin = new Map()
@@ -610,8 +661,21 @@
       void refreshArtifacts(sessionId)
       updateEarlier()
       updateNoiseLabel()
+      // 首屏画完再定位：内容高度此时才是确定的（第一次打开 → 到底部看最新）
+      restoreScroll(sessionId)
       $('conn').textContent = connState(client.snapshot())
     }
+
+    /** 从事件流回到列表：记住读到哪，列表里保持这一行高亮（不取消选中）。 */
+    const backToList = () => {
+      saveScroll()
+      followTail = false
+      mainEl.scrollTop = 0
+      const row = document.querySelector('.row.active')
+      if (row) row.scrollIntoView({ block: 'center' })
+    }
+
+    $('back').addEventListener('click', backToList)
 
     $('earlier').addEventListener('click', () => { void loadEarlier() })
     $('noise').addEventListener('click', () => { showNoise = !showNoise; rerender() })
@@ -622,7 +686,9 @@
       if (!window.confirm('清除本机保存的令牌与设备 ID？清除后需要重新配对。')) return
       client?.stop()
       client = null
-      for (const k of ['wbsync.token', 'wbsync.deviceId', 'wbsync.base']) localStorage.removeItem(k)
+      for (const k of ['wbsync.token', 'wbsync.deviceId', 'wbsync.base', 'wbsync.phoneId', 'wbsync.lastSession']) localStorage.removeItem(k)
+      // 每个会话一条阅读位置，也得一起清：换一台电脑后 sessionId 全变了，留着只是垃圾
+      for (const k of Object.keys(localStorage)) if (k.startsWith('wbsync.gap.')) localStorage.removeItem(k)
       activeSession = null
       evBuf = new Map()
       evOrigin = new Map()

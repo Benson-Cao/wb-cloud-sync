@@ -74,8 +74,8 @@ node --test p1/pwa/test/*.test.mjs       # 或 pnpm --dir p1/pwa test
 ## 明确的边界
 
 - **配对向导已做**：输 6 位码即完成配对（码由 PC 宿主插件本地页 `/__wbsync/pair` 生成）；配对码一次性，输错要回 PC 重新生成。已配对过的设备回访自动用已存令牌直连。
-- **凭据暂存 localStorage**：配对后令牌留在本机便于回访；「换电脑 / 吊销」场景由 PC 侧单活跃令牌机制兜底（重配对即作废旧令牌）。正式版如需更严管控，加「忘掉这台电脑」入口 + PC 侧主动吊销 UI。
-- **`deviceId` 单机期 = Host 设备 ID**：令牌按 Host 的 `deviceId` 登记（单活跃令牌，一台 Host 一部手机），多手机 / 多设备选择器属后续。
+- **凭据暂存 localStorage**：配对后令牌留在本机便于回访；「忘掉这台电脑」清掉本机令牌与身份。r9 起手机独立成行：本机重配只轮换自己那枚令牌，收回某台手机在 PC 管理台按台操作。
+- **`deviceId` = 目标 Host**：URL 里的 `deviceId` 始终是目标 Host；本机身份单独存在 `wbsync.phoneId`（r9）。一台 Host 可绑多台手机（默认 8 台），多设备选择器属后续。
 - **`POST /api/sessions` 已接**：新建会话链路（含 Host 适配器 409 透传与离线置灰）；0.1.5 真机已验证新建会话与第一句话投递均可用（会话日志含 `user/message` 与 `turn/end`）。
 - **取消轮次已接**：事件流面板「取消当前轮次」按钮 → `client.cancelTurn()` → `POST /d/<deviceId>/session/cancel` → 宿主 `sessionController.cancel({sessionId})`；只中断当前轮次、保留待处理收件箱。依赖当前选中的会话（`activeSession`），未选中时不产生请求。
 - **队列 UI 未做，宿主缺读接口**：asar 里只有 `updateQueue`（写：remove / steer / reorder），没有 `session/inbox` / `queue/list` / `session/pending` 任何读取端点，手机端拿不到待处理项列表。用 `agent/inbox/spliced` 本地重建镜像理论可行，但那是**增量差分**（`start` / `removedCount` / `inserted`），丢一帧即与宿主漂移，属不可信 UI，故不做。

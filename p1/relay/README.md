@@ -51,7 +51,8 @@ node p1/relay/run.mjs                    # PORT=8787；WBSYNC_HOST_TOKEN / WBSYN
 | 能力 | 对应需求 |
 |---|---|
 | `POST /pair/generate`（6 位码 / 10 min TTL / 设备+IP 5 次每分限速）、`POST /pair`、`POST /pair/verify`（HMAC-SHA256） | `02` FR-2.2~2.5、`04` §5.1 |
-| 令牌只落 `SHA-256` 摘要、单活跃令牌、重配对作废旧令牌、墓碑不复活 | `08` §4.2 |
+| 令牌只落 `SHA-256` 摘要、单活跃令牌（**逐设备**：手机自成一设备行，r9）、重配对只轮换本机令牌、墓碑不复活 | `08` §4.2、`04` §5.1 |
+| 多手机：一台 Host 可绑多台手机（上限 `maxPhonesPerHost`，默认 8）；`/admin/revoke-client` 逐台收回并断开其长连（r9） | `04` §2 手机独立成行 |
 | `WS /ws/host` 注册 / 心跳 / 索引上报 / 上行事件 / `http/response`；**断连立即判离线** | `04` §5.2、`03` §3.3 |
 | `WS /d/<id>/events/<sid>` 订阅 + 连续 `seq` 补齐 + `gap` 显式上报 | `04` §5.3、`ADR-004`、G4 |
 | `allowedEndpoints` 默认仅 `session/*`、`$events/*`，白名单外 403 | `04` §7、BR-6 |

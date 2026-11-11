@@ -324,3 +324,82 @@ test('返回值是副本：改调用方拿到的对象不会污染表', () => {
   s.headerRef.version = 99
   assert.equal(cp.getSession('s1').headerRef.version, 4)
 })
+
+/* ------------------------------------------------- Phone（r9：多手机） */
+
+const bindPhone = (cp, phoneId, hostId = 'pc-1', token = null, label = null) => {
+  cp.upsertPhone({ phoneId, hostId, label })
+  if (token) cp.setPhoneToken(phoneId, token)
+}
+
+test('两台手机各持一枚令牌，互不作废（r9 的核心动机）', () => {
+  const { cp } = makeCp()
+  cp.upsertDevice(device('pc-1'))
+  bindPhone(cp, 'ph-a', 'pc-1', 'tok-a', 'Pixel')
+  bindPhone(cp, 'ph-b', 'pc-1', 'tok-b', 'iPad')
+
+  assert.deepEqual(cp.verifyClientToken('pc-1', 'tok-a'), { ok: true, clientId: 'ph-a', legacy: false })
+  assert.deepEqual(cp.verifyClientToken('pc-1', 'tok-b'), { ok: true, clientId: 'ph-b', legacy: false })
+  assert.equal(cp.listPhones('pc-1').length, 2)
+
+  // 同一台手机重配：只作废它自己那枚（TC-5.6 的「重配即作废旧令牌」逐台成立）
+  cp.setPhoneToken('ph-a', 'tok-a2')
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-a').ok, false, '旧令牌必须失效')
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-a2').ok, true)
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-b').ok, true, '另一台手机不受牵连')
+})
+
+test('手机令牌不能越界：换一台 Host、或改挂绑定关系一律拒绝', () => {
+  const { cp } = makeCp()
+  cp.upsertDevice(device('pc-1'))
+  cp.upsertDevice(device('pc-2'))
+  bindPhone(cp, 'ph-a', 'pc-1', 'tok-a')
+
+  assert.equal(cp.verifyClientToken('pc-2', 'tok-a').ok, false, '同一枚令牌不能读另一台电脑')
+  assert.equal(cp.verifyClientToken('nope', 'tok-a').ok, false)
+
+  // phoneId 与一台电脑的 deviceId 撞车：不许把电脑改挂成手机
+  cp.upsertDevice(device('pc-3'))
+  assert.throws(() => cp.upsertPhone({ phoneId: 'pc-3', hostId: 'pc-1' }), (e) => e.code === 'UNAUTHORIZED')
+  // 已绑定的手机不能改挂
+  assert.throws(() => cp.upsertPhone({ phoneId: 'ph-a', hostId: 'pc-2' }), (e) => e.code === 'UNAUTHORIZED')
+})
+
+test('吊销单台手机不影响 Host 与另一台；吊销 Host 连坐名下所有手机', () => {
+  const { cp } = makeCp()
+  cp.upsertDevice(device('pc-1'))
+  bindPhone(cp, 'ph-a', 'pc-1', 'tok-a')
+  bindPhone(cp, 'ph-b', 'pc-1', 'tok-b')
+
+  const r = cp.revokePhone('ph-a')
+  assert.equal(r.tombstone, true)
+  assert.equal(r.tokenDigest, null, '吊销要连摘要一起清')
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-a').ok, false)
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-b').ok, true)
+  assert.equal(cp.getDevice('pc-1').tombstone, false, 'Host 不受影响')
+  assert.deepEqual(cp.listPhones('pc-1').map((p) => p.deviceId), ['ph-b'])
+  // 被吊销的手机拿着自己的身份重配也不许复活（墓碑），此时 Host 仍活着
+  assert.throws(() => cp.upsertPhone({ phoneId: 'ph-a', hostId: 'pc-1' }), (e) => e.code === 'UNAUTHORIZED')
+
+  cp.revokeDevice('pc-1')
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-b').ok, false, 'Host 被吊销，手机令牌同时失效')
+  assert.equal(cp.getDevice('ph-b')?.tokenDigest ?? null, null)
+})
+
+test('上限 N 台手机：超限 CLIENT_LIMIT，已绑定的重配不受限', () => {
+  const { cp } = makeCp({ maxPhonesPerHost: 2 })
+  cp.upsertDevice(device('pc-1'))
+  bindPhone(cp, 'ph-a', 'pc-1', 'tok-a')
+  bindPhone(cp, 'ph-b', 'pc-1', 'tok-b')
+  assert.throws(() => cp.upsertPhone({ phoneId: 'ph-c', hostId: 'pc-1' }), (e) => e.code === 'CLIENT_LIMIT')
+  // 已存在的手机重配不占新名额
+  assert.doesNotThrow(() => bindPhone(cp, 'ph-a', 'pc-1', 'tok-a2'))
+})
+
+test('r9 之前配对的手机（令牌落在 Host 行）仍可鉴权，标记 legacy', () => {
+  const { cp } = makeCp()
+  cp.upsertDevice(device('pc-1'))
+  cp.setDeviceToken('pc-1', 'old-host-token')
+  assert.deepEqual(cp.verifyClientToken('pc-1', 'old-host-token'), { ok: true, clientId: null, legacy: true })
+  assert.equal(cp.verifyClientToken('pc-1', 'whatever').ok, false)
+})

@@ -48,6 +48,8 @@ const DEFAULTS = {
   // 会被长回复/大会话摘要顶破，然后以 1009 静默断连、在途请求熬成 504。
   maxFrameBytes: 8 * 1024 * 1024,
   eventBufferBytes: 32 * 1024 * 1024,
+  // 一台 Host 最多绑几台手机（r9）。够用即可：这是「谁的手机能看这台电脑」的清单长度。
+  maxPhonesPerHost: 8,
 }
 
 /** 定长比较，避免按字符比密钥时的时序泄漏（`===` 会在首字节不同处提前返回）。 */
@@ -63,6 +65,18 @@ const safeEqual = (a, b) => {
   const y = Buffer.from(String(b), 'hex')
   return x.length === y.length && timingSafeEqual(x, y)
 }
+
+/**
+ * 手机自报的 `phoneId`：只是个**稳定身份**，不是凭据（凭据永远是令牌）。
+ * 限定字符集与长度是为了让它能安全地进 URL 与日志，不必再转义。
+ * 不合规就当没给 → 服务端生成一个；这比「拒绝配对」更合理：配对码才是信任建立手段。
+ */
+const PHONE_ID_RE = /^[A-Za-z0-9_-]{8,64}$/
+const sanitizePhoneId = (raw) => (typeof raw === 'string' && PHONE_ID_RE.test(raw) ? raw : null)
+/** 设备名只做展示，截断+去控制字符，不参与任何判定。 */
+const sanitizeLabel = (raw) => (typeof raw === 'string'
+  ? raw.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40) || null
+  : null)
 
 /**
  * 端点归一化：白名单必须比对**解码后**的端点，否则 `session/..%2Fadmin%2Frevoke`
@@ -178,6 +192,7 @@ code{color:#8ab8e8} #msg{margin:12px 0;min-height:1.4em}
 </style></head><body>
 <h1>WBSync 设备管理</h1>
 <p>吊销已配对设备：令牌立即失效、设备进入墓碑不可复活，其会话索引与租约一并清除。<b>写操作必须配置 <code>WBSYNC_ADMIN_TOKEN</code></b>；令牌只存本页内存，不写入 URL 或本地存储。</p>
+<p>一台电脑可以配对多台手机（r9）。撤回其中一台只会断它自己，不影响电脑与其它手机。</p>
 <label>Admin Token <input id="token" type="password" autocomplete="off" size="32"></label>
 <button id="refresh">刷新设备列表</button>
 <div id="msg"></div>
@@ -192,9 +207,9 @@ const load = async () => {
     const j = await r.json()
     if (!r.ok) { say('读取失败：' + (j.error && j.error.code) + ' ' + (j.error && j.error.message), true); return }
     $('rows').innerHTML = ''
+    const cell = (s) => { const td = document.createElement('td'); td.textContent = s; return td }
     for (const d of j.data.rows) {
       const tr = document.createElement('tr')
-      const cell = (s) => { const td = document.createElement('td'); td.textContent = s; return td }
       tr.appendChild(cell(d.deviceId))
       tr.appendChild(cell(d.tombstone ? '已吊销' : d.state))
       tr.appendChild(cell(d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : '—'))
@@ -206,18 +221,43 @@ const load = async () => {
       btn.disabled = Boolean(d.tombstone)
       btn.onclick = () => revoke(d.deviceId)
       td.appendChild(btn); tr.appendChild(td); $('rows').appendChild(tr)
+
+      // 已配对的手机逐台列在自己那台电脑下面：撤一台不等于撤一台电脑
+      for (const p of (d.phones || [])) {
+        const pr = document.createElement('tr')
+        pr.style.opacity = '0.85'
+        pr.appendChild(cell('  ↳ 手机 ' + (p.label ? p.label + ' · ' : '') + p.deviceId))
+        pr.appendChild(cell('已配对'))
+        pr.appendChild(cell(p.lastSeenAt ? new Date(p.lastSeenAt).toLocaleString() : '—'))
+        pr.appendChild(cell(p.tokenDigest ? p.tokenDigest.slice(0, 12) + '…' : '—'))
+        const ptd = document.createElement('td')
+        const pb = document.createElement('button')
+        pb.textContent = '收回这台手机'
+        pb.className = 'danger'
+        pb.onclick = () => revokeClient(d.deviceId, p.deviceId)
+        ptd.appendChild(pb); pr.appendChild(ptd); $('rows').appendChild(pr)
+      }
     }
     say('已列出 ' + j.data.rows.length + ' 台设备')
   } catch (e) { say('读取失败：' + e.message, true) }
 }
 const revoke = async (deviceId) => {
-  if (!window.confirm('确认吊销 ' + deviceId + '？该操作不可撤销。')) return
+  if (!window.confirm('确认吊销 ' + deviceId + '？该操作不可撤销，其名下手机一并失效。')) return
   try {
     const r = await fetch('/admin/revoke', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, headers()), body: JSON.stringify({ deviceId }) })
     const j = await r.json()
     if (!r.ok) { say('吊销失败：' + (j.error && j.error.code) + ' ' + (j.error && j.error.message), true); return }
     say('已吊销：' + deviceId); await load()
   } catch (e) { say('吊销失败：' + e.message, true) }
+}
+const revokeClient = async (deviceId, clientId) => {
+  if (!window.confirm('收回这台手机？它会立即掉线，需要重新输配对码。电脑与其它手机不受影响。')) return
+  try {
+    const r = await fetch('/admin/revoke-client', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, headers()), body: JSON.stringify({ deviceId, clientId }) })
+    const j = await r.json()
+    if (!r.ok) { say('收回失败：' + (j.error && j.error.code) + ' ' + (j.error && j.error.message), true); return }
+    say('已收回手机：' + clientId); await load()
+  } catch (e) { say('收回失败：' + e.message, true) }
 }
 $('refresh').onclick = load
 load()
@@ -268,7 +308,11 @@ export function createRelay(options = {}) {
   const rand = cfg.randomBytes ?? randomBytes
   const allowlist = cfg.allowedEndpoints ?? ALLOWED_ENDPOINTS
   // 元数据全在 CP；Relay 不再自己存设备表 / 索引 / 位点
-  const cp = cfg.controlPlane ?? createControlPlane({ now, offlineAfterMs: cfg.heartbeatTimeoutMs })
+  const cp = cfg.controlPlane ?? createControlPlane({
+    now,
+    offlineAfterMs: cfg.heartbeatTimeoutMs,
+    maxPhonesPerHost: cfg.maxPhonesPerHost,
+  })
   // PWA 壳静态根（/app → public/，/src → pwa/src）；null 关闭
   const staticRoots = resolveStaticRoots(cfg.staticDir)
 
@@ -307,6 +351,17 @@ export function createRelay(options = {}) {
       if (conn.isOpen()) { conn.sendJson(frame); reached++ } else set.delete(conn)
     }
     return reached
+  }
+  /** 关掉某台手机的事件订阅长连（按手机收回令牌时用：只断它，不碰同设备的其它手机）。 */
+  const closePhoneClient = (deviceId, clientId) => {
+    const set = state.phoneConns.get(deviceId)
+    if (!set) return 0
+    let closed = 0
+    for (const conn of [...set]) {
+      if (conn.clientId !== clientId) continue
+      try { conn.close?.(1008, 'token revoked'); closed++ } catch { /* 已断开 */ }
+    }
+    return closed
   }
   /** 惰性清过期条目：不额外起定时器，读写时顺手扫。 */
   const sweepApprovals = (deviceId = null) => {
@@ -492,7 +547,8 @@ export function createRelay(options = {}) {
       if (method === 'GET' && path === '/health') {
         return ok(res, {
           protocol: PROTOCOL,
-          online: cp.listDevices().filter((d) => isOnline(d.deviceId)).length,
+          // 只数电脑：手机是客户端，混进 online 会让「电脑在线吗」这个问题失去答案
+          online: cp.listDevices().filter((d) => d.role !== 'phone' && !d.tombstone && isOnline(d.deviceId)).length,
           sockets: [...state.sockets.entries()].filter(([, c]) => c.isOpen()).length,
         })
       }
@@ -533,7 +589,8 @@ export function createRelay(options = {}) {
         if (!safeEqual(String(body.sig ?? ''), expected)) return fail(res, 401, 'UNAUTHORIZED', 'HMAC 校验失败')
 
         const deviceToken = hex(32)
-        // 单活跃令牌：重新配对作废旧令牌；墓碑设备不复活
+        // 手机是**独立设备行**（r9）：多台手机各持一枚令牌，同 phoneId 重配只覆盖它自己那枚。
+        // 之前令牌直接落在这台 Host 行上，第二台手机配对就会把第一台顶掉。
         const prev = cp.getDevice(c.deviceId)
         if (prev?.tombstone) return fail(res, 401, 'UNAUTHORIZED', '设备已吊销')
         cp.upsertDevice({
@@ -542,8 +599,24 @@ export function createRelay(options = {}) {
           lastSeenAt: now(),
           capabilities: prev?.capabilities ?? [],
         })
-        cp.setDeviceToken(c.deviceId, deviceToken)   // 只存摘要
-        return ok(res, { deviceToken, protocol: PROTOCOL, relayUrl: cfg.publicBaseUrl ?? 'http://127.0.0.1' })
+        const phoneId = sanitizePhoneId(body.phoneId) ?? `phone-${hex(8)}`
+        try {
+          cp.upsertPhone({ phoneId, hostId: c.deviceId, label: sanitizeLabel(body.clientName) })
+          cp.setPhoneToken(phoneId, deviceToken)
+        } catch (e) {
+          // CP 的拒绝理由要如实回给手机：「已达上限」「该手机已吊销」与「码不对」是三种处置
+          const code = e?.code ?? 'UNAUTHORIZED'
+          if (code === 'CLIENT_LIMIT') return fail(res, 409, code, e.message)
+          if (code === 'HOST_OFFLINE') return fail(res, 409, code, e.message, true)
+          return fail(res, 401, code === 'UNAUTHORIZED' ? 'UNAUTHORIZED' : code, e?.message ?? '配对被拒绝')
+        }
+        return ok(res, {
+          deviceToken,
+          deviceId: phoneId,          // 这台手机自己的 ID：续配时回传即可轮换令牌
+          hostDeviceId: c.deviceId,   // URL 里的目标是它（/d/<hostDeviceId>/…）
+          protocol: PROTOCOL,
+          relayUrl: cfg.publicBaseUrl ?? 'http://127.0.0.1',
+        })
       }
 
       // Host 注册 / 心跳 / 索引（HTTP 降级通道；正式走 WS）
@@ -597,7 +670,7 @@ export function createRelay(options = {}) {
         const deviceId = url.searchParams.get('deviceId') ?? ''
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-        if (!cp.verifyDeviceToken(deviceId, token)) {
+        if (!cp.verifyClientToken(deviceId, token).ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
         sweepApprovals(deviceId)
@@ -614,7 +687,7 @@ export function createRelay(options = {}) {
         const deviceId = url.searchParams.get('deviceId') ?? ''
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-        if (!cp.verifyDeviceToken(deviceId, token)) {
+        if (!cp.verifyClientToken(deviceId, token).ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
         const rawPinned = url.searchParams.get('pinned')
@@ -634,7 +707,7 @@ export function createRelay(options = {}) {
         const probe = url.searchParams.get('deviceId') ?? ''
         const body = await readBody(req, cfg.maxBodyBytes)
         const deviceId = body.deviceId ?? probe
-        if (!cp.verifyDeviceToken(deviceId, token)) {
+        if (!cp.verifyClientToken(deviceId, token).ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
         if (!isOnline(deviceId)) {
@@ -678,19 +751,28 @@ export function createRelay(options = {}) {
         return ok(res, { accepted: true })
       }
 
-      // 管理台（只读设备总览）
+      // 管理台（只读设备总览；手机作为各自 Host 的子项列出）
       if (method === 'GET' && path === '/admin') {
         if (cfg.adminToken && req.headers.authorization !== `Bearer ${cfg.adminToken}`) {
           return fail(res, 401, 'UNAUTHORIZED', 'admin token 缺失')
         }
-        const rows = cp.listDevices().map((d) => ({
-          deviceId: d.deviceId,
-          state: isOnline(d.deviceId) ? 'online' : 'offline',
-          lastSeenAt: d.lastSeenAt,
-          tokenDigest: d.tokenDigest,
-          tombstone: d.tombstone,
-          transport: state.sockets.get(d.deviceId)?.isOpen() ? 'ws' : 'http-poll',
-        }))
+        const rows = cp.listDevices()
+          .filter((d) => d.role !== 'phone')
+          .map((d) => ({
+            deviceId: d.deviceId,
+            role: d.role ?? 'host',
+            state: isOnline(d.deviceId) ? 'online' : 'offline',
+            lastSeenAt: d.lastSeenAt,
+            tokenDigest: d.tokenDigest,
+            tombstone: d.tombstone,
+            transport: state.sockets.get(d.deviceId)?.isOpen() ? 'ws' : 'http-poll',
+            phones: cp.listPhones(d.deviceId).map((p) => ({
+              deviceId: p.deviceId,
+              label: p.deviceName,
+              lastSeenAt: p.lastSeenAt,
+              tokenDigest: p.tokenDigest,
+            })),
+          }))
         return ok(res, { rows })
       }
 
@@ -709,7 +791,33 @@ export function createRelay(options = {}) {
         if (!d) return fail(res, 404, 'HOST_OFFLINE', '设备不存在')
         // 现有 WS 立刻断开，避免吊销后旧连接继续收事件
         try { state.sockets.get(id)?.close?.() } catch { /* 已断开 */ }
+        // 手机长连挂在 Host 名下，Host 吊销后一并断掉（CP 已把它们标墓碑，这里是断连）
+        for (const conn of [...(state.phoneConns.get(id) ?? [])]) {
+          try { conn.close?.(1008, 'device revoked') } catch { /* 已断开 */ }
+        }
         return ok(res, { deviceId: d.deviceId, tombstone: d.tombstone, state: d.state })
+      }
+
+      // 单独收回一台手机（r9）：电脑与其它手机不受影响
+      if (method === 'POST' && path === '/admin/revoke-client') {
+        if (!cfg.adminToken) {
+          return fail(res, 409, 'ENDPOINT_NOT_ALLOWED', '未配置 WBSYNC_ADMIN_TOKEN，收回入口不可用')
+        }
+        if (req.headers.authorization !== `Bearer ${cfg.adminToken}`) {
+          return fail(res, 401, 'UNAUTHORIZED', 'admin token 缺失')
+        }
+        const body = await readBody(req, cfg.maxBodyBytes)
+        const deviceId = String(body.deviceId ?? '')
+        const clientId = String(body.clientId ?? '')
+        if (!deviceId || !clientId) return fail(res, 400, 'INVALID_JSON', '缺少 deviceId / clientId')
+        const phone = cp.getDevice(clientId)
+        // 「这台手机不在那台电脑名下」和「手机不存在」对外同形：不给枚举探测留缝
+        if (!phone || phone.role !== 'phone' || phone.boundHostId !== deviceId) {
+          return fail(res, 404, 'HOST_OFFLINE', '该设备名下没有这台手机')
+        }
+        const r = cp.revokePhone(clientId)
+        closePhoneClient(deviceId, clientId)
+        return ok(res, { deviceId, clientId, tombstone: Boolean(r?.tombstone) })
       }
 
       // PC 侧管理页：同源 HTML，不走 PWA 的 Service Worker
@@ -740,7 +848,9 @@ export function createRelay(options = {}) {
         const [, deviceId, rawEndpoint] = m
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-        if (!cp.verifyDeviceToken(deviceId, token)) {
+        // deviceId 是**目标 Host**，令牌属于某台已配对的手机 —— 两者不是同一个身份
+        const caller = cp.verifyClientToken(deviceId, token)
+        if (!caller.ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
         // 先解码再判白名单：直接拿原始（可能带 %2F / ..）的串做前缀匹配，
@@ -763,8 +873,14 @@ export function createRelay(options = {}) {
         // #5b：客户端 sinceSeq 只作观测记录，服务端不据此替客户端决定补齐起点。
         // Cursor 的主键是 (clientId, sessionId)：拿不到 sessionId 就不记，
         // 不用 endpoint 或 deviceId 冒充会话键（那会让位点落到错误的行上）。
+        // clientId 优先取**鉴权结果**里的手机身份：body 里那个是客户端自报的，
+        // 谁都能填，用它记位点等于允许别人改写你的进度。
         if (typeof body.sinceSeq === 'number' && body.sessionId) {
-          cp.putCursor({ clientId: body.clientId ?? 'anonymous', sessionId: body.sessionId, sinceSeq: body.sinceSeq })
+          cp.putCursor({
+            clientId: caller.clientId ?? body.clientId ?? 'anonymous',
+            sessionId: body.sessionId,
+            sinceSeq: body.sinceSeq,
+          })
         }
         // 审批应答：先答先得。已在别处应答/过期的一律 409，不再占用 Host 一个往返。
         if (endpoint === '$events/result') {
@@ -810,7 +926,8 @@ export function createRelay(options = {}) {
     if (sub) {
       const [, deviceId, sessionId] = sub
       const token = url.searchParams.get('token') ?? ''
-      if (!cp.verifyDeviceToken(deviceId, token)) {
+      const caller = cp.verifyClientToken(deviceId, token)
+      if (!caller.ok) {
         socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n')
         return
       }
@@ -830,6 +947,9 @@ export function createRelay(options = {}) {
         },
       }, { maxPayload: cfg.maxFrameBytes })
       if (!conn) { socket.destroy(); return }
+      // 记住是哪台手机连的：按手机吊销时要把它的长连一起断掉，
+      // 否则「吊销」只挡住了新请求，旧连接还能继续收事件。
+      conn.clientId = caller.clientId
       trackPhoneConn(deviceId, conn)
       state.hub.subscribe(sessionId, Number.isInteger(sinceSeq) ? sinceSeq : -1, conn)
       return
