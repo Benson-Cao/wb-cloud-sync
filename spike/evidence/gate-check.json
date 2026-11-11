@@ -1,41 +1,30 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-11T15:10:28.766Z",
+  "capturedAt": "2026-11-11T15:26:01.539Z",
   "git": {
-    "head": "14d425d1f7837c07fd2e52b555df6334be3ddf16",
+    "head": "b061d64c127674e2dce6665b331b3a656b6d7779",
     "branch": "main",
     "worktreeClean": true
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [
-      "package.json"
-    ],
+    "dataChanged": [],
     "signoffChanged": [],
-    "artifactChanged": [
-      "dist-tarball"
-    ],
+    "artifactChanged": [],
     "narrativeChanged": [],
-    "notes": [
-      "发布物已重建（仅记录，不影响判定）：dist-tarball"
-    ],
-    "previousCapturedAt": "2026-11-11T14:50:33.954Z",
-    "previousGitHead": "5bd17ee5b5d01ea4da74732bf6b28d3bca4e176f",
+    "notes": [],
+    "previousCapturedAt": "2026-11-11T15:10:28.766Z",
+    "previousGitHead": "14d425d1f7837c07fd2e52b555df6334be3ddf16",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：运行代码/证据：package.json",
-      "capturedAt": "2026-11-11T14:50:33.954Z",
-      "gitHead": "5bd17ee5b5d01ea4da74732bf6b28d3bca4e176f",
-      "dataChanged": [
-        "package.json"
-      ],
+      "previousStatus": "CURRENT",
+      "capturedAt": "2026-11-11T15:10:28.766Z",
+      "gitHead": "14d425d1f7837c07fd2e52b555df6334be3ddf16",
+      "dataChanged": [],
       "signoffChanged": [],
-      "artifactChanged": [
-        "dist-tarball"
-      ],
+      "artifactChanged": [],
       "narrativeChanged": []
     }
   },
