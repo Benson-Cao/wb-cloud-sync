@@ -1,43 +1,49 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-11T14:50:33.954Z",
+  "capturedAt": "2026-11-11T15:10:28.766Z",
   "git": {
-    "head": "5bd17ee5b5d01ea4da74732bf6b28d3bca4e176f",
+    "head": "14d425d1f7837c07fd2e52b555df6334be3ddf16",
     "branch": "main",
     "worktreeClean": true
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [],
-    "signoffChanged": [],
-    "artifactChanged": [],
-    "narrativeChanged": [
-      "PROTOCOL.md"
+    "dataChanged": [
+      "package.json"
     ],
-    "notes": [],
-    "previousCapturedAt": "2026-11-11T14:44:31.559Z",
-    "previousGitHead": "7a30a2ddb268b54e00e3abd1666560a7ba90b376",
+    "signoffChanged": [],
+    "artifactChanged": [
+      "dist-tarball"
+    ],
+    "narrativeChanged": [],
+    "notes": [
+      "发布物已重建（仅记录，不影响判定）：dist-tarball"
+    ],
+    "previousCapturedAt": "2026-11-11T14:50:33.954Z",
+    "previousGitHead": "5bd17ee5b5d01ea4da74732bf6b28d3bca4e176f",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "DRIFTED",
-      "previousReason": "描述文字变化（不阻断）：PROTOCOL.md",
-      "capturedAt": "2026-11-11T14:44:31.559Z",
-      "gitHead": "7a30a2ddb268b54e00e3abd1666560a7ba90b376",
-      "dataChanged": [],
+      "previousStatus": "STALE",
+      "previousReason": "已变化（阻断）：运行代码/证据：package.json",
+      "capturedAt": "2026-11-11T14:50:33.954Z",
+      "gitHead": "5bd17ee5b5d01ea4da74732bf6b28d3bca4e176f",
+      "dataChanged": [
+        "package.json"
+      ],
       "signoffChanged": [],
-      "artifactChanged": [],
-      "narrativeChanged": [
-        "PROTOCOL.md"
-      ]
+      "artifactChanged": [
+        "dist-tarball"
+      ],
+      "narrativeChanged": []
     }
   },
   "fingerprints": {
     "data": {
       "index.js": "639eeebca42695b1841a65d99b9812d77c37985171537d90e2429761cbe75523",
       "cordis.patch.yml": "660bc4071fc3168cc0c06dfe4f2e85f6929b6d6765e93a9a60ab17eff1e1c687",
-      "package.json": "3f54d2511198586f617823d08bfe783e11249751583c5450597b4eec0b292254",
+      "package.json": "4a10947a3b8a6dcfe2c5b0d7b7512bc5133228c5a2f24f754dcbf971db9a417a",
       "host-probe.json": "a57205ad03ff73f8da91c578a460cbab75501bc32478fa1ae21b847d5557a751",
       "check-plugin.json": "6c212298aa2915c87a7a47428402bea4db89d30878ea97eb63acc7359c48c5a2",
       "gate-check.mjs": "449ad1f7842d788bdfd25af8078c075d2d2246388cadd4779cdf445b357ded95",
@@ -55,7 +61,7 @@
       "WORKBUDDY-REFERENCE.md": "e286a4af7afe2aab6f9462bfec7d0baf25ff4c892b21245624963490be49cdcc"
     },
     "artifact": {
-      "dist-tarball": "fb82af0bba2da8e8054cb5c5b1d955d298dc62496bac271751969b99a65b7818"
+      "dist-tarball": "2cef23654f4ddebeeaab5a06286c1ba7ef4e5b5b8b9bdbcaffc3d9c3a4a67ad8"
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
@@ -63,7 +69,7 @@
     }
   },
   "secretScan": {
-    "filesScanned": 120,
+    "filesScanned": 121,
     "patterns": [
       "github-classic",
       "github-fine-grained",
