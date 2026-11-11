@@ -189,13 +189,19 @@ export function createBackfillReader({ openSession, maxBytes = DEFAULT_REPLAY_MA
   const budget = Math.max(1, Number(maxBytes) || DEFAULT_REPLAY_MAX_BYTES)
   const cap = Math.min(Math.max(1, Number(maxRows) || 200), 1000)
 
-  return async function backfill({ sessionId, beforeSeq, limit } = {}) {
+  return async function backfill({ sessionId, beforeSeq, limit, bytes } = {}) {
     if (!sessionId) return { ok: false, code: 'SESSION_UNREADABLE', message: '缺少 sessionId' }
     const before = Number.isInteger(beforeSeq) ? beforeSeq : null
     if (before === null || before <= 0) {
       return { ok: true, value: { sessionId, events: [], fromSeq: null, toSeq: null, hasMoreEarlier: false, bytes: 0 } }
     }
     const want = Math.min(Math.max(1, Number(limit) || 50), cap)
+    // 首屏窗口可以比翻页大（一次开屏 vs 反复滚动），但预算由**调用方只能调小不能调大**：
+    // 上限锁在 4× 页预算，客户端传 8 MiB 也只给到 192 KiB。
+    const effectiveBudget = Math.min(
+      Math.max(4 * 1024, Number(bytes) || budget),
+      budget * 4,
+    )
     const from = Math.max(0, before - want)
 
     let handle
@@ -219,10 +225,10 @@ export function createBackfillReader({ openSession, maxBytes = DEFAULT_REPLAY_MA
       // 光按预算只能拿到 1~2 条，手机上一屏都撑不满、上下文全没了。
       // 所以不足 8 条时允许超预算，但不超过 4×（防 8 条 × 1 MiB 把帧撑爆）。
       const minRows = Math.min(8, batch.length)
-      const hardCap = budget * 4
+      const hardCap = effectiveBudget * 4
       for (let i = batch.length - 1; i >= 0; i--) {
         const size = eventBytes(batch[i])
-        const overBudget = picked.length > 0 && bytes + size > budget
+        const overBudget = picked.length > 0 && bytes + size > effectiveBudget
         if (overBudget && (picked.length >= minRows || bytes + size > hardCap)) break
         picked.unshift(batch[i])
         bytes += size

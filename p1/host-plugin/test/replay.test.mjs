@@ -355,3 +355,21 @@ test('BF6 条数下限：大事件把预算吃满时仍给到 8 条，但不超�
   assert.ok(r.value.bytes <= 12 * 1024 * 4, '但不得超过 4× 预算')
   assert.equal(r.value.events.at(-1).seq, 39, '永远保留紧邻窗口的那条')
 })
+
+test('BF7 首屏窗口可要更大的预算，但 Host 把上限锁在 4× 页预算（挡客户端要 8 MiB）', async () => {
+  const { createBackfillReader } = await import('../src/replay.js')
+  const events = Array.from({ length: 100 }, (_, i) => ({ seq: i, data: { text: 'z'.repeat(10_000) } }))
+  const backfill = createBackfillReader({ openSession: async () => makeHandle(events), maxBytes: 48 * 1024 })
+
+  const normal = await backfill({ sessionId: 's', beforeSeq: 100, limit: 100 })
+  const wide = await backfill({ sessionId: 's', beforeSeq: 100, limit: 100, bytes: 96 * 1024 })
+  const greedy = await backfill({ sessionId: 's', beforeSeq: 100, limit: 100, bytes: 8 * 1024 * 1024 })
+
+  assert.ok(wide.value.bytes > normal.value.bytes, '窗口预算更大应拿到更多内容')
+  assert.ok(wide.value.events.length > normal.value.events.length)
+  assert.ok(greedy.value.bytes <= 48 * 1024 * 4, `上限必须夹在 192 KiB，实际 ${greedy.value.bytes}`)
+  for (const r of [normal, wide, greedy]) {
+    assert.equal(r.value.events.at(-1).seq, 99, '永远保留紧邻窗口的那条')
+    assert.equal(r.value.hasMoreEarlier, true)
+  }
+})

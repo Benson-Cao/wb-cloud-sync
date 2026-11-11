@@ -352,9 +352,10 @@ ctx.on('approval/request', (request, next) => Promise<ApprovalOutcome>)   // 瀑
 
 手机打开会话时**不再全量补齐**。真机 874 条事件按 48 KiB/页要走数十到上百个往返，首屏要等好几秒；而用户 99% 的情况只想看最近发生了什么。
 
-- **窗口按字节定，不按条数定**：先 `POST /session/backfill { beforeSeq: lastSeq + 1, limit: 200 }`，由 Host 按 **48 KiB 字节预算**裁出「最近一页」，拿到 `toSeq` 后再 `follow(sessionId, { sinceSeq: toSeq })` 接实时流。客户端不再猜窗口起点。
+- **窗口按字节定，不按条数定**：先 `POST /session/backfill { beforeSeq: lastSeq + 1, limit: 200, bytes: 98304 }`，由 Host 按**字节预算**裁出「最近一页」，拿到 `toSeq` 后再 `follow(sessionId, { sinceSeq: toSeq })` 接实时流。客户端不再猜窗口起点。
   - 为什么不是固定 50 条：50 条 × 40 KB 的工具结果 = **2 MB**，50 条 × 200 B 的碎片 = **10 KB**，同一数字在两种会话里完全不是一回事。
-  - **条数下限 8**：若最新几条都是几十 KB 的巨型事件，纯按预算只剩 1~2 条，一屏都不满、上下文也没了；不足 8 条时允许超预算，但**不超过 4× 预算**（防 8 条 × 1 MiB 把帧撑爆）。
+  - **两个预算，一个旋钮**：页预算 `replayMaxBytes` 默认 48 KiB（`session/follow` 翻页 + `backfill` 翻页共用）；首屏窗口要 **2×（96 KiB）**——开屏只发生一次，多给点内容比多跑一次往返值。窗口预算由客户端在请求里带 `bytes`，**Host 夹在 `[4 KiB, 4× 页预算]`**：客户端要 8 MiB 也只给到 192 KiB。
+  - **条数下限 8**：若最新几条都是几十 KB 的巨型事件，纯按预算只剩 1~2 条，一屏都不满、上下文也没了；不足 8 条时允许超预算，但**不超过 4× 该次预算**（防 8 条 × 1 MiB 把帧撑爆）。
   - 索引里没有 `lastSeq`（老数据）时才退回 `follow(-1)` 全量引导补齐。
 - **反向补读**：`POST /d/<deviceId>/session/backfill`，请求 `{ sessionId, beforeSeq, limit }`，返回紧邻窗口前面的那一段：
 
@@ -363,7 +364,7 @@ ctx.on('approval/request', (request, next) => Promise<ApprovalOutcome>)   // 瀑
 | `events[]` | `seq < beforeSeq` 的最后 `limit` 条（按 `seq` 升序） |
 | `fromSeq` / `toSeq` | 本段的起止 seq |
 | `hasMoreEarlier` | 最早一条 `seq > 0` 即前面还有；界面据此决定要不要继续显示「加载更早」 |
-| `bytes` | 本段字节数（同样受 48 KiB 预算约束） |
+| `bytes` | 本段字节数（受本次预算约束；请求可带 `bytes` 覆盖，Host 夹在 `[4 KiB, 4× 页预算]`） |
 
 **预算从后往前砍**：超预算时丢的是更早的那些，紧邻窗口的最新几条必须留下——否则用户点十次「加载更早」都看不到紧接着的那几条。
 

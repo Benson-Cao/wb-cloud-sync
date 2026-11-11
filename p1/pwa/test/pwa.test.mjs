@@ -495,3 +495,21 @@ test('D4 openWindow：按 lastSeq 反向开窗；不知道 lastSeq 就返回 nul
   const none = await client.openWindow({ sessionId: 's', lastSeq: -1 })
   assert.equal(none, null, '不知道 lastSeq 时不猜，交给 follow(-1)')
 })
+
+test('D5 openWindow 默认要两份页预算（96 KiB），翻页则不带 bytes 用 Host 默认', async () => {
+  const bodies = []
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body)
+    bodies.push({ tail: String(url).split('/').pop(), body })
+    return {
+      ok: true, status: 200,
+      json: async () => ({ ok: true, data: { events: [{ seq: 5, data: {} }], toSeq: 5, hasMoreEarlier: true } }),
+    }
+  }
+  const client = createPwaClient({ baseUrl: 'http://x', deviceId: 'd', token: 't', fetchImpl })
+  await client.openWindow({ sessionId: 's', lastSeq: 5 })
+  await client.backfill({ sessionId: 's', beforeSeq: 5, limit: 50 })
+  assert.equal(bodies[0].body.bytes, 96 * 1024, '首屏窗口默认 96 KiB')
+  assert.equal(bodies[0].body.beforeSeq, 6)
+  assert.equal(bodies[1].body.bytes, undefined, '翻页不覆盖预算，交给 Host 默认值')
+})

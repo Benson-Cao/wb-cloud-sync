@@ -10,6 +10,7 @@
 
 - 50 条 × 40 KB 的工具结果 = **2 MB**；50 条 × 200 B 的碎片 = **10 KB**。同一个数字在两种会话里完全不是一回事。
 - 现在由 **Host 按 48 KiB 字节预算**裁出「最近一页」：客户端先问一次 `openWindow`（内部走 `session/backfill`，`beforeSeq = lastSeq + 1`），拿到 `toSeq` 后再 `follow(sinceSeq: toSeq)` 接实时流。首屏仍是**一个请求 + 一个窗口**。
+- **窗口预算 96 KiB（2× 页预算）**：开屏只发生一次，多给内容比多跑往返值；翻页仍是 48 KiB。客户端在请求里带 `bytes`，Host 夹在 `[4 KiB, 4× 页预算]`——要 8 MiB 也只给 192 KiB。
 - **条数下限 8**：若最新几条都是巨型事件，纯按预算只剩 1~2 条，一屏都不满。不足 8 条时允许超预算，但**不超过 4× 预算**（防 8 条 × 1 MiB 把帧撑爆）。上限 200 条只是保险，真正起作用的是字节。
 - 新增 `POST /d/<id>/session/backfill`（`{sessionId, beforeSeq, limit}` → `{events, fromSeq, toSeq, hasMoreEarlier, bytes}`）。**预算从后往前砍**：超预算丢更早的，绝不留掉紧邻窗口的最新几条。
 - 「加载更早」按钮：`windowStart > 0` 才出现，补到 0 收起；补读后按 `seq` **整屏重绘**（往 DOM 前面插容易乱序），事件留在 `evBuf` 供重绘。

@@ -425,13 +425,14 @@ export function createPwaClient({
    * 反向补读：取窗口前面那一段（手机首屏只看最近 N 条，往上翻时才要更早的）。
    * 走 session/backfill，与 session/follow 同一条 `session/*` 下行通道。
    */
-  const backfill = async ({ sessionId, beforeSeq, limit = 50 } = {}) => {
+  const backfill = async ({ sessionId, beforeSeq, limit = 50, bytes } = {}) => {
     if (!sessionId) throw Object.assign(new Error('补读缺 sessionId'), { code: 'INVALID_ARGUMENT' })
     if (!Number.isInteger(beforeSeq)) throw Object.assign(new Error('补读缺 beforeSeq'), { code: 'INVALID_ARGUMENT' })
     const r = await fetchImpl(`${base}/d/${encodeURIComponent(deviceId)}/session/backfill`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ sessionId, beforeSeq, limit, clientId }),
+      // bytes 只在想覆盖「一页预算」时带上（首屏窗口）；翻页不带，用 Host 默认值
+      body: JSON.stringify({ sessionId, beforeSeq, limit, clientId, ...(bytes ? { bytes } : {}) }),
     })
     const payload = await r.json().catch(() => null)
     if (!r.ok || payload?.ok !== true) {
@@ -474,10 +475,12 @@ export function createPwaClient({
    * 固定条数管不住体积（50 条 × 40 KB = 2 MB），固定字节才能同时管带宽和阅读量。
    * 返回 null 表示「不知道 lastSeq」，调用方退回 follow(-1) 全量/引导补齐。
    */
-  const openWindow = async ({ sessionId, lastSeq, limit = 200 } = {}) => {
+  const openWindow = async ({ sessionId, lastSeq, limit = 200, bytes = 96 * 1024 } = {}) => {
     if (!sessionId) throw Object.assign(new Error('开窗缺 sessionId'), { code: 'INVALID_ARGUMENT' })
     if (!Number.isInteger(lastSeq) || lastSeq < 0) return null
-    const data = await backfill({ sessionId, beforeSeq: lastSeq + 1, limit })
+    // 首屏窗口要两份页预算（96 KiB）：一次开屏，多给点内容比多跑一次往返值。
+    // 真正的上限在 Host 侧（≤4× 页预算），这里传大也只是被夹住。
+    const data = await backfill({ sessionId, beforeSeq: lastSeq + 1, limit, bytes })
     const events = Array.isArray(data.events) ? data.events : []
     return {
       events,

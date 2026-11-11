@@ -273,6 +273,9 @@ export function apply(ctx, config = {}) {
       if (endpoint === 'session/backfill') {
         const r = await adapters.backfill({
           sessionId: body?.sessionId, beforeSeq: body?.beforeSeq, limit: body?.limit,
+          // 首屏窗口可以要得比一页大；适配器会把上限锁在 4× 页预算。
+          // 只在客户端显式给时带上，避免把 bytes: undefined 透给适配器（参数形状保持旧样）。
+          ...(body?.bytes === undefined ? {} : { bytes: body.bytes }),
         })
         const { status, body: payload } = unwrap(r, {
           sessionId: body?.sessionId ?? null, events: [], hasMoreEarlier: false,
