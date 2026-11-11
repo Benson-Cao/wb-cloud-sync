@@ -486,3 +486,25 @@ test('HA9 端到端（bundle 产物）：合成包也能接上宿主新建会话
     await env.cleanup()
   }
 })
+
+test('HA25 排队期间的幂等：同一 clientMsgId 只转发一次（宿主只管已落库的那条）', async () => {
+  const { ctx, calls } = makeController()
+  const adapters = createHostAdapters(ctx)
+  const first = await adapters.submitPrompt({ sessionId: 's-25', text: '同一句', clientMsgId: 'msg-25' })
+  assert.equal(first.ok, true)
+  assert.notEqual(first.value?.duplicate, true, '第一次必须真的转发')
+
+  for (let i = 0; i < 4; i++) {
+    const again = await adapters.submitPrompt({ sessionId: 's-25', text: '同一句', clientMsgId: 'msg-25' })
+    assert.equal(again.ok, true, '重复请求对客户端仍是成功')
+    assert.equal(again.value?.duplicate, true, '重复请求要标记 duplicate')
+  }
+  assert.equal(calls.prompt.length, 1, '只许真的调一次宿主 prompt')
+
+  // 不同 clientMsgId 不能被误杀
+  await adapters.submitPrompt({ sessionId: 's-25', text: '另一句', clientMsgId: 'msg-25b' })
+  assert.equal(calls.prompt.length, 2)
+  // 同一 clientMsgId 落到不同会话也不该互相影响
+  await adapters.submitPrompt({ sessionId: 's-other', text: '同一句', clientMsgId: 'msg-25' })
+  assert.equal(calls.prompt.length, 3)
+})

@@ -48,9 +48,9 @@ node scripts/beta-check.mjs --admin <你的 admin token>
 |---|---|---|---|
 | A1 配对 | ✓ | 人工 + 管理台 | 两台手机各自配上；管理台可见 |
 | A2 收发实时 | ✓ | 人工 | 手机发、PC 回，同一条且不需刷新 |
-| A3 断线补齐 | ⧗ | `npm run e2e` | 需要一次**成功**的轮次；当前被宿主模型连接挡住 |
-| A4 幂等 | ⧗ | `npm run e2e` | 同上；另有一次可疑观察见 §3 末 |
-| A5 队列顺序 | ⧗ | `npm run e2e` | 同上 |
+| A3 断线补齐 | ✓ | `npm run e2e` | 断线期间那条已补齐、与已收到的 seq 无重叠、seq 连续 |
+| A4 幂等 | ⧗ | `npm run e2e` | 连发 5 次落了 **2 条**（真实缺陷）；已加插件侧短期去重，待重启 DSH 后复验 |
+| A5 队列顺序 | ✓ | `npm run e2e` | 3 条都进会话、顺序与发送一致、各自之后都有 turn/end |
 | A6 卸载残留 | ☐ | 沿用历史证据（TC-4.10） | 本轮未改插件，不重复卸载 |
 
 `npm run e2e -- --admin <token>` 会用一个**临时会话**跑 A3/A4/A5 三条（跑完在 PC 上删掉那个会话即可）：
@@ -178,3 +178,19 @@ turn/end { reason: { kind: 'error', error: { message: 'Connection error.', code:
 同一个 `clientMsgId` 发了 5 次：第 1 条按预期落成 `user/message`（seq 39），但**另一份留在 `agent/inbox` 排队**，随后在下一轮又被投递成一条 `user/message`（seq 66，同一 `rpcId`）。也就是说宿主去重只作用于「已落库的消息」，管不住「还在队列里的那份」。
 
 如果复验仍能重现，这是 M1-4（只产生 1 条）的实质缺陷，按 P1 记：**给手机端的后果是同一条话被回答两次**。
+
+### 3.y A4 的缺陷与修法（2026-11-11 23:2x）
+
+第一次成功的端到端（23:22，宿主模型恢复后）：
+
+```
+A5 PASS  3 条都进了会话；顺序与发送一致；各自之后 turn/end 次数 3/2/1
+A3 PASS  重连补来 12 条，与已收到的重叠 0 条；断线那条已补齐；seq 连续
+A4 FAIL  5 次请求均被受理；会话里出现 2 条对应的 user/message（期望 1）
+```
+
+**根因**：宿主的 `requestId` 去重只覆盖「已经落成 `user/message` 的消息」，管不住还挂在 `mode:'queue'` 里的那一份。同一个 `clientMsgId` 连发 5 次时，一条落库、另一份留在 inbox，下一轮又被投递 —— 手机上表现为**同一句话被回答两次**。
+
+**修法**（插件侧，host-plugin 0.1.12）：`submitPrompt` 按 `(sessionId, clientMsgId)` 记 10 分钟，重复的直接回 `{accepted:true, duplicate:true}` 且**不再转发给宿主**。这一层不替代宿主幂等，只补「排队期间」这个空隙；TTL 与条数都有上界。
+
+**生效条件**：插件已装到 profile（0.1.12），**需重启 DSH** 后重跑 `npm run e2e` 复验。

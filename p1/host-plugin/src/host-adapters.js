@@ -198,6 +198,27 @@ export function createHostAdapters(ctx, options = {}) {
   })
 
   /**
+   * 「排队期间」的幂等补丁（见 submitPrompt 的说明）：
+   * 同 (sessionId, clientMsgId) 10 分钟内只放行一次。表有上界，超了就淘汰最老的一半。
+   */
+  const recentPrompts = new Map()          // `${sessionId}|${clientMsgId}` -> ts
+  const PROMPT_DEDUPE_TTL_MS = 10 * 60_000
+  const PROMPT_DEDUPE_MAX = 200
+  const isDuplicatePrompt = (sessionId, clientMsgId) => {
+    if (!sessionId || !clientMsgId) return false          // 没有幂等键就别假装有
+    const key = `${sessionId}|${clientMsgId}`
+    const now = Date.now()
+    const prev = recentPrompts.get(key)
+    if (typeof prev === 'number' && now - prev < PROMPT_DEDUPE_TTL_MS) return true
+    recentPrompts.set(key, now)
+    if (recentPrompts.size > PROMPT_DEDUPE_MAX) {
+      const byAge = [...recentPrompts.entries()].sort((a, b) => a[1] - b[1])
+      for (const [k] of byAge.slice(0, Math.max(1, Math.floor(byAge.length / 2)))) recentPrompts.delete(k)
+    }
+    return false
+  }
+
+  /**
    * 提交一条消息。`extra` 是附加内容段（如 `{type:'file', receiptId}`），
    * 与文本一起按 session/prompt 的 content 顺序下发；文本为空时只发附件。
    */
@@ -277,7 +298,19 @@ export function createHostAdapters(ctx, options = {}) {
       }
     },
 
-    /** 手机向已有会话发一句话：clientMsgId → requestId（宿主原生幂等）。 */
+    /**
+     * 手机向已有会话发一句话：clientMsgId → requestId。
+     *
+     * **补一层短期去重**（真机取证 2026-11-11）：宿主的 requestId 去重只覆盖
+     * 「已经落成 user/message 的消息」，管不住还挂在 `mode:'queue'` 里的那份 ——
+     * 同一个 clientMsgId 连发 5 次，实测落了 **2 条** user/message（M1-4 因此不达标），
+     * 手机上表现为同一句话被回答两次。
+     *
+     * 所以这里按 (sessionId, clientMsgId) 记 10 分钟：重复的直接回
+     * `{ accepted: true, duplicate: true }`，**不再转发给宿主**。
+     * 这一层不替代宿主幂等，只是把「排队期间」这个空隙补上；TTL 与条数都设上界，
+     * 免得长跑进程把这张表养成内存泄漏。
+     */
     submitPrompt: async ({ sessionId, text, clientMsgId, attachments }) => {
       if (!sessionId) {
         return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'submitPrompt 缺 sessionId' }
@@ -288,6 +321,9 @@ export function createHostAdapters(ctx, options = {}) {
         .filter((a) => a && a.type === 'file' && typeof a.receiptId === 'string' && a.receiptId)
       if (typeof text !== 'string' && !extra.length) {
         return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'submitPrompt 缺 text / attachments' }
+      }
+      if (isDuplicatePrompt(sessionId, clientMsgId)) {
+        return { ok: true, value: { accepted: true, duplicate: true } }
       }
       const r = await promptText(sessionId, text ?? '', clientMsgId, current(), extra)
       return r.requestId ? { ok: r.ok, code: r.code, message: r.message, value: r.value } : r
