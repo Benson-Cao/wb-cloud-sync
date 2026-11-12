@@ -984,7 +984,8 @@ test('下行端点用到的适配器方法都在包装层转发了（漏一个�
     for (const name of [
       'submitPrompt', 'setPinned', 'setArchived', 'cancelTurn', 'createSession',
       'uploadAttachment', 'backfill', 'listArtifacts', 'replay',
-      'createArtifactTicket', 'convertArtifact',
+      'createArtifactTicket',
+      'listSchedules', 'createSchedule', 'runSchedule', 'renameSession',
     ]) {
       assert.equal(typeof plugin.adapters[name], 'function', `${name} 忘了在 adapters 包装层转发`)
     }
@@ -1062,7 +1063,12 @@ test('session/artifact-ticket 下行：调到导出器并原样回响应（ADR-0
     const resp = framesOf(relay, 'http/response')[0]
     assert.equal(resp.status, 200)
     assert.equal(resp.body.data.bytes, 'YWJj')
-    assert.deepEqual(seen, [{ sessionId: 'session-9', relPath: 'out/a.md' }])
+    assert.deepEqual(seen, [{ sessionId: 'session-9', relPath: 'out/a.md', format: undefined }])
+
+    // r13：format 必须原样透传到导出器，否则「转 PDF」会静默变成原样下载
+    relay.send({ t: 'http/request', reqId: 'r-art2', method: 'POST', endpoint: 'session/artifact-ticket', body: { sessionId: 'session-9', path: 'out/a.docx', format: 'pdf' } })
+    await waitFor(() => framesOf(relay, 'http/response').length === 2, '回第二条响应')
+    assert.equal(seen[1].format, 'pdf')
   } finally {
     ctx.dispose()
     await relay.stop()

@@ -132,6 +132,17 @@
     <button id="create">新建会话</button>
     <!-- r12：归档是软移除，入口收在这里，默认不占列表空间 -->
     <button id="archivedToggle" title="显示/收起已归档的会话">🗄 已归档</button>
+    <button id="schedulesToggle" title="定时任务（W9）">⏰ 定时任务</button>
+  </div>
+  <div id="schedulesPanel" hidden>
+    <div class="grouphead">定时任务 · 由电脑上的宿主执行</div>
+    <div id="scheduleRows" class="hint">点「⏰ 定时任务」加载。</div>
+    <div id="scheduleNew">
+      <input id="schTitle" placeholder="任务名（≤120 字）" />
+      <input id="schPrompt" placeholder="到点要执行的指令" />
+      <input id="schMinutes" type="number" min="1" value="10" inputmode="numeric" style="max-width:90px" />
+      <button id="schCreate">N 分钟后执行</button>
+    </div>
   </div>
   <!-- 审批是设备级的（与当前看哪个会话无关），所以放在事件流之外 -->
   <div id="approvals" hidden></div>
@@ -142,6 +153,7 @@
       <h2 id="streamTitle">事件流</h2>
       <button id="cancel" title="取消该会话当前正在运行的轮次">取消当前轮次</button>
       <button id="archive" title="从列表藏起来，可在「已归档」里恢复，不删除日志">归档此会话</button>
+      <button id="rename" title="改会话标题（M2-10）">改名</button>
       <div id="compose">
         <input id="msgText" placeholder="向该会话发消息…" />
         <input id="file" type="file" />
@@ -836,6 +848,9 @@
      * 用 textContent 而不是 innerHTML——路径由宿主的日志来，不该被当成 HTML 执行。
      */
     let artifactRows = []
+    // 宿主 officeToPdf 的硬白名单（照抄源码）：只有这六种能转 PDF。
+    // 名单外的类型不显示「转 PDF」按钮，避免给一个点了必然失败的入口。
+    const OFFICE_PDF = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'])
     let artifactTimer = null
     const renderArtifacts = () => {
       const box = $('artifacts')
@@ -871,32 +886,49 @@
           }
         }
         row.appendChild(copy)
-        // 下载（ADR-011）：显式动作 → 一次性票据 → Blob。转换格式宿主不支持，
-        // 这里只做原样下载，不伪造 PDF/DOCX。
+        // 下载（ADR-011）：显式动作 → 一次性票据 → Blob。
+        // 转换也走**同一张票**（format:'pdf'），Host 换字节、Relay 换票，
+        // 手机永远只拿元数据 + 一次性的下载流，没有第二条旁路。
         const dl = document.createElement('button')
         dl.textContent = '下载'
-        dl.onclick = async () => {
-          if (!client || !activeSession || !a.path) return
-          dl.disabled = true
-          try {
-            const t = await client.createArtifactTicket({ sessionId: activeSession, path: a.path })
-            const blob = await client.fetchArtifactBlob({ ticketId: t.ticketId })
-            const url = URL.createObjectURL(blob)
-            const link = document.createElement('a')
-            link.href = url
-            link.download = t.name || a.name || 'artifact'
-            document.body.appendChild(link)
-            link.click()
-            link.remove()
-            setTimeout(() => URL.revokeObjectURL(url), 5000)
-            say(`已下载 ${link.download}（${t.size} B）`)
-          } catch (e) {
-            say(`下载失败：${e.message}`, true)
-          } finally { dl.disabled = false }
-        }
+        dl.onclick = () => { void saveArtifact(a.path, a.name, null, dl) }
         row.appendChild(dl)
+
+        // 宿主只做 Office → PDF（doc/docx/xls/xlsx/ppt/pptx）。别的类型不给按钮，
+        // 免得点了必失败——按钮存在就该有用。
+        const ext = String(a.name ?? a.path ?? '').toLowerCase().split('.').pop()
+        if (OFFICE_PDF.has(ext)) {
+          const toPdf = document.createElement('button')
+          toPdf.textContent = '转 PDF'
+          toPdf.title = '让电脑上的转换器转成 PDF，再走一次性票据下载'
+          toPdf.onclick = () => { void saveArtifact(a.path, a.name, 'pdf', toPdf) }
+          row.appendChild(toPdf)
+        }
         box.appendChild(row)
       }
+    }
+
+    /** 一次票据 → 一段字节。format 非空时由 Host 转换（失败就如实报错，不给源文件顶替）。 */
+    const saveArtifact = async (path, name, format, btn = null) => {
+      if (!client || !activeSession || !path) return
+      if (btn) btn.disabled = true
+      try {
+        const t = await client.createArtifactTicket({
+          sessionId: activeSession, path, ...(format ? { format } : {}),
+        })
+        const blob = await client.fetchArtifactBlob({ ticketId: t.ticketId })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = t.name || name || 'artifact'
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 5000)
+        say(`已下载 ${link.download}（${t.size} B${t.convertedFrom ? `，由 ${t.convertedFrom} 转换` : ''}）`)
+      } catch (e) {
+        say(`下载失败：${e.message}`, true)
+      } finally { if (btn) btn.disabled = false }
     }
 
     /** 主动问一次 Host：显式呈现过的文件在会话日志里，晚连 / 缓冲被裁也能补回来。 */
@@ -972,6 +1004,72 @@
       if (row) row.scrollIntoView({ block: 'center' })
     }
 
+    /** 定时任务面板（W9）：列表 + 创建 + 立即运行；不自动刷新，点开才拉。 */
+    const renderSchedules = (rows) => {
+      const box = $('scheduleRows')
+      box.innerHTML = ''
+      box.className = ''
+      if (!rows.length) { box.className = 'hint'; box.textContent = '电脑上还没有定时任务。'; return }
+      for (const t of rows) {
+        const row = document.createElement('div')
+        row.className = 'row'
+        const left = document.createElement('div')
+        const title = document.createElement('div')
+        title.className = 'title'
+        title.textContent = t.title || t.id || '未命名任务'
+        const meta = document.createElement('div')
+        meta.className = 'meta'
+        const when = t.timing?.after_seconds ? `${t.timing.after_seconds}s 后` : (t.scheduledAt || t.kind || '—')
+        meta.textContent = `${t.active === false ? '已暂停' : '已启用'} · ${when}`
+        left.appendChild(title); left.appendChild(meta)
+        const run = document.createElement('button')
+        run.className = 'pinbtn'
+        run.textContent = '▶'
+        run.title = '立即运行一次'
+        run.addEventListener('click', (e) => {
+          e.stopPropagation()
+          if (!client || !t.id) return
+          void (async () => {
+            try { await client.runSchedule({ id: t.id }); say('已请求立即运行') }
+            catch (err) { say(`运行失败：${err.message}`, true) }
+          })()
+        })
+        row.appendChild(left); row.appendChild(run)
+        box.appendChild(row)
+      }
+    }
+
+    const loadSchedules = async () => {
+      if (!client) return
+      try { renderSchedules(await client.listSchedules()) }
+      catch (e) { say(`读取定时任务失败：${e.message}`, true) }
+    }
+
+    $('schedulesToggle').addEventListener('click', () => {
+      if (!client) return
+      const panel = $('schedulesPanel')
+      panel.hidden = !panel.hidden
+      if (!panel.hidden) void loadSchedules()
+    })
+    $('schCreate').addEventListener('click', async () => {
+      if (!client) return
+      const title = $('schTitle').value.trim()
+      const prompt = $('schPrompt').value.trim()
+      const minutes = Number($('schMinutes').value)
+      if (!title || !prompt || !Number.isSafeInteger(minutes) || minutes <= 0) {
+        say('需要任务名、指令和正整数分钟数', true); return
+      }
+      $('schCreate').disabled = true
+      try {
+        await client.createSchedule({ title, prompt, afterSeconds: minutes * 60 })
+        $('schTitle').value = ''
+        $('schPrompt').value = ''
+        say('定时任务已创建')
+        await loadSchedules()
+      } catch (e) { say(`创建失败：${e.message}`, true) }
+      finally { $('schCreate').disabled = false }
+    })
+
     $('archivedToggle').addEventListener('click', () => { void toggleArchived() })
     $('back').addEventListener('click', backToList)
 
@@ -1023,6 +1121,19 @@
       } finally {
         $('create').disabled = false
       }
+    })
+    $('rename').addEventListener('click', async () => {
+      if (!client || !activeSession) return
+      const cur = client.getSession?.(activeSession)?.title ?? ''
+      const title = window.prompt('新会话标题（留空取消）', cur || '')
+      if (title === null || !title.trim()) return
+      try {
+        await client.renameSession({ sessionId: activeSession, title: title.trim() })
+        const rows = await client.refreshSessions()
+        renderList(rows)
+        $('streamTitle').textContent = `事件流 · ${title.trim()}`
+        say('已改名')
+      } catch (e) { say(`改名失败：${e.message}`, true) }
     })
     $('archive').addEventListener('click', async () => {
       if (!client || !activeSession) return

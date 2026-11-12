@@ -529,6 +529,10 @@ const SERVICE_CANDIDATES = [
   'workspaceRegistry', 'sessionPersistence', 'typert',
   // 置顶/归档：WorkspaceController，cordis 名 'workspaces'（r11）
   'workspaces',
+  // W8/W9 诊断与能力探测：产物清单、定时任务、账号设置
+  'workspaceFiles', 'uiWorkspace', 'schedule', 'deepseekAccount', 'settingsSchema',
+  // W8/W9 二轮：转换能力、设置、目标/技能、标题
+  'officeToPdf', 'goals', 'skills', 'sessionTitle', 'agentPresets', 'workingDirectory',
   // 附件上行：`fileUploads`（super(ctx,"fileUploads")）与它依赖的 `attachments`
   'fileUploads', 'attachments',
 ]
@@ -556,9 +560,28 @@ const resolveService = (ctx, name) => {
   return { svc: undefined, via: null, errors }
 }
 
+/**
+ * typert lookup 可达性（诊断用）。
+ * `workspaceFiles.list` / `officeToPdf.render` 的首参都来自 `workspaceFileScope` lookup；
+ * 拿不到这个 provider 就只能空着，而「空着」和「真没产物」在手机上是同一个画面——
+ * 所以必须能在 /status 里区分这两件事。
+ */
+const reportLookups = (ctx) => {
+  const out = { reachable: false, hasWorkspaceFileScope: false, error: null }
+  try {
+    const t = resolveService(ctx, 'typert').svc
+    const lookups = t?.lookups
+    out.reachable = Boolean(lookups) && typeof lookups.get === 'function'
+    if (out.reachable) {
+      const p = lookups.get('workspaceFileScope')
+      out.hasWorkspaceFileScope = Boolean(p) && typeof p.resolve === 'function'
+    }
+  } catch (error) { out.error = error?.message ?? String(error) }
+  return out
+}
+
 /** 惰性快照：每次调用都重新解析，宿主晚注册的服务会自动接上。 */
-const probeServices = (ctx) => {
-  const services = {}
+const probeServices = (ctx) => {  const services = {}
   const resolved = {}
   for (const name of SERVICE_CANDIDATES) {
     const r = resolveService(ctx, name)
@@ -638,6 +661,30 @@ const promptEntry = (services) => {
  * 返回 Remote 风格 `{ ok, value: { pinnedSessionIds } }`（最近置顶在前的全局集合）。
  * 找不到就如实报「没有这个入口」，绝不自己改索引假装成功。
  */
+/** 定时任务（W9）：宿主 `schedule` 服务，catalog/create/list/run 都是 lateBound。 */
+const scheduleEntry = (services) => {
+  const s = services.schedule
+  return s && (typeof s.catalog === 'function' || typeof s.list === 'function') ? s : null
+}
+
+/** 只挑契约字段：宿主对象里带运行时句柄，整个塞给手机既危险又超帧。 */
+const scheduleRow = (t) => {
+  if (!t || typeof t !== 'object') return null
+  const timing = t.timing && typeof t.timing === 'object' ? t.timing : null
+  return {
+    id: typeof t.id === 'string' ? t.id : null,
+    kind: typeof t.kind === 'string' ? t.kind : null,
+    title: typeof t.title === 'string' ? t.title : null,
+    prompt: typeof t.prompt === 'string' ? t.prompt : null,
+    timing,
+    scheduledAt: t.scheduledAt ?? null,
+    active: t.active ?? t.enabled ?? null,
+    target: t.target && typeof t.target === 'object'
+      ? { kind: t.target.kind ?? null, sessionId: t.target.sessionId ?? null }
+      : null,
+  }
+}
+
 const workspaceEntry = (services) => {
   // 真机 status 取证：插件在主进程里看到的是 **workspaceRegistry**（lateBound，
   // 带 pinSession/unpinSession/pinnedSessionIds/archiveSession/delete）；
@@ -803,6 +850,9 @@ function createHostAdapters(ctx, options = {}) {
           boot: Object.fromEntries(SERVICE_CANDIDATES.map((n) => [n, boot.resolved[n].present])),
           lateBound: SERVICE_CANDIDATES.filter((n) => !boot.resolved[n].present && now.resolved[n].present),
           services: serviceReport,
+          // 产物清单/转换都靠 typert 的 workspaceFileScope lookup；这里直接报告它是否可达，
+          // 免得再出现「以为在问、其实没问到，异常被软探测吞掉」的假阴性
+          lookups: reportLookups(ctx),
         },
       }
     },
@@ -892,6 +942,101 @@ function createHostAdapters(ctx, options = {}) {
         return { ok: r?.ok !== false, value: { archived: Boolean(archived), archivedSessionIds: Array.isArray(ids) ? ids : [] } }
       } catch (error) {
         return asError(error, { name: 'workspaceRegistry', kind: archived ? 'archiveSession' : 'unarchiveSession' })
+      }
+    },
+
+    /**
+     * 定时任务列表（W9）：优先 `catalog()`（无参、Host 全量），失败退 `list()`。
+     * 只回契约字段，不把宿主运行时对象透给手机。
+     */
+    listSchedules: async ({ limit = 100, offset = 0 } = {}) => {
+      const services = current()
+      const s = scheduleEntry(services)
+      if (!s) return unavailable('schedule.catalog/list', services)
+      try {
+        let rows = typeof s.catalog === 'function' ? await s.catalog() : null
+        if (!Array.isArray(rows) && typeof s.list === 'function') {
+          const r = await s.list({ limit, offset })
+          rows = Array.isArray(r) ? r : (Array.isArray(r?.rows) ? r.rows : null)
+        }
+        if (!Array.isArray(rows)) {
+          return { ok: false, code: 'HOST_ADAPTER_ERROR', message: '定时任务列表返回结构不认识' }
+        }
+        return {
+          ok: true,
+          value: { rows: rows.slice(0, 200).map(scheduleRow).filter(Boolean), count: rows.length },
+        }
+      } catch (error) {
+        return asError(error, { name: 'schedule', kind: 'catalog' })
+      }
+    },
+
+    /**
+     * 创建定时任务（W9）：手机只给「标题 + 内容 + N 分钟后 + 投递目标」。
+     * 参数形状按宿主 `ScheduleCreateRequest`（asar 取证）：`{title,prompt,timing,target}`，
+     * `timing` 支持 after/at/every/daily，v1 只开放 after；target 默认 new_once。
+     */
+    createSchedule: async ({ title, prompt, afterSeconds, target = null } = {}) => {
+      const services = current()
+      const s = scheduleEntry(services)
+      if (!s || typeof s.create !== 'function') return unavailable('schedule.create', services)
+      const t = typeof title === 'string' ? title.trim() : ''
+      const p = typeof prompt === 'string' ? prompt.trim() : ''
+      const n = Number(afterSeconds)
+      if (!t || t.length > 120 || !p || !Number.isSafeInteger(n) || n <= 0) {
+        return { ok: false, code: 'INVALID_ARGUMENT', message: '需要标题(≤120)、内容、正整数 afterSeconds' }
+      }
+      try {
+        const r = await s.create({
+          title: t,
+          prompt: p,
+          timing: { kind: 'after', after_seconds: n },
+          target: target && typeof target === 'object' ? target : { kind: 'new_once' },
+        })
+        const created = r?.task ?? r?.row ?? (r?.id ? r : null)
+        return { ok: r?.ok !== false, value: { task: scheduleRow(created) } }
+      } catch (error) {
+        return asError(error, { name: 'schedule', kind: 'create' })
+      }
+    },
+
+    /** 立即运行一次（W9）：宿主 `run` 的参数形状两个都试，失败如实回错。 */
+    runSchedule: async ({ id } = {}) => {
+      const services = current()
+      const s = scheduleEntry(services)
+      if (!s || typeof s.run !== 'function') return unavailable('schedule.run', services)
+      if (!id) return { ok: false, code: 'INVALID_ARGUMENT', message: 'runSchedule 缺 id' }
+      try {
+        const r = await s.run({ id })
+        return { ok: r?.ok !== false, value: { id } }
+      } catch (error) {
+        try {
+          const r = await s.run(id)
+          return { ok: r?.ok !== false, value: { id } }
+        } catch {
+          return asError(error, { name: 'schedule', kind: 'run' })
+        }
+      }
+    },
+
+    /**
+     * 会话改名（M2-10）：签名取自 asar `sessionController.rename(request)` →
+     * `sessionTitle.rename(agent.session, title)`，请求 `{sessionId, title}`，
+     * 返回 `{title, seq}`。不改日志、不自己写标题事件。
+     */
+    renameSession: async ({ sessionId, title } = {}) => {
+      const services = current()
+      const c = services.sessionController
+      if (typeof c?.rename !== 'function') return unavailable('sessionController.rename', services)
+      const t = typeof title === 'string' ? title.trim() : ''
+      if (!sessionId || !t) {
+        return { ok: false, code: 'INVALID_ARGUMENT', message: '改名需要 sessionId 与非空 title' }
+      }
+      try {
+        const r = await c.rename({ sessionId, title: t })
+        return { ok: true, value: { sessionId, title: r?.title ?? t, seq: r?.seq ?? null } }
+      } catch (error) {
+        return asError(error, { name: 'sessionController', kind: 'rename' })
       }
     },
 
@@ -1251,20 +1396,36 @@ const mimeOfArtifact = (name) => {
 }
 
 /**
- * 显式产物导出（ADR-011）：**Host 这一侧只做「校验 + 读字节」**。
+ * 宿主 `officeToPdf.renderFile` 的硬白名单（源码取证）：只认这六种。
+ * 把 odt/rtf 之类写进来会「看起来支持、实际报 unsupported-format」，所以照抄。
+ */
+const PDF_CONVERTIBLE = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'])
+
+/** 小写扩展名，没有就空串。 */
+const extOf = (name) => {
+  const base = basename(name)
+  const at = base.lastIndexOf('.')
+  return at <= 0 ? '' : base.slice(at + 1).toLowerCase()
+}
+
+/**
+ * 显式产物导出（ADR-011）：**Host 这一侧只做「校验 + 读字节 / 校验 + 交给宿主转换」**。
  * 票据本身由 Relay 持有（一次性 / TTL / 绑定手机），所以这里不建票据表。
  *
- * 三条硬约束，少一条都会把 Relay 变成任意文件读取网关：
+ * 四条硬约束，少一条都会把 Relay 变成任意文件读取网关：
  *   1. 路径必须在该会话 `deliverables/presented` 的索引里（不信手机自报路径）；
  *   2. 解析后必须仍落在会话工作区内（防 `..` / 绝对路径穿越）；
- *   3. 体积硬上限（WS 帧 1 MiB + base64 膨胀），超出明确拒绝，不静默截断。
+ *   3. 体积硬上限（WS 帧 1 MiB + base64 膨胀），超出明确拒绝，不静默截断；
+ *   4. 转换只走**同一个** `convertToPdf`，输出仍受同一体积上限约束。
  *
- * 没有 PDF/DOCX 转换：宿主 asar 里 `exportPdf/exportDocx` 0 命中，
- * 原样下载，格式不对就由上层明确回 409，绝不拼一个「看起来像」的文件。
+ * PDF 转换（r13 修订）：宿主有 `officeToPdf.render`，但**只做 Office → PDF**。
+ * Markdown / 纯文本 → PDF 在宿主里没有实现，所以那种请求明确回
+ * `CAPABILITY_UNAVAILABLE`，绝不拼一个「看起来像 PDF」的东西骗用户。
  */
 function createArtifactExporter({
   listArtifacts,
   resolveWorkspace,
+  convertToPdf = null,
   maxBytes = 512 * 1024,
 } = {}) {
   if (typeof listArtifacts !== 'function' || typeof resolveWorkspace !== 'function') {
@@ -1272,7 +1433,7 @@ function createArtifactExporter({
   }
   const cap = Math.max(1, Number(maxBytes) || 512 * 1024)
 
-  const readBytes = async ({ sessionId, relPath }) => {
+  const readBytes = async ({ sessionId, relPath, format }) => {
     if (!sessionId || typeof relPath !== 'string' || !relPath.trim()) {
       return { ok: false, code: 'INVALID_ARGUMENT', message: '缺 sessionId / path' }
     }
@@ -1301,6 +1462,61 @@ function createArtifactExporter({
     try { st = await fs.stat(abs) }
     catch { return { ok: false, code: 'ARTIFACT_MISSING', message: '文件已不存在（可能被删或移动）' } }
     if (!st.isFile()) return { ok: false, code: 'ARTIFACT_MISSING', message: '不是普通文件' }
+
+    const sourceName = basename(match.name ?? relPath)
+    const srcExt = extOf(sourceName)
+    const wantPdf = format === 'pdf' && srcExt !== 'pdf'
+
+    // ── 转换支路：不读源字节，把绝对路径交给宿主（它有自己的 maxInputBytes / 超时）
+    if (wantPdf) {
+      if (!PDF_CONVERTIBLE.has(srcExt)) {
+        return {
+          ok: false, code: 'CAPABILITY_UNAVAILABLE',
+          message: `宿主只能把 Office 文件转成 PDF（.docx/.xlsx/.pptx 等），`
+            + `${srcExt ? '.' + srcExt : '该类型'} 不支持转换；请原样下载或在电脑上导出`,
+        }
+      }
+      if (typeof convertToPdf !== 'function') {
+        return { ok: false, code: 'CAPABILITY_UNAVAILABLE', message: '本机没有可用的 PDF 转换器' }
+      }
+      let conv
+      try {
+        conv = await convertToPdf({ sessionId, absPath: abs, relPath })
+      } catch (error) {
+        // 同步抛 / 异步 reject 都兜住：异常绝不能冒到帧层变成空响应
+        conv = { ok: false, code: 'CONVERT_FAILED', message: `PDF 转换失败：${error?.message ?? 'unknown'}` }
+      }
+      if (!conv?.ok) {
+        return {
+          ok: false,
+          code: conv?.code ?? 'CONVERT_FAILED',
+          message: conv?.message ?? '转换失败（宿主未说明原因）',
+        }
+      }
+      const buf = Buffer.isBuffer(conv.value?.bytes)
+        ? conv.value.bytes
+        : Buffer.from(conv.value?.bytes ?? [])
+      if (!buf.length) return { ok: false, code: 'CONVERT_FAILED', message: '转换结果为空' }
+      if (buf.length > cap) {
+        return {
+          ok: false, code: 'ARTIFACT_TOO_LARGE',
+          message: `转换后 ${buf.length} B 超过 ${cap} B 上限，请在电脑上打开`,
+        }
+      }
+      const pdfName = `${sourceName.replace(/\.[^.]+$/, '')}.pdf`
+      return {
+        ok: true,
+        value: {
+          name: pdfName,
+          mime: 'application/pdf',
+          size: buf.length,
+          bytes: buf.toString('base64'),
+          convertedFrom: sourceName,
+        },
+      }
+    }
+
+    // ── 原样支路
     if (st.size > cap) {
       return { ok: false, code: 'ARTIFACT_TOO_LARGE', message: `文件 ${st.size} B 超过 ${cap} B 上限，请在电脑上打开` }
     }
@@ -1310,12 +1526,11 @@ function createArtifactExporter({
     if (buf.length > cap) {
       return { ok: false, code: 'ARTIFACT_TOO_LARGE', message: '读取时体积超限' }
     }
-    const name = basename(match.name ?? relPath)
     return {
       ok: true,
       value: {
-        name,
-        mime: mimeOfArtifact(name),
+        name: sourceName,
+        mime: mimeOfArtifact(sourceName),
         size: buf.length,
         bytes: buf.toString('base64'),   // 只在 frame 里，不落盘、不进事件流
       },
@@ -1325,7 +1540,12 @@ function createArtifactExporter({
   return { readBytes, maxBytes: cap }
 }
 
-function createArtifactIndex({ openSession, pageSize = 500, maxPages = 20 } = {}) {
+/**
+ * 会话产物索引。显式交付事件为 0 条时，`listWorkspaceFiles`（若宿主提供）作为
+ * **第二数据源**：路径来自宿主权威文件服务，标 `source:'workspace'`，
+ * 绝不用正则从 tool/result 正文里抠路径（宿主自己都不这么干）。拿不到就保持空。
+ */
+function createArtifactIndex({ openSession, pageSize = 500, maxPages = 20, listWorkspaceFiles = null } = {}) {
   const limit = Math.min(Math.max(1, Number(pageSize) || 500), 5000)
   const pages = Math.min(Math.max(1, Number(maxPages) || 20), 100)
 
@@ -1370,14 +1590,43 @@ function createArtifactIndex({ openSession, pageSize = 500, maxPages = 20 } = {}
         if (unique.length >= MAX_ARTIFACT_ROWS) break
       }
       unique.sort((a, b) => a.seq - b.seq || a.index - b.index)
+      // 显式交付为 0 行时，问宿主的权威文件服务要一份工作区清单。
+      // 失败/不可用都保持 rows:[]——**如实空着，不猜**。
+      let rows = unique
+      let source = 'presented'
+      let workspaceError = null
+      if (!rows.length && typeof listWorkspaceFiles === 'function') {
+        try {
+          const got = await listWorkspaceFiles(sessionId)
+          // 兼容两种返回：裸数组（老夹具）与 { rows, error }（带失败原因，便于真机定位）
+          const files = Array.isArray(got) ? got : (got?.rows ?? [])
+          workspaceError = Array.isArray(got) ? null : (got?.error ?? null)
+          if (files.length) {
+            rows = files.slice(0, MAX_ARTIFACT_ROWS)
+              .filter((f) => f && typeof f.path === 'string' && f.path.trim())
+              .map((f, i) => ({
+                seq: -1, turn: null, callId: null, index: i,
+                path: f.path, name: basename(f.name ?? f.path),
+                description: f.description ?? null,
+                source: 'workspace',
+              }))
+            source = 'workspace'
+          }
+        } catch (error) {
+          // 文件服务不可用：保持空，但把原因留下来——「空着」和「没问到」必须能分开
+          workspaceError = error?.message ?? String(error)
+        }
+      }
       return {
         ok: true,
         value: {
           sessionId,
-          rows: unique,
-          count: unique.length,
+          rows,
+          source,
+          count: rows.length,
           scanned,
-          truncated: truncated || unique.length >= MAX_ARTIFACT_ROWS,
+          truncated: truncated || rows.length >= MAX_ARTIFACT_ROWS,
+          ...(workspaceError ? { workspaceError } : {}),
         },
       }
     } catch (error) {
@@ -1526,6 +1775,56 @@ function __apply(ctx, config = {}) {
    */
   const hostAdapters = cfg.hostAdapters ?? createHostAdapters(ctx, { randomId: cfg.randomId })
 
+  /**
+   * 按 sessionId 取 typert `workspaceFileScope`（宿主自己注册的 lookup）。
+   * `workspaceFiles` / `officeToPdf` 的首参都是它，**不是** sessionId 字符串：
+   * 上一轮直接传 sessionId 调 list，形状不对，所以真机上产物恒为 0 条——
+   * 不是「没产物」，是「我们问法错了」。
+   */
+  const resolveFileScope = async (sessionId) => {
+    try {
+      const typert = resolveService(ctx, 'typert').svc
+      const provider = typert?.lookups?.get?.('workspaceFileScope')
+      if (!provider || typeof provider.resolve !== 'function') return null
+      return (await provider.resolve(sessionId)) ?? null
+    } catch { return null }
+  }
+
+  /**
+   * W8 第二数据源：宿主 `workspaceFiles.list(scope, path)`（权威文件服务，非文本猜测）。
+   * 返回 `{ path, entries:[{name,type,size}] }`；子项只有 `name`，路径要自己按 `/` 拼。
+   * **拿不到就保持空**，绝不拿异常当产物。
+   */
+  const listWorkspaceFiles = async (sessionId) => {
+    let svc = null
+    try { svc = resolveService(ctx, 'workspaceFiles').svc } catch { svc = null }
+    if (!svc || typeof svc.list !== 'function') return { rows: [], error: 'workspaceFiles 服务不可用' }
+    const scope = await resolveFileScope(sessionId)
+    if (!scope) return { rows: [], error: 'workspaceFileScope 解析失败' }
+    const errors = []
+    for (const dir of ['', '.']) {
+      try {
+        const r = await svc.list(scope, dir)
+        const entries = Array.isArray(r?.entries) ? r.entries : null
+        if (!entries) { errors.push(`${JSON.stringify(dir)}: 返回无 entries`); continue }
+        const base = typeof r.path === 'string' ? r.path : ''
+        return {
+          rows: entries
+            .filter((e) => e && e.type === 'file' && typeof e.name === 'string' && e.name)
+            .map((e) => ({
+              path: base ? `${base}/${e.name}` : e.name,
+              name: e.name,
+              description: null,
+            })),
+          error: null,
+        }
+      } catch (error) {
+        errors.push(`${JSON.stringify(dir)}: ${error?.message ?? String(error)}`)
+      }
+    }
+    return { rows: [], error: errors.join(' | ') }
+  }
+
   const adapters = {
     submitPrompt: cfg.submitPrompt ?? hostAdapters.submitPrompt,
     // 置顶（r11）：同样要在这个包装层逐个转发，漏了下行分派就拿到 undefined
@@ -1545,7 +1844,10 @@ function __apply(ctx, config = {}) {
       })),
     // 产物索引：与 replay 共用同一个只读句柄，扫 append-only 日志里的显式呈现事件
     listArtifacts: cfg.listArtifacts ?? (openSession
-      ? createArtifactIndex({ openSession, pageSize: cfg.artifactPageSize, maxPages: cfg.artifactMaxPages })
+      ? createArtifactIndex({
+        openSession, pageSize: cfg.artifactPageSize, maxPages: cfg.artifactMaxPages,
+        listWorkspaceFiles,
+      })
       : async () => ({
         ok: false, code: 'NOT_AVAILABLE',
         message: '没有可用的只读句柄（未注入 sessionPersistence / openSession）',
@@ -1562,8 +1864,53 @@ function __apply(ctx, config = {}) {
       })),
   }
 
-  // 产物导出（ADR-011）：只校验「已呈现 + 工作区内 + 体积上限」再读字节；
-  // 票据由 Relay 持有，Host 不建表、不开新端口。
+  /**
+   * Office → PDF（r13）：宿主 `officeToPdf.render(scope, path, 'foreground')`。
+   * `scope` 由 typert 的 `workspaceFileScope` lookup 按 sessionId 解析（与 workspaceFiles
+   * 同一份授权），所以转换用的是**会话自身的文件系统权限**，不是我们自己拼路径再读。
+   *
+   * 为什么不「先读字节再转」：Office 产物常几 MB，而下载上限只有 512 KiB，
+   * 先读就一定被自家上限卡死。让宿主按它的 `maxInputBytes` 从磁盘读，
+   * 我们只对**输出 PDF** 卡上限——判据落在真正过网的那一段。
+   */
+  const convertToPdf = async ({ sessionId, relPath }) => {
+    let office = null
+    try { office = resolveService(ctx, 'officeToPdf').svc } catch { office = null }
+    if (!office || typeof office.render !== 'function') {
+      return { ok: false, code: 'CAPABILITY_UNAVAILABLE', message: '宿主未加载 officeToPdf 转换服务' }
+    }
+    let scope = null
+    try { scope = await resolveFileScope(sessionId) } catch { scope = null }
+    if (!scope) {
+      return { ok: false, code: 'CAPABILITY_UNAVAILABLE', message: '拿不到会话的工作区授权，无法转换' }
+    }
+    try {
+      // 宿主内部是 `AbortSignal.any([signal, remoteLifetime])`：signal 不能是 undefined，
+      // 否则直接抛 "signals[0] is not of type AbortSignal"。所以自己给一个带超时的。
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), Math.max(1000, Number(cfg.artifactConvertTimeoutMs) || 120000))
+      let out
+      try {
+        out = await office.render(scope, relPath, 'foreground', ctrl.signal)
+      } finally {
+        clearTimeout(timer)
+      }
+      if (out?.eof === false) {
+        return { ok: false, code: 'ARTIFACT_TOO_LARGE', message: '转换结果超出单次传输窗口，请在电脑上打开' }
+      }
+      const data = out?.data
+      const buf = Buffer.isBuffer(data) ? data : Buffer.from(data ?? [])
+      if (!buf.length) return { ok: false, code: 'CONVERT_FAILED', message: '转换器返回空文件' }
+      return { ok: true, value: { bytes: buf, missingFonts: out?.missingFonts ?? [] } }
+    } catch (error) {
+      const aborted = error?.name === 'AbortError'
+      return {
+        ok: false, code: 'CONVERT_FAILED',
+        message: aborted ? 'PDF 转换超时（文件可能太大或转换器忙）' : `PDF 转换失败：${error?.message ?? 'unknown'}`,
+      }
+    }
+  }
+
   const artifactExporter = createArtifactExporter({
     listArtifacts: (args) => adapters.listArtifacts(args),
     resolveWorkspace: async (sessionId) => {
@@ -1572,14 +1919,17 @@ function __apply(ctx, config = {}) {
       const hit = (Array.isArray(snaps) ? snaps : []).find((s) => s?.header?.id === sessionId)
       return typeof hit?.header?.cwd === 'string' ? hit.header.cwd : null
     },
+    convertToPdf,
     maxBytes: cfg.artifactMaxBytes,
   })
+
+  // 一条下行、一条票据：`format:'pdf'` 也走这里，不另开端点（否则就是绕过票据的旁路）
   adapters.createArtifactTicket = cfg.createArtifactTicket ?? ((args) => artifactExporter.readBytes(args))
-  // 宿主没有 PDF/DOCX 转换器（asar 取证 0 命中）：明确拒绝，不伪造格式
-  adapters.convertArtifact = cfg.convertArtifact ?? (async () => ({
-    ok: false, code: 'CAPABILITY_UNAVAILABLE',
-    message: '宿主未提供 PDF/DOCX 导出能力；请原样下载或在桌面端导出',
-  }))
+  // W9：定时任务 + 会话改名，同样逐个转发
+  adapters.listSchedules = cfg.listSchedules ?? hostAdapters.listSchedules
+  adapters.createSchedule = cfg.createSchedule ?? hostAdapters.createSchedule
+  adapters.runSchedule = cfg.runSchedule ?? hostAdapters.runSchedule
+  adapters.renameSession = cfg.renameSession ?? hostAdapters.renameSession
 
   /**
    * 会话索引：`sessionPersistence.list()` 是唯一来源。拿不到就不上报（status 里
@@ -1690,14 +2040,29 @@ function __apply(ctx, config = {}) {
         const { status, body: payload } = unwrap(r, { pinned: body?.pinned !== false })
         return send({ t: 'http/response', reqId, status, body: payload })
       }
-      if (endpoint === 'session/artifact-ticket') {
-        // ADR-011：显式产物导出。校验在 Host，票据在 Relay；这里只回元数据 + 内存中转的字节
-        const r = await adapters.createArtifactTicket({ sessionId: body?.sessionId, relPath: body?.path })
+      if (endpoint === 'session/schedule-list') {
+        const r = await adapters.listSchedules({ limit: body?.limit, offset: body?.offset })
+        const { status, body: payload } = unwrap(r, { rows: [] })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/schedule-create') {
+        const r = await adapters.createSchedule({ title: body?.title, prompt: body?.prompt, afterSeconds: body?.afterSeconds, target: body?.target })
         const { status, body: payload } = unwrap(r, {})
         return send({ t: 'http/response', reqId, status, body: payload })
       }
-      if (endpoint === 'session/artifact-convert') {
-        const r = await adapters.convertArtifact({ sessionId: body?.sessionId, path: body?.path, format: body?.format })
+      if (endpoint === 'session/schedule-run') {
+        const r = await adapters.runSchedule({ id: body?.id })
+        const { status, body: payload } = unwrap(r, {})
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/rename') {
+        const r = await adapters.renameSession({ sessionId: body?.sessionId, title: body?.title })
+        const { status, body: payload } = unwrap(r, {})
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/artifact-ticket') {
+        // ADR-011：显式产物导出。校验在 Host，票据在 Relay；这里只回元数据 + 内存中转的字节
+        const r = await adapters.createArtifactTicket({ sessionId: body?.sessionId, relPath: body?.path, format: body?.format })
         const { status, body: payload } = unwrap(r, {})
         return send({ t: 'http/response', reqId, status, body: payload })
       }

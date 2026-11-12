@@ -141,3 +141,61 @@ test('AF9 seq 不是连续整数时停止翻页并报截断，不靠猜 offset �
   assert.equal(handle.calls.length, 1)
   assert.equal(handle.closed, true)
 })
+
+test('AF10 W8 第二数据源：显式交付 0 条时用宿主文件服务补，标来源且不猜路径', async () => {
+  const handle = fakeHandle(logEvents(2).filter(() => false))   // 完全没有交付事件
+  const list = createArtifactIndex({
+    openSession: async () => handle,
+    listWorkspaceFiles: async (sid) => {
+      assert.equal(sid, 's-1')
+      return [
+        { path: 'out/report.md', name: 'report.md' },
+        { path: 'out/生成结果.txt', name: '生成结果.txt' },
+        { path: '', name: '' },                        // 畸形项应被过滤
+      ]
+    },
+  })
+  const r = await list({ sessionId: 's-1' })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.source, 'workspace')
+  assert.equal(r.value.count, 2)
+  assert.equal(r.value.rows[0].name, 'report.md')
+  assert.equal(r.value.rows[1].name, '生成结果.txt')
+  assert.ok(r.value.rows.every((x) => x.source === 'workspace'), '来源必须标出来，别伪装成交付产物')
+})
+
+test('AF11 文件服务不可用 / 抛异常：如实保持空，不编造产物', async () => {
+  const empty = fakeHandle([])
+  const unavailable = createArtifactIndex({ openSession: async () => empty, listWorkspaceFiles: async () => [] })
+  assert.equal((await unavailable({ sessionId: 's-1' })).value.count, 0)
+
+  const throwing = createArtifactIndex({
+    openSession: async () => empty,
+    listWorkspaceFiles: async () => { throw new Error('scope 解析失败') },
+  })
+  const r = await throwing({ sessionId: 's-1' })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.count, 0)
+  assert.equal(r.value.source, 'presented')
+})
+
+test('AF12 第二数据源失败要留下原因：空着 ≠ 没问到', async () => {
+  const empty = fakeHandle([])
+  const list = createArtifactIndex({
+    openSession: async () => empty,
+    listWorkspaceFiles: async () => ({ rows: [], error: 'workspaceFileScope 解析失败' }),
+  })
+  const r = await list({ sessionId: 's-1' })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.count, 0)
+  assert.equal(r.value.workspaceError, 'workspaceFileScope 解析失败')
+
+  // 拿到了就不该带 error
+  const ok = createArtifactIndex({
+    openSession: async () => fakeHandle([]),
+    listWorkspaceFiles: async () => ({ rows: [{ path: 'a.md', name: 'a.md' }], error: null }),
+  })
+  const r2 = await ok({ sessionId: 's-1' })
+  assert.equal(r2.value.count, 1)
+  assert.equal(r2.value.workspaceError, undefined)
+})

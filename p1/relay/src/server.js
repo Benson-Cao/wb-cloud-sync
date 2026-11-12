@@ -775,7 +775,49 @@ export function createRelay(options = {}) {
         })
       }
 
-      // 置顶（r11）/ 归档（r12）：PATCH /api/sessions/:id { pinned } 或 { archived }
+      // 定时任务遥控（W9）：手机只经 Relay 转发，参数形状由 Host 的 ScheduleCreateRequest 定。
+      // 创建是**写操作**，所以必须走白名单内的 session/* 下行，Relay 不代造任务。
+      if ((method === 'GET' || method === 'POST') && path === '/api/schedules') {
+        const auth = String(req.headers.authorization ?? '')
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        const body = method === 'POST' ? await readBody(req, cfg.maxBodyBytes) : {}
+        const deviceId = body.deviceId ?? url.searchParams.get('deviceId') ?? ''
+        if (!cp.verifyClientToken(deviceId, token).ok) {
+          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+        }
+        if (!isOnline(deviceId)) {
+          cp.markDeviceOffline(deviceId)
+          return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
+        }
+        if (method === 'GET') {
+          return bridge(req, res, deviceId, 'session/schedule-list', {
+            limit: Number(url.searchParams.get('limit')) || 100,
+            offset: Number(url.searchParams.get('offset')) || 0,
+          })
+        }
+        return bridge(req, res, deviceId, 'session/schedule-create', {
+          title: body.title, prompt: body.prompt,
+          afterSeconds: body.afterSeconds, target: body.target ?? null,
+        })
+      }
+
+      if (method === 'POST' && /^\/api\/schedules\/[^/]+\/run$/.test(path)) {
+        const id = decodeURIComponent(path.slice('/api/schedules/'.length, -'/run'.length))
+        const auth = String(req.headers.authorization ?? '')
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        const body = await readBody(req, cfg.maxBodyBytes)
+        const deviceId = body.deviceId ?? url.searchParams.get('deviceId') ?? ''
+        if (!cp.verifyClientToken(deviceId, token).ok) {
+          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+        }
+        if (!isOnline(deviceId)) {
+          cp.markDeviceOffline(deviceId)
+          return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
+        }
+        return bridge(req, res, deviceId, 'session/schedule-run', { id })
+      }
+
+      // 置顶（r11）/ 归档（r12）/ 改名（M2-10）：PATCH /api/sessions/:id 三选一
       // DELETE /api/sessions/:id = 归档（软移除别名，协议 §4 的「移除工作空间」）。
       // 为什么不真删：手机误点的代价应该只是「从列表消失、能一键恢复」，
       // 而不是把宿主落盘日志删掉。归档集合由宿主权威，Relay 照它刷新 CP。
@@ -790,23 +832,33 @@ export function createRelay(options = {}) {
         }
         const wantPin = body.pinned === true || body.pinned === false
         const wantArchive = method === 'DELETE' || body.archived === true || body.archived === false
-        if (!wantPin && !wantArchive) {
-          return fail(res, 400, 'INVALID_JSON', 'PATCH 需要 { pinned } 或 { archived }（布尔）')
+        const wantRename = typeof body.title === 'string' && body.title.trim().length > 0
+        const intents = [wantPin, wantArchive, wantRename].filter(Boolean).length
+        if (intents === 0) {
+          return fail(res, 400, 'INVALID_JSON', 'PATCH 需要 { pinned } / { archived } / { title } 之一')
         }
-        if (wantPin && wantArchive) {
-          return fail(res, 400, 'INVALID_JSON', '一次只做一件事：pinned 与 archived 不能同时给')
+        if (intents > 1) {
+          return fail(res, 400, 'INVALID_JSON', '一次只做一件事：pinned / archived / title 不能同时给')
         }
         if (!isOnline(deviceId)) {
           cp.markDeviceOffline(deviceId)
           return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
         }
         const archived = method === 'DELETE' ? true : body.archived
-        const endpoint = wantArchive ? 'session/archive' : 'session/pin'
+        const endpoint = wantArchive ? 'session/archive'
+          : wantRename ? 'session/rename' : 'session/pin'
         const frameBody = wantArchive
           ? { sessionId, archived }
-          : { sessionId, pinned: body.pinned }
+          : wantRename ? { sessionId, title: body.title.trim() }
+            : { sessionId, pinned: body.pinned }
         return bridge(req, res, deviceId, endpoint, frameBody, (response) => {
           if (response?.status !== 200) return
+          if (wantRename) {
+            // 标题由宿主权威（它写了标题事件），这里只同步 CP 索引供手机显示
+            const title = response?.body?.data?.title
+            if (typeof title === 'string') cp.patchSession(sessionId, { title })
+            return
+          }
           if (wantArchive) {
             const ids = response?.body?.data?.archivedSessionIds
             cp.patchSession(sessionId, {
@@ -841,6 +893,11 @@ export function createRelay(options = {}) {
         if (!body.sessionId || typeof body.path !== 'string' || !body.path.trim()) {
           return fail(res, 400, 'INVALID_ARGUMENT', '需要 { sessionId, path }')
         }
+        // format 只认 'pdf'：宿主只做 Office→PDF。给别的值就明确拒绝，
+        // 不然「要 docx」会被静默当原样下载，用户拿到的东西和意图不一样。
+        if (body.format !== undefined && body.format !== 'pdf') {
+          return fail(res, 400, 'INVALID_ARGUMENT', 'format 只支持 pdf（宿主只做 Office → PDF）')
+        }
         if (!isOnline(deviceId)) {
           cp.markDeviceOffline(deviceId)
           return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
@@ -849,6 +906,7 @@ export function createRelay(options = {}) {
         const tokenDigest = createHash('sha256').update(token).digest('hex')
         return bridge(req, res, deviceId, 'session/artifact-ticket', {
           sessionId: body.sessionId, path: body.path,
+          ...(body.format === 'pdf' ? { format: 'pdf' } : {}),
         }, null, (response) => {
           if (response?.status !== 200) return response
           const d = response.body?.data
@@ -869,7 +927,12 @@ export function createRelay(options = {}) {
             status: 200,
             body: {
               ok: true,
-              data: { ticketId, name, mime, size: bytes.length, expiresIn: Math.floor(TICKET_TTL_MS / 1000) },
+              data: {
+                ticketId, name, mime, size: bytes.length,
+                expiresIn: Math.floor(TICKET_TTL_MS / 1000),
+                // 转换来源要透出来：手机得能说清「这份 PDF 是转的」，别让人以为是原件
+                ...(typeof d.convertedFrom === 'string' ? { convertedFrom: d.convertedFrom.slice(0, 120) } : {}),
+              },
               protocol: PROTOCOL,
             },
           }

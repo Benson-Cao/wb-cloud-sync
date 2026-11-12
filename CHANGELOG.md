@@ -4,6 +4,51 @@
 
 ---
 
+## [P1 W8 · 续] · 2026-11-12 22:5x · Office→PDF 走同一张票（协议 r14，ADR-011 修订，0.1.20）
+
+上一轮我写过一句「宿主没有 PDF/DOCX 转换能力（asar 里 `exportPdf/exportDocx` 0 命中）」。**这句是错的**，
+而且错得很典型：我按**函数名**搜，没按**服务名**找。宿主有 `officeToPdf` 服务，
+`render(scope, path, priority)` 返回**完整 PDF 字节**（源码：`{ offset: 0, eof: true, data: result.pdf }`）。
+
+### 决策：不新增端点，转换复用同一张票
+- `POST /api/artifacts/ticket` 加可选 `format:"pdf"`，下行仍是 `session/artifact-ticket`。
+- **撤销** `session/artifact-convert`：一个「直接回字节」的转换端点就是绕过一次性票据的第二条旁路，
+  正是 ADR-011 要堵的东西。上一轮把它当占位端点写进协议，这一轮拆掉。
+- 非 `pdf` 的 `format` 一律 400：不然「要 docx」会被静默当原样下载，用户拿到的东西和意图不一致。
+
+### 关键实现
+- **授权不是自己拼的**：转换器首参是 typert `workspaceFileScope` lookup 的解析结果。
+  用 `ctx.typert.lookups.get('workspaceFileScope').resolve(sessionId)` 拿 `{ sessionId, workspaceRoot }`，
+  即**会话自身的文件系统授权**——比自己 `path.resolve` 更贴合宿主权限模型。
+- **不预读源字节**：Office 产物动辄几 MB，票据上限只有 512 KiB。先 `readBytes` 再转，源文件先被自家上限卡死，
+  功能等于不存在。改为把**路径**交给宿主，由它按 `maxInputBytes` 读盘；**只有输出 PDF** 受 512 KiB 约束。
+- **白名单照抄源码**：`doc/docx/xls/xlsx/ppt/pptx` 六种。源码对其它后缀直接抛 `unsupported-format`，
+  写宽了只会骗自己。**MD → PDF 不存在**，明确 `CAPABILITY_UNAVAILABLE`；手机上「转 PDF」按钮也只对六种出现。
+- **失败不降级**：转换失败回 `CONVERT_FAILED`，绝不退化成「把源文件给你」；成功回 `convertedFrom`，
+  手机能说清「这份 PDF 是转的」，不让人误当原件。
+
+### 顺手修掉的真 bug
+转换器**同步抛异常**时我没兜住，异常会冒到帧层变成空响应（单测 Y10 抓出来的）。
+现在同步抛 / 异步 reject 都归一成 `CONVERT_FAILED`。
+
+- 测试 316 → **328**（Host 转换分支 4 条 + `format` 透传 + Relay 端到端 + 静态断言 + 第二数据源诊断）；SW **v27**；bundle **0.1.20**。
+
+### 真机联调抓住的三个错（都不在单测覆盖里）
+1. **`hostAdapters` 命名空间根本不存在**：`index.js` 里只 `import { createHostAdapters }`，我却写 `hostAdapters.resolveService(...)`。
+   异常被 `catch` 吞成「workspaceFiles 服务不可用」，于是产物永远 0 条。**软探测把编程错误也一起软掉了**——这是它最大的副作用。
+2. **`render` 的 signal 不能是 undefined**：宿主内部 `AbortSignal.any([signal, remoteLifetime])`，传 `undefined` 直接抛
+   `signals[0] is not of type AbortSignal`。改成自建带 120s 超时的 `AbortController`。
+3. **上一轮把「0 条」归因错了**：不是宿主没产物，是 `workspaceFiles.list` 首参要 `workspaceFileScope`（lookup 解析），
+   我传的是 sessionId 字符串。修好后真机立刻列出 36 个文件。
+
+**真机取证**：`office→pdf` **200，215,903 B，头部 `%PDF-`，`convertedFrom` 正确**；`md→pdf` 明确 `CAPABILITY_UNAVAILABLE`；`format:"docx"` 明确 400 `INVALID_ARGUMENT`。
+**诚实记录**：第二数据源让手机能列出/下载**会话工作区根目录**的直接子文件（含中间产物），这是信任面放宽，
+已写进 ADR-011「修订（r14，同日）」，不是暗门。
+- 协议升 **r14**（`04` §4 帧示例、§5.6 转换边界、修订记录）；`03` ADR-011 加「修订（r14）」并改状态为**已实现**；
+  `05` W8 改 ✓（Office 六种）、W9 记为 ◐（定时任务/改名 ✓，账号级设置与 Memory **宿主无对应服务**，阻塞不硬接）。
+
+---
+
 ## [P1 W8 · 起步] · 2026-11-12 16:4x · 显式产物导出 + 临时下载票（ADR-011 / r13）
 
 W8 唯一缺口。协议 §5.6 明确写着「要做必须先立 ADR 处理信任边界变化」，所以**先立 ADR-011 再写代码**：

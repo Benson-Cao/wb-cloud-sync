@@ -19,6 +19,8 @@ before(() => {
   outDir = join(root, 'out')
   mkdirSync(outDir, { recursive: true })
   writeFileSync(join(outDir, 'a.md'), '# 成品\n中文内容', 'utf8')
+  writeFileSync(join(outDir, 'a.docx'), Buffer.alloc(64, 1))     // 源文件故意大于下载上限，验证「转换不看源体积」
+  writeFileSync(join(outDir, 'a.pdf'), Buffer.from('%PDF-1.4 原样', 'utf8'))
   writeFileSync(join(root, 'secret.txt'), '不该被读到')
   secretFile = join(root, 'secret.txt')
 })
@@ -33,6 +35,8 @@ const listed = {
       { seq: 2, index: 0, path: '../secret.txt', name: 'secret.txt', description: '越界样本' },
       { seq: 3, index: 0, path: 'out/big.bin', name: 'big.bin', description: '' },
       { seq: 4, index: 0, path: 'out/gone.txt', name: 'gone.txt', description: '' },
+      { seq: 5, index: 0, path: 'out/a.docx', name: 'a.docx', description: 'Word 成品' },
+      { seq: 6, index: 0, path: 'out/a.pdf', name: 'a.pdf', description: '' },
     ],
   },
 }
@@ -85,4 +89,76 @@ test('Y7 MIME 只认常见后缀，认不出就 octet-stream（不猜内容）',
   assert.equal(mimeOfArtifact('x.pdf'), 'application/pdf')
   assert.equal(mimeOfArtifact('x.docx').startsWith('application/vnd'), true)
   assert.equal(mimeOfArtifact('x.whatever'), 'application/octet-stream')
+})
+
+test('Y8 转 PDF：Office 源交给宿主转换器，输出仍受同一张票据的体积上限', async () => {
+  const seen = []
+  const conv = createArtifactExporter({
+    listArtifacts: async () => listed,
+    resolveWorkspace: async () => root,
+    convertToPdf: async (args) => {
+      seen.push(args)
+      return { ok: true, value: { bytes: Buffer.from('%PDF-1.7 转换结果', 'utf8') } }
+    },
+  })
+  const r = await conv.readBytes({ sessionId: 's1', relPath: 'out/a.docx', format: 'pdf' })
+  assert.equal(r.ok, true)
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].relPath, 'out/a.docx')
+  assert.equal(seen[0].absPath, join(root, 'out', 'a.docx'), '转换器要拿到绝对路径，才不用先读字节')
+  assert.equal(r.value.name, 'a.pdf', '名字要跟着实际格式走，不能还叫 .docx')
+  assert.equal(r.value.mime, 'application/pdf')
+  assert.equal(r.value.convertedFrom, 'a.docx')
+  assert.equal(Buffer.from(r.value.bytes, 'base64').toString('utf8'), '%PDF-1.7 转换结果')
+})
+
+test('Y9 md/txt 转 PDF：宿主没这个能力，必须明确拒绝而不是硬转', async () => {
+  let called = 0
+  const conv = createArtifactExporter({
+    listArtifacts: async () => listed,
+    resolveWorkspace: async () => root,
+    convertToPdf: async () => { called++; return { ok: true, value: { bytes: Buffer.from('x') } } },
+  })
+  const r = await conv.readBytes({ sessionId: 's1', relPath: 'out/a.md', format: 'pdf' })
+  assert.equal(r.code, 'CAPABILITY_UNAVAILABLE')
+  assert.match(r.message, /Office/)
+  assert.equal(called, 0, '不支持的类型不该白跑一次转换')
+})
+
+test('Y10 转换失败 / 输出超限：原样上报，不退化成「给个源文件」', async () => {
+  const failed = createArtifactExporter({
+    listArtifacts: async () => listed, resolveWorkspace: async () => root,
+    convertToPdf: async () => ({ ok: false, code: 'CONVERT_FAILED', message: 'LibreOffice 超时' }),
+  })
+  const r1 = await failed.readBytes({ sessionId: 's1', relPath: 'out/a.docx', format: 'pdf' })
+  assert.equal(r1.code, 'CONVERT_FAILED')
+  assert.match(r1.message, /LibreOffice 超时/)
+
+  const throwing = createArtifactExporter({
+    listArtifacts: async () => listed, resolveWorkspace: async () => root,
+    convertToPdf: async () => { throw new Error('转换器崩了') },
+  })
+  // 抛出也算失败，绝不能让异常冒到 frame 层变成 500 空响应
+  const r2 = await throwing.readBytes({ sessionId: 's1', relPath: 'out/a.docx', format: 'pdf' })
+  assert.equal(r2.ok, false)
+
+  const huge = createArtifactExporter({
+    listArtifacts: async () => listed, resolveWorkspace: async () => root, maxBytes: 128,
+    convertToPdf: async () => ({ ok: true, value: { bytes: Buffer.alloc(512, 2) } }),
+  })
+  const r3 = await huge.readBytes({ sessionId: 's1', relPath: 'out/a.docx', format: 'pdf' })
+  assert.equal(r3.code, 'ARTIFACT_TOO_LARGE')
+})
+
+test('Y11 已经是 PDF 再要 PDF：原样给，不白跑转换', async () => {
+  let called = 0
+  const conv = createArtifactExporter({
+    listArtifacts: async () => listed, resolveWorkspace: async () => root,
+    convertToPdf: async () => { called++; return { ok: true, value: { bytes: Buffer.from('nope') } } },
+  })
+  const r = await conv.readBytes({ sessionId: 's1', relPath: 'out/a.pdf', format: 'pdf' })
+  assert.equal(r.ok, true)
+  assert.equal(called, 0)
+  assert.equal(r.value.name, 'a.pdf')
+  assert.match(Buffer.from(r.value.bytes, 'base64').toString('utf8'), /%PDF-1\.4/)
 })

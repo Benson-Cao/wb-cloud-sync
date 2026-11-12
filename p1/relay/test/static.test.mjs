@@ -225,5 +225,18 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /client\.createArtifactTicket/, '产物卡片要有换票动作')
   assert.match(page, /client\.fetchArtifactBlob/, '换票后才取字节')
   assert.match(page, /一次性票据/, '界面要说明这是一次性票据，不是自动同步')
+
+  // 转 PDF：只对宿主支持的六种 Office 后缀出按钮，且走同一张票
+  assert.match(page, /OFFICE_PDF = new Set/, '白名单要照抄宿主支持的格式')
+  assert.match(page, /'转 PDF'/, 'Office 产物要有转换入口')
+  assert.match(page, /saveArtifact\([^)]*'pdf'/, '转换要带目标格式进换票')
+  assert.match(page, /\{ format \}/, '换票请求要把 format 发出去')
+
+  // W9 定时任务 + M2-10 改名
+  assert.match(page, /id="schedulesToggle"/, '要有定时任务入口')
+  assert.match(page, /client\.createSchedule/, '创建要交给宿主，不本地造任务')
+  assert.match(page, /client\.listSchedules/, '列表从宿主读')
+  assert.match(page, /id="rename"/, '会话里要有改名入口')
+  assert.match(page, /client\.renameSession/, '改名走宿主 sessionController')
   assert.match(page, /\$\('save'\)\.disabled = true/, '配对期间按钮要置灰，否则用户会以为没反应再点一次')
 })

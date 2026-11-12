@@ -481,3 +481,99 @@ test('T15 产物下载票（ADR-011）：手机只见元数据，票据单次/�
   })
   assert.equal((await bad).status, 403)
 })
+
+test('T16 W9 定时任务 + 改名：Relay 只转发，Host 响应回手机（写操作不代造）', async () => {
+  const p = await pair('w9-dev')
+  await call('/host/register', { method: 'POST', body: { deviceId: 'w9-dev' } })
+
+  const round = async (method, path, body, responseData) => {
+    const inflight = call(path, { method, token: p.token, body })
+    await waitForQueue('w9-dev')
+    const frame = (await call('/host/poll?deviceId=w9-dev')).json.data.frames[0]
+    await call('/host/respond', {
+      method: 'POST', body: {
+        reqId: frame.reqId, status: 200,
+        body: { ok: true, data: responseData, protocol: PROTOCOL },
+      },
+    })
+    return { r: await inflight, frame }
+  }
+
+  const list = await round('GET', '/api/schedules?deviceId=w9-dev', undefined,
+    { rows: [{ id: 't1', title: '提醒' }], count: 1 })
+  assert.equal(list.r.status, 200)
+  assert.equal(list.frame.endpoint, 'session/schedule-list')
+  assert.equal(list.r.json.data.rows[0].title, '提醒')
+
+  const made = await round('POST', '/api/schedules',
+    { deviceId: 'w9-dev', title: '买菜', prompt: '列清单', afterSeconds: 600 },
+    { task: { id: 't2', title: '买菜' } })
+  assert.equal(made.frame.endpoint, 'session/schedule-create')
+  assert.equal(made.frame.body.target ?? null, null, 'Relay 不替手机决定投递目标')
+  assert.equal(made.r.json.data.task.id, 't2')
+
+  const run = await round('POST', '/api/schedules/t2/run', { deviceId: 'w9-dev' }, { id: 't2' })
+  assert.equal(run.frame.endpoint, 'session/schedule-run')
+  assert.equal(run.frame.body.id, 't2')
+
+  // 改名：PATCH {title} 走第三条支路，CP 标题按宿主回传更新
+  relay.cp.putSession('w9-dev', { sessionId: 's-ren', state: 'stopped', lastSeq: 1, title: '旧名' })
+  const ren = await round('PATCH', '/api/sessions/s-ren?deviceId=w9-dev',
+    { deviceId: 'w9-dev', title: '新名' }, { title: '新名', seq: 9 })
+  assert.equal(ren.frame.endpoint, 'session/rename')
+  assert.equal(relay.cp.getSession('s-ren').title, '新名')
+
+  // 一次只做一件事
+  const both = await call('/api/sessions/s-ren?deviceId=w9-dev', {
+    method: 'PATCH', token: p.token, body: { deviceId: 'w9-dev', title: 'x', pinned: true },
+  })
+  assert.equal(both.status, 400)
+})
+
+test('T17 转 PDF 也走同一张票：format 透传 Host，convertedFrom 回手机，非法 format 直接 400', async () => {
+  const p = await pair('pdf-dev')
+  await call('/host/register', { method: 'POST', body: { deviceId: 'pdf-dev' } })
+  const bytes = Buffer.from('%PDF-1.7 转出来的', 'utf8').toString('base64')
+
+  const inflight = call('/api/artifacts/ticket', {
+    method: 'POST', token: p.token,
+    body: { deviceId: 'pdf-dev', sessionId: 's-1', path: 'out/a.docx', format: 'pdf' },
+  })
+  await waitForQueue('pdf-dev')
+  const frame = (await call('/host/poll?deviceId=pdf-dev')).json.data.frames[0]
+  assert.equal(frame.endpoint, 'session/artifact-ticket')
+  assert.equal(frame.body.format, 'pdf', 'format 必须到 Host，否则会静默变原样下载')
+  await call('/host/respond', {
+    method: 'POST', body: {
+      reqId: frame.reqId, status: 200,
+      body: {
+        ok: true,
+        data: {
+          name: 'a.pdf', mime: 'application/pdf', size: bytes.length,
+          bytes, convertedFrom: 'a.docx',
+        },
+        protocol: PROTOCOL,
+      },
+    },
+  })
+
+  const r = await inflight
+  assert.equal(r.status, 200)
+  assert.equal(r.json.data.name, 'a.pdf')
+  assert.equal(r.json.data.convertedFrom, 'a.docx', '得让手机说得出「这是转的」')
+  assert.equal(r.json.data.bytes, undefined)
+
+  const d = await fetch(`http://127.0.0.1:${port}/api/artifacts/download/${r.json.data.ticketId}`, {
+    headers: { Authorization: `Bearer ${p.token}` },
+  })
+  assert.equal(d.status, 200)
+  assert.equal(d.headers.get('content-type')?.startsWith('application/pdf'), true)
+
+  // 不支持的目标格式不许被「将就」成原样下载
+  const bad = await call('/api/artifacts/ticket', {
+    method: 'POST', token: p.token,
+    body: { deviceId: 'pdf-dev', sessionId: 's-1', path: 'out/a.docx', format: 'docx' },
+  })
+  assert.equal(bad.status, 400)
+  assert.equal(bad.json.error.code, 'INVALID_ARGUMENT')
+})

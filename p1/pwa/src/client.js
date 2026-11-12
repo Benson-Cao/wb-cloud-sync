@@ -462,6 +462,61 @@ export function createPwaClient({
     return payload.data?.rows ?? []
   }
 
+  /** 定时任务（W9）：列表 / 创建（N 分钟后）/ 立即运行一次。 */
+  const listSchedules = async () => {
+    const r = await fetchImpl(`${base}/api/schedules?deviceId=${encodeURIComponent(deviceId)}`, { headers: authHeaders() })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      throw Object.assign(new Error(`读取定时任务失败：${code}`), { code })
+    }
+    return payload.data?.rows ?? []
+  }
+
+  const createSchedule = async ({ title, prompt, afterSeconds, target = null } = {}) => {
+    const r = await fetchImpl(`${base}/api/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ deviceId, title, prompt, afterSeconds, target }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      const detail = typeof payload?.error?.message === 'string' ? payload.error.message : ''
+      throw Object.assign(new Error(detail || `创建定时任务失败：${code}`), { code })
+    }
+    return payload.data
+  }
+
+  const runSchedule = async ({ id } = {}) => {
+    const r = await fetchImpl(`${base}/api/schedules/${encodeURIComponent(id)}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ deviceId }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      throw Object.assign(new Error(`运行失败：${code}`), { code })
+    }
+    return payload.data
+  }
+
+  /** 会话改名（M2-10）：标题由宿主写事件并权威回传。 */
+  const renameSession = async ({ sessionId, title } = {}) => {
+    const r = await fetchImpl(`${base}/api/sessions/${encodeURIComponent(sessionId)}?deviceId=${encodeURIComponent(deviceId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ deviceId, title }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      throw Object.assign(new Error(`改名失败：${code}`), { code })
+    }
+    return payload.data
+  }
+
   /**
    * 向已有会话发一条消息：文本 + 已上传附件的 receiptId。
    * 走白名单 `session/prompt`；`clientMsgId` 是宿主原生幂等键，重发同一条不会重复落库。
@@ -584,14 +639,15 @@ export function createPwaClient({
    * 产物下载（ADR-011）：分两步——先换一次性票据（只回元数据），再用票据取字节。
    * Host 只放行「该会话已显式交付、且在工作区内」的文件；Relay 内存票据 60s/单次。
    */
-  const createArtifactTicket = async ({ sessionId, path } = {}) => {
+  const createArtifactTicket = async ({ sessionId, path, format } = {}) => {
     if (!sessionId || typeof path !== 'string' || !path.trim()) {
       throw Object.assign(new Error('下载缺 sessionId / path'), { code: 'INVALID_ARGUMENT' })
     }
     const r = await fetchImpl(`${base}/api/artifacts/ticket`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ deviceId, sessionId, path }),
+      // format 只允许 'pdf'（宿主只做 Office→PDF），别的值直接不发，别让服务端去猜
+      body: JSON.stringify({ deviceId, sessionId, path, ...(format === 'pdf' ? { format } : {}) }),
     })
     const payload = await r.json().catch(() => null)
     if (!r.ok || payload?.ok !== true) {
@@ -694,6 +750,7 @@ export function createPwaClient({
     refreshSessions, createSession, cancelTurn, setPinned, setArchived, getArchivedSessions, submitPrompt, uploadAttachment,
     getHostStatus: () => ({ ...hostStatus }),
     listApprovals, answerApproval, getArtifacts, createArtifactTicket, fetchArtifactBlob, backfill, openWindow,
+    listSchedules, createSchedule, runSchedule, renameSession,
     follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null,
   }
 }

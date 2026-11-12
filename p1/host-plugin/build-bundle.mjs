@@ -70,7 +70,7 @@ const helpers = `// ===== 内联自 src/replay.js（重启后历史补齐，只�
 const EXPECTED_IMPORTS = [
   /^import \{ createBackfillReader, createReplayAdapter \} from '\.\/replay\.js'$/m,
   /^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'$/m,
-  /^import \{ createHostAdapters \} from '\.\/host-adapters\.js'$/m,
+  /^import \{ createHostAdapters(?:, resolveService)? \} from '\.\/host-adapters\.js'$/m,
   /^import \{ createApprovalBridge \} from '\.\/approvals\.js'$/m,
   /^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts\.js'$/m,
 ]
@@ -80,7 +80,7 @@ for (const pattern of EXPECTED_IMPORTS) {
 const main = mainSrc
   .replace(/^import \{ createBackfillReader, createReplayAdapter \} from '\.\/replay\.js'\n/m, '')
   .replace(/^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'\n/m, '')
-  .replace(/^import \{ createHostAdapters \} from '\.\/host-adapters\.js'\n/m, '')
+  .replace(/^import \{ createHostAdapters(?:, resolveService)? \} from '\.\/host-adapters\.js'\n/m, '')
   .replace(/^import \{ createApprovalBridge \} from '\.\/approvals\.js'\n/m, '')
   .replace(/^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts\.js'\n/m, '')
   .replace(/^export function apply\(/m, 'function __apply(')

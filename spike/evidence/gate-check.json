@@ -1,10 +1,10 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-12T08:50:19.697Z",
+  "capturedAt": "2026-11-12T15:06:45.125Z",
   "git": {
-    "head": "1c1176ca9bdc744d02116d87a46896f819ba9877",
+    "head": "4d7b35859a970e3739822e8f25ea0426b58def39",
     "branch": "main",
-    "worktreeClean": true
+    "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
@@ -12,25 +12,20 @@
     "dataChanged": [],
     "signoffChanged": [],
     "artifactChanged": [],
-    "narrativeChanged": [
-      "PROTOCOL.md"
-    ],
+    "narrativeChanged": [],
     "notes": [],
-    "previousCapturedAt": "2026-11-12T07:56:02.804Z",
-    "previousGitHead": "24a0c164456d2c4e7282652ac0c339162acb51ec",
+    "previousCapturedAt": "2026-11-12T15:06:41.624Z",
+    "previousGitHead": "4d7b35859a970e3739822e8f25ea0426b58def39",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "DRIFTED",
-      "previousReason": "描述文字变化（不阻断）：PROTOCOL.md",
-      "capturedAt": "2026-11-12T07:56:02.804Z",
-      "gitHead": "24a0c164456d2c4e7282652ac0c339162acb51ec",
+      "previousStatus": "CURRENT",
+      "capturedAt": "2026-11-12T15:06:41.624Z",
+      "gitHead": "4d7b35859a970e3739822e8f25ea0426b58def39",
       "dataChanged": [],
       "signoffChanged": [],
       "artifactChanged": [],
-      "narrativeChanged": [
-        "PROTOCOL.md"
-      ]
+      "narrativeChanged": []
     }
   },
   "fingerprints": {
@@ -59,7 +54,7 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "946929553d9e4f573b406a032fa40d37d4e94f132ce14c76366c1869132849ff"
+      "PROTOCOL.md": "54c559bf3573ddc713f19e1b0d4b703da13c892763194d1333c9f7d28bfaee9d"
     }
   },
   "secretScan": {
@@ -104,7 +99,7 @@
     "chaosFail": 0,
     "chaosError": null,
     "perfVerdict": "PASS",
-    "perfAgeDays": 1.8,
+    "perfAgeDays": 2,
     "perfReason": null
   },
   "automated": [

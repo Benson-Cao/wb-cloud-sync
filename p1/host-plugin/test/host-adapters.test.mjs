@@ -569,3 +569,52 @@ test('HA28 setArchived：软移除委托 workspaceRegistry，回完整归档集�
   assert.equal((await noEntry.setArchived({ sessionId: 's-1' })).code, 'WRITER_UNAVAILABLE')
   assert.equal((await adapters.setArchived({})).code, 'HOST_ADAPTER_ERROR')
 })
+
+test('HA29 定时任务（W9）：列表用 catalog，创建走 ScheduleCreateRequest 形状', async () => {
+  const seen = []
+  const ctx = { schedule: {
+    catalog: async () => [
+      { id: 't1', kind: 'after', title: '提醒', prompt: '喝水', timing: { kind: 'after', after_seconds: 600 }, active: true, internalHandle: '不该外泄' },
+    ],
+    create: async (req) => { seen.push(req); return { ok: true, task: { id: 't2', title: req.title } } },
+    run: async (req) => { seen.push(['run', req]); return { ok: true } },
+  } }
+  const adapters = createHostAdapters(ctx)
+
+  const list = await adapters.listSchedules({})
+  assert.equal(list.ok, true)
+  assert.equal(list.value.rows.length, 1)
+  assert.equal(list.value.rows[0].title, '提醒')
+  assert.equal(list.value.rows[0].internalHandle, undefined, '宿主运行时句柄不能透给手机')
+
+  const made = await adapters.createSchedule({ title: '  买菜  ', prompt: '  列清单  ', afterSeconds: 600 })
+  assert.equal(made.ok, true)
+  assert.deepEqual(seen[0], {
+    title: '买菜', prompt: '列清单',
+    timing: { kind: 'after', after_seconds: 600 },
+    target: { kind: 'new_once' },
+  })
+  assert.equal((await adapters.createSchedule({ title: '', prompt: 'x', afterSeconds: 1 })).code, 'INVALID_ARGUMENT')
+  assert.equal((await adapters.createSchedule({ title: 'x', prompt: 'x', afterSeconds: -1 })).code, 'INVALID_ARGUMENT')
+
+  await adapters.runSchedule({ id: 't1' })
+  assert.deepEqual(seen[1], ['run', { id: 't1' }])
+})
+
+test('HA30 没有 schedule 服务时如实报缺，不伪造空列表', async () => {
+  const adapters = createHostAdapters({})
+  assert.equal((await adapters.listSchedules({})).code, 'WRITER_UNAVAILABLE')
+  assert.equal((await adapters.createSchedule({ title: 'x', prompt: 'y', afterSeconds: 1 })).code, 'WRITER_UNAVAILABLE')
+})
+
+test('HA31 会话改名：委托 sessionController.rename({sessionId,title})，不自写标题事件', async () => {
+  const seen = []
+  const ctx = { sessionController: { rename: async (r) => { seen.push(r); return { title: r.title, seq: 7 } } } }
+  const adapters = createHostAdapters(ctx)
+  const r = await adapters.renameSession({ sessionId: 's-1', title: '  新名字  ' })
+  assert.equal(r.ok, true)
+  assert.equal(r.value.title, '新名字')
+  assert.equal(r.value.seq, 7)
+  assert.deepEqual(seen, [{ sessionId: 's-1', title: '新名字' }])
+  assert.equal((await adapters.renameSession({ sessionId: 's-1', title: '  ' })).code, 'INVALID_ARGUMENT')
+})

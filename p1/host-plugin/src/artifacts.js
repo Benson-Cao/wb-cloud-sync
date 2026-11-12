@@ -85,20 +85,36 @@ export const mimeOfArtifact = (name) => {
 }
 
 /**
- * 显式产物导出（ADR-011）：**Host 这一侧只做「校验 + 读字节」**。
+ * 宿主 `officeToPdf.renderFile` 的硬白名单（源码取证）：只认这六种。
+ * 把 odt/rtf 之类写进来会「看起来支持、实际报 unsupported-format」，所以照抄。
+ */
+export const PDF_CONVERTIBLE = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'])
+
+/** 小写扩展名，没有就空串。 */
+export const extOf = (name) => {
+  const base = basename(name)
+  const at = base.lastIndexOf('.')
+  return at <= 0 ? '' : base.slice(at + 1).toLowerCase()
+}
+
+/**
+ * 显式产物导出（ADR-011）：**Host 这一侧只做「校验 + 读字节 / 校验 + 交给宿主转换」**。
  * 票据本身由 Relay 持有（一次性 / TTL / 绑定手机），所以这里不建票据表。
  *
- * 三条硬约束，少一条都会把 Relay 变成任意文件读取网关：
+ * 四条硬约束，少一条都会把 Relay 变成任意文件读取网关：
  *   1. 路径必须在该会话 `deliverables/presented` 的索引里（不信手机自报路径）；
  *   2. 解析后必须仍落在会话工作区内（防 `..` / 绝对路径穿越）；
- *   3. 体积硬上限（WS 帧 1 MiB + base64 膨胀），超出明确拒绝，不静默截断。
+ *   3. 体积硬上限（WS 帧 1 MiB + base64 膨胀），超出明确拒绝，不静默截断；
+ *   4. 转换只走**同一个** `convertToPdf`，输出仍受同一体积上限约束。
  *
- * 没有 PDF/DOCX 转换：宿主 asar 里 `exportPdf/exportDocx` 0 命中，
- * 原样下载，格式不对就由上层明确回 409，绝不拼一个「看起来像」的文件。
+ * PDF 转换（r13 修订）：宿主有 `officeToPdf.render`，但**只做 Office → PDF**。
+ * Markdown / 纯文本 → PDF 在宿主里没有实现，所以那种请求明确回
+ * `CAPABILITY_UNAVAILABLE`，绝不拼一个「看起来像 PDF」的东西骗用户。
  */
 export function createArtifactExporter({
   listArtifacts,
   resolveWorkspace,
+  convertToPdf = null,
   maxBytes = 512 * 1024,
 } = {}) {
   if (typeof listArtifacts !== 'function' || typeof resolveWorkspace !== 'function') {
@@ -106,7 +122,7 @@ export function createArtifactExporter({
   }
   const cap = Math.max(1, Number(maxBytes) || 512 * 1024)
 
-  const readBytes = async ({ sessionId, relPath }) => {
+  const readBytes = async ({ sessionId, relPath, format }) => {
     if (!sessionId || typeof relPath !== 'string' || !relPath.trim()) {
       return { ok: false, code: 'INVALID_ARGUMENT', message: '缺 sessionId / path' }
     }
@@ -135,6 +151,61 @@ export function createArtifactExporter({
     try { st = await fs.stat(abs) }
     catch { return { ok: false, code: 'ARTIFACT_MISSING', message: '文件已不存在（可能被删或移动）' } }
     if (!st.isFile()) return { ok: false, code: 'ARTIFACT_MISSING', message: '不是普通文件' }
+
+    const sourceName = basename(match.name ?? relPath)
+    const srcExt = extOf(sourceName)
+    const wantPdf = format === 'pdf' && srcExt !== 'pdf'
+
+    // ── 转换支路：不读源字节，把绝对路径交给宿主（它有自己的 maxInputBytes / 超时）
+    if (wantPdf) {
+      if (!PDF_CONVERTIBLE.has(srcExt)) {
+        return {
+          ok: false, code: 'CAPABILITY_UNAVAILABLE',
+          message: `宿主只能把 Office 文件转成 PDF（.docx/.xlsx/.pptx 等），`
+            + `${srcExt ? '.' + srcExt : '该类型'} 不支持转换；请原样下载或在电脑上导出`,
+        }
+      }
+      if (typeof convertToPdf !== 'function') {
+        return { ok: false, code: 'CAPABILITY_UNAVAILABLE', message: '本机没有可用的 PDF 转换器' }
+      }
+      let conv
+      try {
+        conv = await convertToPdf({ sessionId, absPath: abs, relPath })
+      } catch (error) {
+        // 同步抛 / 异步 reject 都兜住：异常绝不能冒到帧层变成空响应
+        conv = { ok: false, code: 'CONVERT_FAILED', message: `PDF 转换失败：${error?.message ?? 'unknown'}` }
+      }
+      if (!conv?.ok) {
+        return {
+          ok: false,
+          code: conv?.code ?? 'CONVERT_FAILED',
+          message: conv?.message ?? '转换失败（宿主未说明原因）',
+        }
+      }
+      const buf = Buffer.isBuffer(conv.value?.bytes)
+        ? conv.value.bytes
+        : Buffer.from(conv.value?.bytes ?? [])
+      if (!buf.length) return { ok: false, code: 'CONVERT_FAILED', message: '转换结果为空' }
+      if (buf.length > cap) {
+        return {
+          ok: false, code: 'ARTIFACT_TOO_LARGE',
+          message: `转换后 ${buf.length} B 超过 ${cap} B 上限，请在电脑上打开`,
+        }
+      }
+      const pdfName = `${sourceName.replace(/\.[^.]+$/, '')}.pdf`
+      return {
+        ok: true,
+        value: {
+          name: pdfName,
+          mime: 'application/pdf',
+          size: buf.length,
+          bytes: buf.toString('base64'),
+          convertedFrom: sourceName,
+        },
+      }
+    }
+
+    // ── 原样支路
     if (st.size > cap) {
       return { ok: false, code: 'ARTIFACT_TOO_LARGE', message: `文件 ${st.size} B 超过 ${cap} B 上限，请在电脑上打开` }
     }
@@ -144,12 +215,11 @@ export function createArtifactExporter({
     if (buf.length > cap) {
       return { ok: false, code: 'ARTIFACT_TOO_LARGE', message: '读取时体积超限' }
     }
-    const name = basename(match.name ?? relPath)
     return {
       ok: true,
       value: {
-        name,
-        mime: mimeOfArtifact(name),
+        name: sourceName,
+        mime: mimeOfArtifact(sourceName),
         size: buf.length,
         bytes: buf.toString('base64'),   // 只在 frame 里，不落盘、不进事件流
       },
@@ -159,7 +229,12 @@ export function createArtifactExporter({
   return { readBytes, maxBytes: cap }
 }
 
-export function createArtifactIndex({ openSession, pageSize = 500, maxPages = 20 } = {}) {
+/**
+ * 会话产物索引。显式交付事件为 0 条时，`listWorkspaceFiles`（若宿主提供）作为
+ * **第二数据源**：路径来自宿主权威文件服务，标 `source:'workspace'`，
+ * 绝不用正则从 tool/result 正文里抠路径（宿主自己都不这么干）。拿不到就保持空。
+ */
+export function createArtifactIndex({ openSession, pageSize = 500, maxPages = 20, listWorkspaceFiles = null } = {}) {
   const limit = Math.min(Math.max(1, Number(pageSize) || 500), 5000)
   const pages = Math.min(Math.max(1, Number(maxPages) || 20), 100)
 
@@ -204,14 +279,43 @@ export function createArtifactIndex({ openSession, pageSize = 500, maxPages = 20
         if (unique.length >= MAX_ARTIFACT_ROWS) break
       }
       unique.sort((a, b) => a.seq - b.seq || a.index - b.index)
+      // 显式交付为 0 行时，问宿主的权威文件服务要一份工作区清单。
+      // 失败/不可用都保持 rows:[]——**如实空着，不猜**。
+      let rows = unique
+      let source = 'presented'
+      let workspaceError = null
+      if (!rows.length && typeof listWorkspaceFiles === 'function') {
+        try {
+          const got = await listWorkspaceFiles(sessionId)
+          // 兼容两种返回：裸数组（老夹具）与 { rows, error }（带失败原因，便于真机定位）
+          const files = Array.isArray(got) ? got : (got?.rows ?? [])
+          workspaceError = Array.isArray(got) ? null : (got?.error ?? null)
+          if (files.length) {
+            rows = files.slice(0, MAX_ARTIFACT_ROWS)
+              .filter((f) => f && typeof f.path === 'string' && f.path.trim())
+              .map((f, i) => ({
+                seq: -1, turn: null, callId: null, index: i,
+                path: f.path, name: basename(f.name ?? f.path),
+                description: f.description ?? null,
+                source: 'workspace',
+              }))
+            source = 'workspace'
+          }
+        } catch (error) {
+          // 文件服务不可用：保持空，但把原因留下来——「空着」和「没问到」必须能分开
+          workspaceError = error?.message ?? String(error)
+        }
+      }
       return {
         ok: true,
         value: {
           sessionId,
-          rows: unique,
-          count: unique.length,
+          rows,
+          source,
+          count: rows.length,
           scanned,
-          truncated: truncated || unique.length >= MAX_ARTIFACT_ROWS,
+          truncated: truncated || rows.length >= MAX_ARTIFACT_ROWS,
+          ...(workspaceError ? { workspaceError } : {}),
         },
       }
     } catch (error) {

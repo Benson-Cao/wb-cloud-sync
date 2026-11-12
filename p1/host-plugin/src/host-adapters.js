@@ -42,6 +42,10 @@ const SERVICE_CANDIDATES = [
   'workspaceRegistry', 'sessionPersistence', 'typert',
   // 置顶/归档：WorkspaceController，cordis 名 'workspaces'（r11）
   'workspaces',
+  // W8/W9 诊断与能力探测：产物清单、定时任务、账号设置
+  'workspaceFiles', 'uiWorkspace', 'schedule', 'deepseekAccount', 'settingsSchema',
+  // W8/W9 二轮：转换能力、设置、目标/技能、标题
+  'officeToPdf', 'goals', 'skills', 'sessionTitle', 'agentPresets', 'workingDirectory',
   // 附件上行：`fileUploads`（super(ctx,"fileUploads")）与它依赖的 `attachments`
   'fileUploads', 'attachments',
 ]
@@ -50,7 +54,7 @@ const SERVICE_CANDIDATES = [
  * 每路独立 try：cordis 的 Proxy 访问未注入属性会抛（0.1.2 同类坑）。
  * 同时记录命中路径与各路异常，供 /__wbsync/status 做真机诊断。
  */
-const resolveService = (ctx, name) => {
+export const resolveService = (ctx, name) => {
   const errors = []
   try {
     const got = typeof ctx?.get === 'function' ? ctx.get(name) : undefined
@@ -69,9 +73,28 @@ const resolveService = (ctx, name) => {
   return { svc: undefined, via: null, errors }
 }
 
+/**
+ * typert lookup 可达性（诊断用）。
+ * `workspaceFiles.list` / `officeToPdf.render` 的首参都来自 `workspaceFileScope` lookup；
+ * 拿不到这个 provider 就只能空着，而「空着」和「真没产物」在手机上是同一个画面——
+ * 所以必须能在 /status 里区分这两件事。
+ */
+const reportLookups = (ctx) => {
+  const out = { reachable: false, hasWorkspaceFileScope: false, error: null }
+  try {
+    const t = resolveService(ctx, 'typert').svc
+    const lookups = t?.lookups
+    out.reachable = Boolean(lookups) && typeof lookups.get === 'function'
+    if (out.reachable) {
+      const p = lookups.get('workspaceFileScope')
+      out.hasWorkspaceFileScope = Boolean(p) && typeof p.resolve === 'function'
+    }
+  } catch (error) { out.error = error?.message ?? String(error) }
+  return out
+}
+
 /** 惰性快照：每次调用都重新解析，宿主晚注册的服务会自动接上。 */
-const probeServices = (ctx) => {
-  const services = {}
+const probeServices = (ctx) => {  const services = {}
   const resolved = {}
   for (const name of SERVICE_CANDIDATES) {
     const r = resolveService(ctx, name)
@@ -151,6 +174,30 @@ const promptEntry = (services) => {
  * 返回 Remote 风格 `{ ok, value: { pinnedSessionIds } }`（最近置顶在前的全局集合）。
  * 找不到就如实报「没有这个入口」，绝不自己改索引假装成功。
  */
+/** 定时任务（W9）：宿主 `schedule` 服务，catalog/create/list/run 都是 lateBound。 */
+const scheduleEntry = (services) => {
+  const s = services.schedule
+  return s && (typeof s.catalog === 'function' || typeof s.list === 'function') ? s : null
+}
+
+/** 只挑契约字段：宿主对象里带运行时句柄，整个塞给手机既危险又超帧。 */
+const scheduleRow = (t) => {
+  if (!t || typeof t !== 'object') return null
+  const timing = t.timing && typeof t.timing === 'object' ? t.timing : null
+  return {
+    id: typeof t.id === 'string' ? t.id : null,
+    kind: typeof t.kind === 'string' ? t.kind : null,
+    title: typeof t.title === 'string' ? t.title : null,
+    prompt: typeof t.prompt === 'string' ? t.prompt : null,
+    timing,
+    scheduledAt: t.scheduledAt ?? null,
+    active: t.active ?? t.enabled ?? null,
+    target: t.target && typeof t.target === 'object'
+      ? { kind: t.target.kind ?? null, sessionId: t.target.sessionId ?? null }
+      : null,
+  }
+}
+
 const workspaceEntry = (services) => {
   // 真机 status 取证：插件在主进程里看到的是 **workspaceRegistry**（lateBound，
   // 带 pinSession/unpinSession/pinnedSessionIds/archiveSession/delete）；
@@ -316,6 +363,9 @@ export function createHostAdapters(ctx, options = {}) {
           boot: Object.fromEntries(SERVICE_CANDIDATES.map((n) => [n, boot.resolved[n].present])),
           lateBound: SERVICE_CANDIDATES.filter((n) => !boot.resolved[n].present && now.resolved[n].present),
           services: serviceReport,
+          // 产物清单/转换都靠 typert 的 workspaceFileScope lookup；这里直接报告它是否可达，
+          // 免得再出现「以为在问、其实没问到，异常被软探测吞掉」的假阴性
+          lookups: reportLookups(ctx),
         },
       }
     },
@@ -405,6 +455,101 @@ export function createHostAdapters(ctx, options = {}) {
         return { ok: r?.ok !== false, value: { archived: Boolean(archived), archivedSessionIds: Array.isArray(ids) ? ids : [] } }
       } catch (error) {
         return asError(error, { name: 'workspaceRegistry', kind: archived ? 'archiveSession' : 'unarchiveSession' })
+      }
+    },
+
+    /**
+     * 定时任务列表（W9）：优先 `catalog()`（无参、Host 全量），失败退 `list()`。
+     * 只回契约字段，不把宿主运行时对象透给手机。
+     */
+    listSchedules: async ({ limit = 100, offset = 0 } = {}) => {
+      const services = current()
+      const s = scheduleEntry(services)
+      if (!s) return unavailable('schedule.catalog/list', services)
+      try {
+        let rows = typeof s.catalog === 'function' ? await s.catalog() : null
+        if (!Array.isArray(rows) && typeof s.list === 'function') {
+          const r = await s.list({ limit, offset })
+          rows = Array.isArray(r) ? r : (Array.isArray(r?.rows) ? r.rows : null)
+        }
+        if (!Array.isArray(rows)) {
+          return { ok: false, code: 'HOST_ADAPTER_ERROR', message: '定时任务列表返回结构不认识' }
+        }
+        return {
+          ok: true,
+          value: { rows: rows.slice(0, 200).map(scheduleRow).filter(Boolean), count: rows.length },
+        }
+      } catch (error) {
+        return asError(error, { name: 'schedule', kind: 'catalog' })
+      }
+    },
+
+    /**
+     * 创建定时任务（W9）：手机只给「标题 + 内容 + N 分钟后 + 投递目标」。
+     * 参数形状按宿主 `ScheduleCreateRequest`（asar 取证）：`{title,prompt,timing,target}`，
+     * `timing` 支持 after/at/every/daily，v1 只开放 after；target 默认 new_once。
+     */
+    createSchedule: async ({ title, prompt, afterSeconds, target = null } = {}) => {
+      const services = current()
+      const s = scheduleEntry(services)
+      if (!s || typeof s.create !== 'function') return unavailable('schedule.create', services)
+      const t = typeof title === 'string' ? title.trim() : ''
+      const p = typeof prompt === 'string' ? prompt.trim() : ''
+      const n = Number(afterSeconds)
+      if (!t || t.length > 120 || !p || !Number.isSafeInteger(n) || n <= 0) {
+        return { ok: false, code: 'INVALID_ARGUMENT', message: '需要标题(≤120)、内容、正整数 afterSeconds' }
+      }
+      try {
+        const r = await s.create({
+          title: t,
+          prompt: p,
+          timing: { kind: 'after', after_seconds: n },
+          target: target && typeof target === 'object' ? target : { kind: 'new_once' },
+        })
+        const created = r?.task ?? r?.row ?? (r?.id ? r : null)
+        return { ok: r?.ok !== false, value: { task: scheduleRow(created) } }
+      } catch (error) {
+        return asError(error, { name: 'schedule', kind: 'create' })
+      }
+    },
+
+    /** 立即运行一次（W9）：宿主 `run` 的参数形状两个都试，失败如实回错。 */
+    runSchedule: async ({ id } = {}) => {
+      const services = current()
+      const s = scheduleEntry(services)
+      if (!s || typeof s.run !== 'function') return unavailable('schedule.run', services)
+      if (!id) return { ok: false, code: 'INVALID_ARGUMENT', message: 'runSchedule 缺 id' }
+      try {
+        const r = await s.run({ id })
+        return { ok: r?.ok !== false, value: { id } }
+      } catch (error) {
+        try {
+          const r = await s.run(id)
+          return { ok: r?.ok !== false, value: { id } }
+        } catch {
+          return asError(error, { name: 'schedule', kind: 'run' })
+        }
+      }
+    },
+
+    /**
+     * 会话改名（M2-10）：签名取自 asar `sessionController.rename(request)` →
+     * `sessionTitle.rename(agent.session, title)`，请求 `{sessionId, title}`，
+     * 返回 `{title, seq}`。不改日志、不自己写标题事件。
+     */
+    renameSession: async ({ sessionId, title } = {}) => {
+      const services = current()
+      const c = services.sessionController
+      if (typeof c?.rename !== 'function') return unavailable('sessionController.rename', services)
+      const t = typeof title === 'string' ? title.trim() : ''
+      if (!sessionId || !t) {
+        return { ok: false, code: 'INVALID_ARGUMENT', message: '改名需要 sessionId 与非空 title' }
+      }
+      try {
+        const r = await c.rename({ sessionId, title: t })
+        return { ok: true, value: { sessionId, title: r?.title ?? t, seq: r?.seq ?? null } }
+      } catch (error) {
+        return asError(error, { name: 'sessionController', kind: 'rename' })
       }
     },
 
