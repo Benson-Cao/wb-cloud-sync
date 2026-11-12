@@ -37,6 +37,10 @@
       margin-bottom: 8px; background: #1a1a1a; cursor: pointer;
     }
     .row.active { border-color: #4da3ff; }
+    /* 置顶分组（r11）：小标题 + 置顶开关，开关不挤走状态徽章 */
+    .grouphead { margin: 10px 2px 6px; font-size: 12px; color: #7a8699; letter-spacing: .5px; }
+    .pinbtn { background: none; border: none; cursor: pointer; font-size: 15px; padding: 4px 2px; opacity: .35; }
+    .pinbtn.on { opacity: 1; }
     /* 内容区必须能收缩：内层 div 不设 min-width:0 时，长标题会把右侧状态徽章顶出屏幕 */
     .row > div { min-width: 0; flex: 1 1 auto; }
     .row .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -278,12 +282,32 @@
       return tail || null
     }
 
+    /**
+     * 会话列表：置顶在前（按宿主给的 pinnedOrder，最近置顶在前），其余按最近活跃。
+     * 置顶是宿主的全局集合（r11），这里只负责分组显示与逐条置顶/取消——**不改序**。
+     */
     const renderList = (rows) => {
       const box = $('list')
       box.classList.remove('hint')
       if (!rows.length) { box.innerHTML = '<span class="hint">PC 侧还没有上报会话索引。</span>'; return }
       box.innerHTML = ''
-      for (const r of rows) {
+      const sorted = [...rows].sort((a, b) => {
+        const pa = a.pinned ? 0 : 1
+        const pb = b.pinned ? 0 : 1
+        if (pa !== pb) return pa - pb
+        if (a.pinned && b.pinned) return (a.pinnedOrder ?? 0) - (b.pinnedOrder ?? 0)
+        return (b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0)
+      })
+      let lastGroup = null
+      for (const r of sorted) {
+        const group = r.pinned ? '置顶' : '全部'
+        if (group !== lastGroup) {
+          lastGroup = group
+          const head = document.createElement('div')
+          head.className = 'grouphead'
+          head.textContent = group
+          box.appendChild(head)
+        }
         const div = document.createElement('div')
         div.className = 'row' + (r.sessionId === activeSession ? ' active' : '')
 
@@ -303,9 +327,29 @@
         badge.className = `badge ${r.state ?? ''}`
         badge.textContent = STATE_LABEL[r.state] ?? (r.state ?? '未知')
 
-        div.appendChild(left); div.appendChild(badge)
+        // 置顶开关：点它**只改置顶**，不能顺带把会话打开
+        const pin = document.createElement('button')
+        pin.className = 'pinbtn' + (r.pinned ? ' on' : '')
+        pin.textContent = '📌'
+        pin.title = r.pinned ? '取消置顶' : '置顶'
+        pin.addEventListener('click', (e) => { e.stopPropagation(); void togglePin(r) })
+
+        div.appendChild(left); div.appendChild(badge); div.appendChild(pin)
         div.addEventListener('click', () => openStream(r.sessionId))
         box.appendChild(div)
+      }
+    }
+
+    /** 置顶/取消置顶：成功后按宿主回的最新行刷新列表（排序跟着宿主走）。 */
+    const togglePin = async (row) => {
+      if (!client) return
+      try {
+        await client.setPinned({ sessionId: row.sessionId, pinned: !row.pinned })
+        const rows = await client.refreshSessions()
+        renderList(rows)
+        say(row.pinned ? '已取消置顶' : '已置顶')
+      } catch (e) {
+        say(`置顶失败：${e.message}`, true)
       }
     }
 

@@ -40,6 +40,8 @@
 const SERVICE_CANDIDATES = [
   'sessionController', 'sessions', 'agents', 'connection', 'gateway',
   'workspaceRegistry', 'sessionPersistence', 'typert',
+  // 置顶/归档：WorkspaceController，cordis 名 'workspaces'（r11）
+  'workspaces',
   // 附件上行：`fileUploads`（super(ctx,"fileUploads")）与它依赖的 `attachments`
   'fileUploads', 'attachments',
 ]
@@ -140,6 +142,21 @@ const promptEntry = (services) => {
   if (typeof services.agents?.get === 'function') {
     return { svc: services.agents, name: 'agents', kind: 'followup' }
   }
+  return null
+}
+
+/**
+ * 置顶/取消置顶（r11）：宿主 `WorkspaceController`（cordis 名 `workspaces`）。
+ * 方法签名（asar 取证）：`pinSession(sessionId) / unpinSession(sessionId)`，
+ * 返回 Remote 风格 `{ ok, value: { pinnedSessionIds } }`（最近置顶在前的全局集合）。
+ * 找不到就如实报「没有这个入口」，绝不自己改索引假装成功。
+ */
+const workspaceEntry = (services) => {
+  const w = services.workspaces
+  if (!w) return null
+  if (typeof w.pinSession === 'function' && typeof w.unpinSession === 'function') return w
+  const inner = w.workspace ?? w.model
+  if (inner && typeof inner.pinSession === 'function' && typeof inner.unpinSession === 'function') return inner
   return null
 }
 
@@ -327,6 +344,27 @@ export function createHostAdapters(ctx, options = {}) {
       }
       const r = await promptText(sessionId, text ?? '', clientMsgId, current(), extra)
       return r.requestId ? { ok: r.ok, code: r.code, message: r.message, value: r.value } : r
+    },
+
+    /**
+     * 置顶 / 取消置顶（r11）。委托宿主 `workspaces.pinSession / unpinSession`，
+     * 返回宿主给的**完整**置顶集合（最近置顶在前）——调用方拿它刷新索引，
+     * 不要用「翻转本地布尔」去猜：置顶集合是全局的，别的端也可能改。
+     */
+    setPinned: async ({ sessionId, pinned = true } = {}) => {
+      if (!sessionId) {
+        return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'setPinned 缺 sessionId' }
+      }
+      const services = current()
+      const w = workspaceEntry(services)
+      if (!w) return unavailable('workspaces.pinSession/unpinSession', services)
+      try {
+        const r = pinned ? await w.pinSession(sessionId) : await w.unpinSession(sessionId)
+        const ids = r?.value?.pinnedSessionIds ?? (Array.isArray(r) ? r : [])
+        return { ok: r?.ok !== false, value: { pinned: Boolean(pinned), pinnedSessionIds: ids } }
+      } catch (error) {
+        return asError(error, { name: 'workspaces', kind: pinned ? 'pinSession' : 'unpinSession' })
+      }
     },
 
     /** 取消当前轮次：官方 session/cancel 只吃 { sessionId }，保留 pending inbox。 */

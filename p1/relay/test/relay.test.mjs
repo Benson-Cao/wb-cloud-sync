@@ -339,3 +339,37 @@ test('T12b 配了 publicBaseUrl 时以配置为准（反代 / 公网域名场景
     await r2.stop()
   }
 })
+
+test('T13 PATCH 置顶：转发 session/pin，CP 按宿主回的全局集合刷新 pinnedOrder（r11）', async () => {
+  const p = await pair('pin-dev')
+  await call('/host/register', { method: 'POST', body: { deviceId: 'pin-dev' } })
+  relay.cp.putSession('pin-dev', { sessionId: 'session-pin', state: 'stopped', lastSeq: 1 })
+
+  const inflight = call('/api/sessions/session-pin?deviceId=pin-dev', {
+    method: 'PATCH', token: p.token, body: { deviceId: 'pin-dev', pinned: true },
+  })
+  await waitForQueue('pin-dev')
+  const polled = await call('/host/poll?deviceId=pin-dev')
+  const frame = polled.json.data.frames[0]
+  assert.equal(frame.endpoint, 'session/pin', '走白名单里的 session/* 通道')
+  assert.equal(frame.body.sessionId, 'session-pin')
+  assert.equal(frame.body.pinned, true)
+
+  await call('/host/respond', {
+    method: 'POST', body: {
+      reqId: frame.reqId, status: 200,
+      body: { ok: true, data: { pinned: true, pinnedSessionIds: ['session-pin'] }, protocol: PROTOCOL },
+    },
+  })
+  const r = await inflight
+  assert.equal(r.status, 200)
+  assert.equal(relay.cp.getSession('session-pin').pinned, true)
+  assert.equal(relay.cp.getSession('session-pin').pinnedOrder, 0, '照宿主的集合定序，不自己猜')
+
+  // 缺 pinned 字段：400，不白跑一趟宿主
+  const bad = await call('/api/sessions/session-pin?deviceId=pin-dev', {
+    method: 'PATCH', token: p.token, body: { deviceId: 'pin-dev' },
+  })
+  assert.equal(bad.status, 400)
+  assert.equal(bad.json.error.code, 'INVALID_JSON')
+})

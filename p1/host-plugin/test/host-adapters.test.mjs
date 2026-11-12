@@ -508,3 +508,28 @@ test('HA25 排队期间的幂等：同一 clientMsgId 只转发一次（宿主�
   await adapters.submitPrompt({ sessionId: 's-other', text: '同一句', clientMsgId: 'msg-25' })
   assert.equal(calls.prompt.length, 3)
 })
+
+test('HA26 setPinned：转发 workspaces.pinSession/unpinSession，回完整置顶集合', async () => {
+  const calls = []
+  const ctx = { workspaces: {
+    pinSession: async (id) => { calls.push(['pin', id]); return { ok: true, value: { pinnedSessionIds: [id, 'other'] } } },
+    unpinSession: async (id) => { calls.push(['unpin', id]); return { ok: true, value: { pinnedSessionIds: ['other'] } } },
+  } }
+  const adapters = createHostAdapters(ctx)
+
+  const on = await adapters.setPinned({ sessionId: 's-1', pinned: true })
+  assert.equal(on.ok, true)
+  assert.deepEqual(on.value.pinnedSessionIds, ['s-1', 'other'], '回宿主的完整集合，调用方不猜序')
+
+  const off = await adapters.setPinned({ sessionId: 's-1', pinned: false })
+  assert.deepEqual(off.value.pinnedSessionIds, ['other'])
+  assert.deepEqual(calls, [['pin', 's-1'], ['unpin', 's-1']])
+
+  // 没有 workspaces 服务：如实报入口缺失，不自己改本地状态假装成功
+  const bare = createHostAdapters({})
+  const missing = await bare.setPinned({ sessionId: 's-1' })
+  assert.equal(missing.code, 'WRITER_UNAVAILABLE')
+
+  const noId = await adapters.setPinned({})
+  assert.equal(noId.code, 'HOST_ADAPTER_ERROR')
+})

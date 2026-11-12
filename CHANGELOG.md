@@ -4,6 +4,19 @@
 
 ---
 
+## [P1 W7 · 续] · 2026-11-12 13:4x · 置顶（真实状态 + 手机可置顶 + 分组显示，协议 r11）
+
+列表已经 24 个会话了，找一个常用会话要滑半天。置顶在协议里躺着（`pinned / pinnedOrder` 两个字段、`PATCH /api/sessions/:id` 一个端点），但整条链没人接——索引里 `pinned` 恒为 `false`，PATCH 连路由都没有。
+
+- **真实置顶状态**：Host 从 `workspaces.pinSession/unpinSession` 的全局集合（最近置顶在前）读 `pinnedSessionIds`，索引如实上报 `pinned/pinnedOrder`；**问不到就全当未置顶，不猜**——猜出来的比空着更糟。
+- **手机可置顶**（r11 放宽）：`PATCH /api/sessions/:id { pinned }` → 新增下行 `session/pin` → 宿主 `pinSession/unpinSession`。旧约束「置顶仅 PC、手机 403」解除，但**排序仍宿主权威**（手机不改序、调序仍仅 PC）——两端各自维护顺序只会打架。
+- **分组显示**：列表分「置顶 / 全部」两组，组内按 `pinnedOrder`；每行一个 📌 开关，点了只改置顶、不顺带开会话。
+- 手机端 `client.setPinned()`；SW **v23**。
+- 测试 296 → **299**（索引置顶 / setPinned 适配器 / PATCH 端到端 / 静态断言）。
+- **没做**「移除工作空间」：宿主 `workspaceController.delete` 删的是**工作区**不是会话，`session_delete` 只在 Agent RPC 规格里、SessionController 没暴露——不硬接，等找到正确入口再说。
+
+---
+
 ## [P1 W7 · 续] · 2026-11-12 12:2x · 僵尸手机根治（两段式配对）+ relay 自启材料
 
 上午换地址（192.168 → 100.x Tailscale）重配后，CP 里多出一行没人用的手机记录——根因是配对流程在拿到 `hostDeviceId` 之前就要决定用哪个 `phoneId`，新地址下按 base 找不到旧档案，于是被当成一台新手机。

@@ -10,7 +10,7 @@
 # 04 接口协议与数据模型（PROTOCOL.md）
 
 > 协议版本：`wbsync/1`
-> Owner：架构师 ｜ 状态：**修订 r10（发起人裁定采纳；四方会签已于 2026-11-10 取消）** ｜ 协议版本：`wbsync/1`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名。均不升主版本）
+> Owner：架构师 ｜ 状态：**修订 r11（发起人裁定采纳；四方会签已于 2026-11-10 取消）** ｜ 协议版本：`wbsync/1`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）。均不升主版本）
 > **本文是跨组件唯一契约源**。任何字段变更必须同时更新本文件、版本号与 CHANGELOG。
 > 字段名以锁定的 DSH commit 实际类型为准；W1 Spike 已完成实测回填（见 §3）。上游升级前须重跑全量契约测试（见 `07`）。
 
@@ -194,7 +194,7 @@ GET  /api/sessions?deviceId=&pinned= → { deviceId, host, rows: SessionIndex[] 
                                       host = { deviceId, name, platform, online, lastSeenAt }（r10）
 GET  /api/approvals?deviceId=         → 待审批清单（r5；断线期间的靠这条补）
 POST /api/sessions                   → 在指定在线 Host 新建会话/工作空间
-PATCH /api/sessions/:id              → 置顶 / 调序（仅 PC 端可写，手机 403）
+PATCH /api/sessions/:id              → 置顶 / 取消置顶（r11：手机可写 { pinned }；调序仍仅 PC）
 DELETE /api/sessions/:id             → 移除工作空间（同步到手机）
 POST /api/devices/:id/revoke         → 吊销令牌 + 断开在线手机（:id = Host 或其名下某台手机，r9）
 GET  /api/artifacts?sessionId=       → 产物元数据 + 临时下载票
@@ -202,7 +202,7 @@ GET  /api/artifacts?sessionId=       → 产物元数据 + 临时下载票
 
 **约束**：
 - `POST /api/sessions` 在目标设备离线时返回 `HOST_OFFLINE`，手机端入口置灰。
-- 手机对 `pinned / pinnedOrder` 只读；置顶与调序必须由 PC 端发起。
+- 手机可置顶 / 取消置顶（`PATCH { pinned }`，r11）；**排序**（`pinnedOrder`）仍由 Host 权威（最近置顶在前），手机不改序——两端各自维护顺序只会打架。**调序**仍仅 PC 可写。
 - CP 不提供任何"读取消息正文"接口。
 
 ---
@@ -275,6 +275,7 @@ ANY  /d/<deviceId>/$events/*      审批 / 提问通道（r5：$events/result �
 // 下行（手机 → Host）
 { "t": "session/prompt",  "sessionId": "...", "text": "...", "clientMsgId": "uuid" }
 { "t": "session/cancel",  "sessionId": "..." }
+{ "t": "session/pin",     "sessionId": "...", "pinned": true }        // r11
 { "t": "session/follow",  "sessionId": "...", "sinceSeq": 123 }
 { "t": "$events/result",  "eventId": "...", "answer": {...} }
 { "t": "ack", "ref": "clientMsgId", "status": "accepted|duplicate|rejected" }
@@ -510,6 +511,7 @@ allowedEndpoints:
 - **r1（2026-11-07）**：按 W1 Spike 实测澄清事件契约、幂等映射与 Idempotency 归属；仅新增可选字段与说明，无删除/改名，兼容 `wbsync/1` 现有客户端；依据 ADR-007~009（待会签）。
 - **r2（2026-11-10）**：`SessionIndex.state` 扩充 `stopped` / `failed` 两个枚举值并给出 `turn/end.reason` 映射；新增 §5.4 正文可见性边界；修正「新增事件依赖 `ignorable`」的过时表述。无删除、无改名，兼容 `wbsync/1` 现有客户端；依据 WorkBuddy 对标复核与 ADR-010（待会签）。
 - **r3（2026-11-10）**：新增 `fileUploads/*` 附件上行端点（`POST /d/<deviceId>/fileUploads/upload`）与 §7 的白名单项、安全边界（Relay 内存中转、receipt 限 Agent 作用域）；`session/prompt` 的 `content` 允许 `{type:'file',receiptId}`（宿主 schema 原本已支持，本次仅明确手机侧用法）。无删除、无改名，兼容 `wbsync/1` 现有客户端；发起人裁定采纳（四方会签已取消）。
+- **r11（2026-11-12）**：手机可**置顶 / 取消置顶**（`PATCH /api/sessions/:id { pinned }`，§4；下行新增 `session/pin`，§5.3）。旧约束「置顶仅 PC、手机 403」解除，但**排序**（`pinnedOrder`）仍由 Host 权威（宿主 `workspaces.pinSession` 的全局集合，最近置顶在前），手机不改序、调序仍仅 PC。索引行的 `pinned/pinnedOrder` 改为**如实上报**（此前恒为 false/0）。纯新增/语义放宽，旧客户端不受影响。
 - **r10（2026-11-11）**：`GET /api/sessions` 响应回带 `host = { deviceId, name, platform, online, lastSeenAt }`（§4），供手机端画「这台电脑在不在线」的状态点，不必再单独打一次 `/health`（那是全局面板，答不了「这一台」）。配套：§5.2 `host/register` 加可选 `deviceName` / `platform`（仅展示，不参与判定；缺省为 `null`），`name` 就取自它。纯新增字段，不改变 `rows` 语义，旧客户端忽略即可。
 - **r9（2026-11-11）**：手机成为**独立设备行**（§2 `Device.role` / `boundHostId`），一台 Host 可同时绑多台手机（默认 8，超限 `CLIENT_LIMIT`）。`POST /pair/verify` 请求加可选 `phoneId` / `clientName`，响应加 `deviceId`（本机 phoneId）与 `hostDeviceId`（URL 里用的目标 Host）；`clientId` 字段废弃（从未参与判定）。新增管理端点 `POST /admin/revoke-client`。语义变化两处：① 重新配对**不再**作废其它手机的令牌，只轮换同 `phoneId` 那一枚（r8 的「单活跃令牌」按手机成立）；② `Cursor.clientId` 改用鉴权得到的手机身份，不再采信请求体自报的 `clientId`。字段与端点均为新增/可选，旧手机令牌（落在 Host 行上）继续可用，不破坏兼容。
 - **r8（2026-11-11）**：新增 §5.7 首屏窗口与反向补读。手机打开会话默认只看**最近一页**（Host 按 48 KiB 字节预算裁，最少 8 条、最多 200 条），更早的按需调新增端点 `POST /session/backfill`（`{sessionId, beforeSeq, limit}` → `{events, fromSeq, toSeq, hasMoreEarlier, bytes}`）。端点落在既有 `session/*` 白名单内，不新增帧；旧 Host 回 403 时客户端退回 `follow` 取一页，不破坏兼容。

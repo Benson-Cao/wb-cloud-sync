@@ -325,6 +325,9 @@ function createSessionIndexReporter({
   listSessions,
   openSession = null,
   resolveState = null,
+  // 可选：() => string[]，宿主 workspaces 的全局置顶集合（最近置顶在前）。
+  // 没有就都当未置顶——**不猜**：置顶是 PC 侧状态，猜出来的比空着更糟。
+  pinnedIds = null,
   deviceId = null,
   limit = DEFAULT_LIMIT,
   maxDecodeBytes = DEFAULT_MAX_DECODE_BYTES,
@@ -401,6 +404,13 @@ function createSessionIndexReporter({
       .sort((a, b) => (b.header.createdAt ?? 0) - (a.header.createdAt ?? 0))
       .slice(0, cap)
 
+    // 置顶集合：宿主口径是「最近置顶在前」，索引就按它给 pinnedOrder（0 = 最近）
+    const pinIndex = new Map()
+    try {
+      const ids = typeof pinnedIds === 'function' ? pinnedIds() : null
+      if (Array.isArray(ids)) ids.forEach((id, i) => pinIndex.set(id, i))
+    } catch { /* 读不到就当没置顶，不影响列表 */ }
+
     const stats = { total: list.length, reported: sorted.length, decoded: 0, cache: 0, skipped: 0 }
     const sources = {}
     const rows = []
@@ -419,9 +429,9 @@ function createSessionIndexReporter({
         ownerDeviceId: deviceId,
         workspace: pick(header, 'cwd'),
         title: pick(header, 'title'),
-        // 置顶与排序是 PC 侧状态（协议规定手机只读），Host 日志里没有，默认不置顶
-        pinned: false,
-        pinnedOrder: 0,
+        // 置顶来自宿主 workspaces 的全局集合（r11）：日志里没有这份状态，问宿主要
+        pinned: pinIndex.has(header.id),
+        pinnedOrder: pinIndex.get(header.id) ?? 0,
         state: stateOf(header, unreadable),
         lastSeq: p.lastSeq,
         lastActiveAt: p.lastActiveAt ?? pick(header, 'createdAt'),
@@ -507,6 +517,8 @@ function createSessionIndexReporter({
 const SERVICE_CANDIDATES = [
   'sessionController', 'sessions', 'agents', 'connection', 'gateway',
   'workspaceRegistry', 'sessionPersistence', 'typert',
+  // 置顶/归档：WorkspaceController，cordis 名 'workspaces'（r11）
+  'workspaces',
   // 附件上行：`fileUploads`（super(ctx,"fileUploads")）与它依赖的 `attachments`
   'fileUploads', 'attachments',
 ]
@@ -607,6 +619,21 @@ const promptEntry = (services) => {
   if (typeof services.agents?.get === 'function') {
     return { svc: services.agents, name: 'agents', kind: 'followup' }
   }
+  return null
+}
+
+/**
+ * 置顶/取消置顶（r11）：宿主 `WorkspaceController`（cordis 名 `workspaces`）。
+ * 方法签名（asar 取证）：`pinSession(sessionId) / unpinSession(sessionId)`，
+ * 返回 Remote 风格 `{ ok, value: { pinnedSessionIds } }`（最近置顶在前的全局集合）。
+ * 找不到就如实报「没有这个入口」，绝不自己改索引假装成功。
+ */
+const workspaceEntry = (services) => {
+  const w = services.workspaces
+  if (!w) return null
+  if (typeof w.pinSession === 'function' && typeof w.unpinSession === 'function') return w
+  const inner = w.workspace ?? w.model
+  if (inner && typeof inner.pinSession === 'function' && typeof inner.unpinSession === 'function') return inner
   return null
 }
 
@@ -794,6 +821,27 @@ function createHostAdapters(ctx, options = {}) {
       }
       const r = await promptText(sessionId, text ?? '', clientMsgId, current(), extra)
       return r.requestId ? { ok: r.ok, code: r.code, message: r.message, value: r.value } : r
+    },
+
+    /**
+     * 置顶 / 取消置顶（r11）。委托宿主 `workspaces.pinSession / unpinSession`，
+     * 返回宿主给的**完整**置顶集合（最近置顶在前）——调用方拿它刷新索引，
+     * 不要用「翻转本地布尔」去猜：置顶集合是全局的，别的端也可能改。
+     */
+    setPinned: async ({ sessionId, pinned = true } = {}) => {
+      if (!sessionId) {
+        return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'setPinned 缺 sessionId' }
+      }
+      const services = current()
+      const w = workspaceEntry(services)
+      if (!w) return unavailable('workspaces.pinSession/unpinSession', services)
+      try {
+        const r = pinned ? await w.pinSession(sessionId) : await w.unpinSession(sessionId)
+        const ids = r?.value?.pinnedSessionIds ?? (Array.isArray(r) ? r : [])
+        return { ok: r?.ok !== false, value: { pinned: Boolean(pinned), pinnedSessionIds: ids } }
+      } catch (error) {
+        return asError(error, { name: 'workspaces', kind: pinned ? 'pinSession' : 'unpinSession' })
+      }
     },
 
     /** 取消当前轮次：官方 session/cancel 只吃 { sessionId }，保留 pending inbox。 */
@@ -1381,9 +1429,20 @@ function __apply(ctx, config = {}) {
       ? (options) => ctx.sessionPersistence.list(options)
       : null)
 
+  // 置顶集合（r11）：问宿主 workspaces 的全局 pinnedSessionIds（最近置顶在前）。
+  // 读不到就返回空——置顶是 PC 侧状态，**猜出来的比空着更糟**。
+  const readPinnedIds = () => {
+    try {
+      const w = typeof ctx.get === 'function' ? ctx.get('workspaces') : ctx.workspaces
+      const ids = w?.model?.pinnedSessionIds ?? w?.list?.pinnedSessionIds ?? w?.pinnedSessionIds
+      return Array.isArray(ids) ? ids : []
+    } catch { return [] }
+  }
+
   const collectIndex = listSessions
     ? createSessionIndexReporter({
       listSessions,
+      pinnedIds: readPinnedIds,
       openSession,
       deviceId: cfg.deviceId,
       limit: cfg.indexLimit,
@@ -1448,6 +1507,12 @@ function __apply(ctx, config = {}) {
           ...(body?.attachments === undefined ? {} : { attachments: body.attachments }),
         })
         const { status, body: payload } = unwrap(r, { accepted: true })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/pin') {
+        // 置顶/取消置顶（r11）：转发给宿主 workspaces，成功后由索引刷新把新集合带下去
+        const r = await adapters.setPinned({ sessionId: body?.sessionId, pinned: body?.pinned !== false })
+        const { status, body: payload } = unwrap(r, { pinned: body?.pinned !== false })
         return send({ t: 'http/response', reqId, status, body: payload })
       }
       if (endpoint === 'session/cancel') {

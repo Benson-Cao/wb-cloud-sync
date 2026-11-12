@@ -762,6 +762,39 @@ export function createRelay(options = {}) {
         })
       }
 
+      // 置顶 / 取消置顶（r11）：PATCH /api/sessions/:id { pinned: true|false }
+      // 旧协议写的是「置顶仅 PC、手机 403」——内测后改了：手机也能置顶，但**排序**
+      // （pinnedOrder）仍由宿主权威（最近置顶在前），手机不改序，避免两端抢排序。
+      if (method === 'PATCH' && path.startsWith('/api/sessions/')) {
+        const sessionId = decodeURIComponent(path.slice('/api/sessions/'.length))
+        const auth = String(req.headers.authorization ?? '')
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        const body = await readBody(req, cfg.maxBodyBytes)
+        const deviceId = body.deviceId ?? url.searchParams.get('deviceId') ?? ''
+        if (!cp.verifyClientToken(deviceId, token).ok) {
+          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+        }
+        if (body.pinned !== true && body.pinned !== false) {
+          return fail(res, 400, 'INVALID_JSON', 'PATCH 需要 { pinned: true|false }')
+        }
+        if (!isOnline(deviceId)) {
+          cp.markDeviceOffline(deviceId)
+          return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
+        }
+        return bridge(req, res, deviceId, 'session/pin', { sessionId, pinned: body.pinned }, (response) => {
+          if (response?.status !== 200) return
+          // 宿主回的是**全局**置顶集合（最近置顶在前）：照它刷新 pinnedOrder，
+          // 不用「本地翻转布尔」去猜——别的端（PC）也可能改过。
+          const ids = response?.body?.data?.pinnedSessionIds
+          if (Array.isArray(ids)) {
+            const idx = ids.indexOf(sessionId)
+            cp.patchSession(sessionId, { pinned: idx !== -1, pinnedOrder: idx === -1 ? 0 : idx })
+          } else {
+            cp.patchSession(sessionId, { pinned: body.pinned })
+          }
+        })
+      }
+
       // 降级通道：轮询取帧 / 回响应
       if (method === 'GET' && path === '/host/poll') {
         if (!hostAuthOk(req, null, url)) return rejectHost(res)

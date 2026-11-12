@@ -202,5 +202,11 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /const dotOf = /, '状态点要分开「在线/离线/没探过」三种')
   assert.match(page, /p\.online === true \? '●'/, '没探过不能画成离线')
   assert.match(page, /client\?\.getHostStatus/, '在线状态来自 sessions 响应，不另打接口')
+
+  // 置顶（r11）：分组显示 + 逐条开关，且排序跟着宿主
+  assert.match(page, /className = 'pinbtn'/, '每行要有置顶开关')
+  assert.match(page, /const togglePin = /, '置顶要走 client.setPinned，不能只改本地布尔')
+  assert.match(page, /className = 'grouphead'/, '置顶与全部分组显示')
+  assert.match(page, /pinnedOrder \?\? 0/, '置顶组内按宿主给的 pinnedOrder 排，客户端不改序')
   assert.match(page, /\$\('save'\)\.disabled = true/, '配对期间按钮要置灰，否则用户会以为没反应再点一次')
 })

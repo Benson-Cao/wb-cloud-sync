@@ -280,3 +280,30 @@ test('collectDiff：首轮 full、无变化零行、变更只发变化行、消�
   assert.equal(again.mode, 'full', '重连重置后重新发 full')
   assert.equal(again.rows.length, 2)
 })
+
+test('Z1 置顶来自宿主全局集合（r11）：问不到就全当未置顶，不猜', async () => {
+  const list = async () => [snapshot('s-1'), snapshot('s-2'), snapshot('s-3')]
+  // 宿主口径：最近置顶在前 → s-3 的 pinnedOrder 比 s-1 小
+  const withPins = createSessionIndexReporter({
+    listSessions: list, deviceId: 'pc-1', pinnedIds: () => ['s-3', 's-1'],
+  })
+  const rows = (await withPins({ mode: 'full' })).rows
+  const by = (id) => rows.find((r) => r.sessionId === id)
+  assert.equal(by('s-3').pinned, true)
+  assert.equal(by('s-3').pinnedOrder, 0, '最近置顶在前')
+  assert.equal(by('s-1').pinned, true)
+  assert.equal(by('s-1').pinnedOrder, 1)
+  assert.equal(by('s-2').pinned, false)
+
+  // 读不到（没有 workspaces / 抛异常）→ 全部未置顶，而不是沿用旧值
+  const noPins = createSessionIndexReporter({ listSessions: list, deviceId: 'pc-1' })
+  const rows2 = (await noPins({ mode: 'full' })).rows
+  assert.ok(rows2.every((r) => r.pinned === false && r.pinnedOrder === 0))
+
+  const throws = createSessionIndexReporter({
+    listSessions: list, deviceId: 'pc-1',
+    pinnedIds: () => { throw new Error('服务还没起来') },
+  })
+  const rows3 = (await throws({ mode: 'full' })).rows
+  assert.ok(rows3.every((r) => r.pinned === false), '抛异常也不能把列表搞坏')
+})

@@ -399,6 +399,32 @@ export function createPwaClient({
   }
 
   /**
+   * 置顶 / 取消置顶（r11）：`PATCH /api/sessions/:id { pinned }`。
+   * 返回宿主给的最新行；**排序（pinnedOrder）由宿主权威**（最近置顶在前），
+   * 客户端不改序——两端各自维护顺序只会打架。
+   */
+  const setPinned = async ({ sessionId, pinned = true } = {}) => {
+    if (!sessionId) {
+      throw Object.assign(new Error('置顶缺 sessionId'), { code: 'INVALID_ARGUMENT' })
+    }
+    const r = await fetchImpl(`${base}/api/sessions/${encodeURIComponent(sessionId)}?deviceId=${encodeURIComponent(deviceId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ deviceId, pinned: Boolean(pinned) }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      const detail = typeof payload?.error?.message === 'string' ? payload.error.message : ''
+      throw Object.assign(
+        new Error(`置顶失败：${code}${detail && detail !== code ? ` · ${detail}` : ''}`),
+        { code, detail },
+      )
+    }
+    return payload.data
+  }
+
+  /**
    * 向已有会话发一条消息：文本 + 已上传附件的 receiptId。
    * 走白名单 `session/prompt`；`clientMsgId` 是宿主原生幂等键，重发同一条不会重复落库。
    */
@@ -591,7 +617,7 @@ export function createPwaClient({
   })
 
   return {
-    refreshSessions, createSession, cancelTurn, submitPrompt, uploadAttachment,
+    refreshSessions, createSession, cancelTurn, setPinned, submitPrompt, uploadAttachment,
     getHostStatus: () => ({ ...hostStatus }),
     listApprovals, answerApproval, getArtifacts, backfill, openWindow,
     follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null,
