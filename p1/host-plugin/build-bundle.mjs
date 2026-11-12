@@ -91,7 +91,7 @@ const EXPECTED_IMPORTS = [
   /^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts\.js'$/m,
   /^import \{ listMirrorSessions, readSessionChunk \} from '\.\/mirror\.js'$/m,
   /^import \{ createRoutes, notAllowed \} from '\.\/routes\.js'$/m,
-  /^import \{ pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored \} from '\.\/mirror-sync\.js'$/m,
+  /^import \{ pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored, writeProjectionStub, clearProjectionStubs \} from '\.\/mirror-sync\.js'$/m,
 ]
 for (const pattern of EXPECTED_IMPORTS) {
   if (!pattern.test(mainSrc)) throw new Error('src/index.js 的相对导入与打包器预期不一致——请同步更新本脚本')
@@ -104,7 +104,7 @@ const main = mainSrc
   .replace(/^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts\.js'\n/m, '')
   .replace(/^import \{ listMirrorSessions, readSessionChunk \} from '\.\/mirror\.js'\n/m, '')
   .replace(/^import \{ createRoutes, notAllowed \} from '\.\/routes\.js'\n/m, '')
-  .replace(/^import \{ pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored \} from '\.\/mirror-sync\.js'\n/m, '')
+  .replace(/^import \{ pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored, writeProjectionStub, clearProjectionStubs \} from '\.\/mirror-sync\.js'\n/m, '')
   .replace(/^export function apply\(/m, 'function __apply(')
 if (!main.includes('function __apply(')) throw new Error('apply 改名失败')
 

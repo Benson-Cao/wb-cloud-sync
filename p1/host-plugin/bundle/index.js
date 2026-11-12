@@ -2108,6 +2108,57 @@ async function removeMirrorWorkspace({ registryPath, workspacePath }) {
   return { removed: true, id, sids }
 }
 
+/**
+ * 写一条**最小投影缓存**，让宿主在侧栏里认得出这个镜像会话。
+ *
+ * 结构（真机取证：`version:7` + `record.identity` + `record.rows`）：
+ *   { version:7, record:{ identity:{formatVersion:4, createdAt, cwd, isSeeded, inheritedEventCount}, rows:{} } }
+ *
+ * 三条边界（ADR-012 增补）：
+ *   1. **只新增，绝不覆盖** —— 目标文件已存在说明是本机会话的条目，跳过；
+ *   2. **只写 identity，不伪造 rows** —— 投影行由宿主按日志自己重建，我们不编造内容；
+ *   3. `cwd` 写**镜像目录**：镜像后日志确实在那里，这是事实描述，不是猜测。
+ */
+async function writeProjectionStub({ projRoot, sid, cwd, createdAt = Date.now() }) {
+  await fs.mkdir(projRoot, { recursive: true })
+  const target = join(projRoot, `${sid}.json`)
+  const exists = await fs.access(target).then(() => true).catch(() => false)
+  if (exists) return { written: false, reason: 'EXISTS' }
+
+  const body = {
+    version: 7,
+    record: {
+      identity: {
+        formatVersion: 4,
+        createdAt,
+        cwd,
+        isSeeded: false,
+        inheritedEventCount: 0,
+      },
+      rows: {},
+    },
+  }
+  const tmp = `${target}.wbsync.tmp`
+  await fs.writeFile(tmp, JSON.stringify(body, null, 2) + '\n')
+  await fs.rename(tmp, target)
+  return { written: true }
+}
+
+/** 清理我们写过的投影缓存：只删传入 sid 且 identity.cwd 指向镜像目录的那些。 */
+async function clearProjectionStubs({ projRoot, sids, cwd }) {
+  let removed = 0
+  for (const sid of sids ?? []) {
+    const target = join(projRoot, `${sid}.json`)
+    let rec
+    try { rec = JSON.parse(await fs.readFile(target, 'utf8')) } catch { continue }
+    // 只删「确实指向镜像目录」的条目：万一 sid 撞上本机会话，不能连带删掉人家的
+    if (rec?.record?.identity?.cwd !== cwd) continue
+    await fs.rm(target, { force: true })
+    removed++
+  }
+  return { removed }
+}
+
 // ===== 主模块 src/index.js =====
 /**
  * P1 W3 · DSH Host 侧插件骨架
@@ -2756,11 +2807,26 @@ function __apply(ctx, config = {}) {
             workspacePath, title: hostName,
             sids: picked.map((r) => r.sid),
           })
+
+          /*
+           * 只搬 sessions/ 时侧栏不列会话：宿主靠 projcache 的 identity.cwd 判断归属。
+           * 这里补一条**最小**投影缓存（只 identity，不伪造 rows）。
+           * 被跳过（已归属别的工作区）的会话**不写**——那是本机的条目，不碰。
+           */
+          const skipped = new Set(Array.isArray(reg.skipped) ? reg.skipped : [])
+          const projRoot = join(base, 'storages', 'session_projcache', 'sessions')
+          let stubs = 0
+          for (const row of picked) {
+            if (skipped.has(row.sid)) continue
+            const r = await writeProjectionStub({ projRoot, sid: row.sid, cwd: workspacePath })
+            if (r.written) stubs++
+          }
           return json(res, 200, okBody({
             workspaceId: reg.id, workspaceTitle: hostName, created: reg.created,
             sessions: picked.length, truncated: rows.length > picked.length,
             files, bytes, totalInWorkspace: reg.total,
             skipped: Array.isArray(reg.skipped) ? reg.skipped.length : 0,
+            stubs,
           }))
         } catch (error) {
           return json(res, 409, errBody(error?.code ?? 'MIRROR_FAILED', `镜像失败：${error?.message ?? error}`, true))
@@ -2785,7 +2851,14 @@ function __apply(ctx, config = {}) {
         try {
           const reg = await removeMirrorWorkspace({ registryPath: join(base, 'storages', 'workspace.json'), workspacePath })
           const dir = await clearMirrored({ sessionsRoot: join(base, 'sessions'), cwdPath: workspacePath })
-          return json(res, 200, okBody({ registry: reg.removed, files: dir.removed, workspaceTitle: hostName }))
+          // 只删「cwd 指向镜像目录」的投影缓存：sid 万一撞上本机会话，不能连带删人家的
+          const proj = await clearProjectionStubs({
+            projRoot: join(base, 'storages', 'session_projcache', 'sessions'),
+            sids: reg.sids ?? [], cwd: workspacePath,
+          })
+          return json(res, 200, okBody({
+            registry: reg.removed, files: dir.removed, stubs: proj.removed, workspaceTitle: hostName,
+          }))
         } catch (error) {
           return json(res, 409, errBody('MIRROR_FAILED', `清理失败：${error?.message ?? error}`, true))
         }

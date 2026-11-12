@@ -213,3 +213,54 @@ export async function removeMirrorWorkspace({ registryPath, workspacePath }) {
   await fs.rename(tmp, registryPath)
   return { removed: true, id, sids }
 }
+
+/**
+ * 写一条**最小投影缓存**，让宿主在侧栏里认得出这个镜像会话。
+ *
+ * 结构（真机取证：`version:7` + `record.identity` + `record.rows`）：
+ *   { version:7, record:{ identity:{formatVersion:4, createdAt, cwd, isSeeded, inheritedEventCount}, rows:{} } }
+ *
+ * 三条边界（ADR-012 增补）：
+ *   1. **只新增，绝不覆盖** —— 目标文件已存在说明是本机会话的条目，跳过；
+ *   2. **只写 identity，不伪造 rows** —— 投影行由宿主按日志自己重建，我们不编造内容；
+ *   3. `cwd` 写**镜像目录**：镜像后日志确实在那里，这是事实描述，不是猜测。
+ */
+export async function writeProjectionStub({ projRoot, sid, cwd, createdAt = Date.now() }) {
+  await fs.mkdir(projRoot, { recursive: true })
+  const target = join(projRoot, `${sid}.json`)
+  const exists = await fs.access(target).then(() => true).catch(() => false)
+  if (exists) return { written: false, reason: 'EXISTS' }
+
+  const body = {
+    version: 7,
+    record: {
+      identity: {
+        formatVersion: 4,
+        createdAt,
+        cwd,
+        isSeeded: false,
+        inheritedEventCount: 0,
+      },
+      rows: {},
+    },
+  }
+  const tmp = `${target}.wbsync.tmp`
+  await fs.writeFile(tmp, JSON.stringify(body, null, 2) + '\n')
+  await fs.rename(tmp, target)
+  return { written: true }
+}
+
+/** 清理我们写过的投影缓存：只删传入 sid 且 identity.cwd 指向镜像目录的那些。 */
+export async function clearProjectionStubs({ projRoot, sids, cwd }) {
+  let removed = 0
+  for (const sid of sids ?? []) {
+    const target = join(projRoot, `${sid}.json`)
+    let rec
+    try { rec = JSON.parse(await fs.readFile(target, 'utf8')) } catch { continue }
+    // 只删「确实指向镜像目录」的条目：万一 sid 撞上本机会话，不能连带删掉人家的
+    if (rec?.record?.identity?.cwd !== cwd) continue
+    await fs.rm(target, { force: true })
+    removed++
+  }
+  return { removed }
+}

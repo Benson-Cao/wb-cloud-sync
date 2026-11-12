@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import {
-  encodeCwd, pullSessionFile, listMirrored, clearMirrored, upsertMirrorWorkspace, removeMirrorWorkspace,
+  encodeCwd, pullSessionFile, listMirrored, clearMirrored, upsertMirrorWorkspace, removeMirrorWorkspace, writeProjectionStub, clearProjectionStubs,
 } from '../src/mirror-sync.js'
 
 let root
@@ -191,4 +191,40 @@ test('R11 他处已登记的会话绝不抢：否则宿主会判「域不一致�
   const after = JSON.parse(readFileSync(p, 'utf8'))
   assert.deepEqual(after.tables.workspaces['ws-m'].sessionIds, ['session-new'])
   assert.deepEqual(after.tables.workspaces['ws-a'].sessionIds, ['session-keep'], '原归属不能被动')
+})
+
+// ---------- 投影缓存：只新增、只 identity、只删自己写的 ----------
+
+test('P1 写最小 identity：cwd 指向镜像目录，rows 为空（不伪造投影）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wbsync-proj-'))
+  const r = await writeProjectionStub({ projRoot: dir, sid: 'session-p1', cwd: '/m', createdAt: 123 })
+  assert.equal(r.written, true)
+  const j = JSON.parse(readFileSync(join(dir, 'session-p1.json'), 'utf8'))
+  assert.equal(j.version, 7)
+  assert.equal(j.record.identity.cwd, '/m')
+  assert.equal(j.record.identity.createdAt, 123)
+  assert.deepEqual(j.record.rows, {}, '投影行交给宿主重建，不许自己编')
+})
+
+test('P2 目标已存在就跳过：本机会话的条目绝不能被覆盖', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wbsync-proj2-'))
+  const target = join(dir, 'session-local.json')
+  writeFileSync(target, JSON.stringify({ version: 7, record: { identity: { cwd: '/local' }, rows: { a: 1 } } }))
+  const r = await writeProjectionStub({ projRoot: dir, sid: 'session-local', cwd: '/m' })
+  assert.equal(r.written, false)
+  assert.equal(r.reason, 'EXISTS')
+  const j = JSON.parse(readFileSync(target, 'utf8'))
+  assert.equal(j.record.identity.cwd, '/local', '原条目必须原样保留')
+  assert.deepEqual(j.record.rows, { a: 1 })
+})
+
+test('P3 清理只删 cwd 指向镜像目录的条目（sid 撞车时保护本机）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wbsync-proj3-'))
+  writeFileSync(join(dir, 'session-mine.json'), JSON.stringify({ version: 7, record: { identity: { cwd: '/m' }, rows: {} } }))
+  writeFileSync(join(dir, 'session-local.json'), JSON.stringify({ version: 7, record: { identity: { cwd: '/local' }, rows: {} } }))
+
+  const r = await clearProjectionStubs({ projRoot: dir, sids: ['session-mine', 'session-local'], cwd: '/m' })
+  assert.equal(r.removed, 1, '只应删掉自己的那条')
+  assert.equal(existsSync(join(dir, 'session-mine.json')), false)
+  assert.equal(existsSync(join(dir, 'session-local.json')), true, '本机条目必须留下')
 })

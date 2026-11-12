@@ -28,7 +28,7 @@ import { createApprovalBridge } from './approvals.js'
 import { createArtifactIndex, createArtifactExporter } from './artifacts.js'
 import { listMirrorSessions, readSessionChunk } from './mirror.js'
 import { createRoutes, notAllowed } from './routes.js'
-import { pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored } from './mirror-sync.js'
+import { pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored, writeProjectionStub, clearProjectionStubs } from './mirror-sync.js'
 
 export const name = 'wbsync-host-dev'
 export const inject = ['webServer', 'sessionPersistence']
@@ -653,11 +653,26 @@ export function apply(ctx, config = {}) {
             workspacePath, title: hostName,
             sids: picked.map((r) => r.sid),
           })
+
+          /*
+           * 只搬 sessions/ 时侧栏不列会话：宿主靠 projcache 的 identity.cwd 判断归属。
+           * 这里补一条**最小**投影缓存（只 identity，不伪造 rows）。
+           * 被跳过（已归属别的工作区）的会话**不写**——那是本机的条目，不碰。
+           */
+          const skipped = new Set(Array.isArray(reg.skipped) ? reg.skipped : [])
+          const projRoot = join(base, 'storages', 'session_projcache', 'sessions')
+          let stubs = 0
+          for (const row of picked) {
+            if (skipped.has(row.sid)) continue
+            const r = await writeProjectionStub({ projRoot, sid: row.sid, cwd: workspacePath })
+            if (r.written) stubs++
+          }
           return json(res, 200, okBody({
             workspaceId: reg.id, workspaceTitle: hostName, created: reg.created,
             sessions: picked.length, truncated: rows.length > picked.length,
             files, bytes, totalInWorkspace: reg.total,
             skipped: Array.isArray(reg.skipped) ? reg.skipped.length : 0,
+            stubs,
           }))
         } catch (error) {
           return json(res, 409, errBody(error?.code ?? 'MIRROR_FAILED', `镜像失败：${error?.message ?? error}`, true))
@@ -682,7 +697,14 @@ export function apply(ctx, config = {}) {
         try {
           const reg = await removeMirrorWorkspace({ registryPath: join(base, 'storages', 'workspace.json'), workspacePath })
           const dir = await clearMirrored({ sessionsRoot: join(base, 'sessions'), cwdPath: workspacePath })
-          return json(res, 200, okBody({ registry: reg.removed, files: dir.removed, workspaceTitle: hostName }))
+          // 只删「cwd 指向镜像目录」的投影缓存：sid 万一撞上本机会话，不能连带删人家的
+          const proj = await clearProjectionStubs({
+            projRoot: join(base, 'storages', 'session_projcache', 'sessions'),
+            sids: reg.sids ?? [], cwd: workspacePath,
+          })
+          return json(res, 200, okBody({
+            registry: reg.removed, files: dir.removed, stubs: proj.removed, workspaceTitle: hostName,
+          }))
         } catch (error) {
           return json(res, 409, errBody('MIRROR_FAILED', `清理失败：${error?.message ?? error}`, true))
         }
