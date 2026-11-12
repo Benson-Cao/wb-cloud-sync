@@ -26,6 +26,7 @@ import { createSessionIndexReporter } from './sessions.js'
 import { createHostAdapters, resolveService } from './host-adapters.js'
 import { createApprovalBridge } from './approvals.js'
 import { createArtifactIndex, createArtifactExporter } from './artifacts.js'
+import { listMirrorSessions, readSessionChunk } from './mirror.js'
 
 export const name = 'wbsync-host-dev'
 export const inject = ['webServer', 'sessionPersistence']
@@ -294,6 +295,28 @@ export function apply(ctx, config = {}) {
   adapters.renameSession = cfg.renameSession ?? hostAdapters.renameSession
 
   /**
+   * 会话镜像（ADR-012）：把电脑上的**原始会话文件字节**分块导出给手机。
+   * 只读、只走 sessions/ 目录、只认真实存在的文件——手机不能自报任意路径。
+   * 分块是因为 WS 帧 1 MiB 硬限，而会话文件常是几十 MB。
+   */
+  const mirrorRoot = () => join(homedir(), '.dsh', 'sessions')
+  adapters.mirrorList = cfg.mirrorList ?? (async () => {
+    try {
+      const rows = await listMirrorSessions(mirrorRoot())
+      return { ok: true, value: { rows } }
+    } catch (error) {
+      return { ok: false, code: 'HOST_ADAPTER_ERROR', message: `镜像清单失败：${error?.message ?? error}` }
+    }
+  })
+  adapters.mirrorFile = cfg.mirrorFile ?? (async (args) => {
+    try {
+      return { ok: true, value: await readSessionChunk(mirrorRoot(), args) }
+    } catch (error) {
+      return { ok: false, code: error?.code ?? 'HOST_ADAPTER_ERROR', message: error?.message ?? '镜像读取失败' }
+    }
+  })
+
+  /**
    * 会话索引：`sessionPersistence.list()` 是唯一来源。拿不到就不上报（status 里
    * `indexReady:false`），而不是发一份空表骗手机「你没有会话」。
    * `lastSeq` 需要解码日志才知道，交给 sessions.js 按 `revision` 缓存。
@@ -444,6 +467,19 @@ export function apply(ctx, config = {}) {
           text: body?.text ?? '', cwd: body?.cwd ?? null, clientId: body?.clientId ?? null,
         })
         const { status, body: payload } = unwrap(r, { created: true })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/mirror-list') {
+        const r = await adapters.mirrorList()
+        const { status, body: payload } = unwrap(r, { rows: [] })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/mirror-file') {
+        // 一次一块：offset/limit 由手机决定，Host 只保证「不越界、不超上限」
+        const r = await adapters.mirrorFile({
+          sid: body?.sid, name: body?.name, offset: body?.offset, maxBytes: body?.maxBytes,
+        })
+        const { status, body: payload } = unwrap(r, { sid: body?.sid ?? null, bytes: '', eof: true })
         return send({ t: 'http/response', reqId, status, body: payload })
       }
       if (endpoint === 'session/follow') {

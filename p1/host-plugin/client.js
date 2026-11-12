@@ -167,9 +167,24 @@ window.__ModuleLoader__.load({
      * 一条事件 → 一行可渲染内容。**只读取，不推断**：拿不到文本就退回原始类型名，
      * 绝不拼一个「看起来像答案」的字符串。
      */
+    /**
+     * 宿主会把运行上下文塞进 user/message（"Current runtime context…"、
+     * "<system-reminder>…"、文件策略等）。它们确实是日志里的真实事件，
+     * 但**不是用户说的话**——原样铺开会把真正的对话挤到屏幕外。
+     * 判据只看开头，不猜语义；认不出就照常当用户消息。
+     */
+    const isInjectedContext = (text) => {
+      const t = String(text || '').trimStart()
+      return t.startsWith('<system-reminder') || t.startsWith('Current runtime context')
+        || t.startsWith('Current working directory') || t.startsWith('Current DSH file policy')
+    }
+
     const toRow = (ev) => {
       const role = roleOf(ev)
       const text = messageText(ev)
+      if (role === 'user' && text !== null && isInjectedContext(text)) {
+        return { kind: 'context', text: `${text.length} 字符`, seq: ev.seq }
+      }
       if (role && text !== null) return { kind: role, text, seq: ev.seq }
       if (ev?.type === 'tool/call') return { kind: 'tool', text: toolName(ev) ?? '工具调用', seq: ev.seq }
       if (ev?.type === 'tool/result') return { kind: 'tool-result', text: `${(messageText(ev) ?? '').length} 字符`, seq: ev.seq }
@@ -296,6 +311,17 @@ window.__ModuleLoader__.load({
       ])
     }
 
+    /** 会话显示名：标题 → 工作区名 → id 前 16 位。真机上很多会话没有标题，裸 UUID 不可读。 */
+    const sessionLabel = (row) => {
+      if (row?.title) return row.title
+      const ws = typeof row?.workspace === 'string' ? row.workspace.replace(/[\\/]+$/, '') : ''
+      if (ws) {
+        const seg = ws.split(/[\\/]/).filter(Boolean).pop()
+        if (seg) return seg
+      }
+      return String(row?.sessionId ?? '').slice(0, 16) || '未命名会话'
+    }
+
     function SessionRow({ row, active, onPick, onlineHint }) {
       const online = onlineHint !== false
       const state = row?.state ?? 'stopped'
@@ -314,7 +340,7 @@ window.__ModuleLoader__.load({
           h('div', {
             key: 't',
             style: { fontSize: 13, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-          }, row?.title || String(row?.sessionId ?? '').slice(0, 16) || '未命名会话'),
+          }, sessionLabel(row)),
           h('div', { key: 's', style: { fontSize: 11, color: 'var(--color-text-tertiary)' } },
             `${state === 'running' ? '运行中' : '空闲'} · ${ago(row?.lastActiveAt)}`),
         ]),
@@ -347,9 +373,39 @@ window.__ModuleLoader__.load({
       return { fontSize: 11, color: 'var(--color-text-tertiary)', lineHeight: 1.6 }
     }
 
+
     const rowPrefix = (kind) => ({
       tool: '· 调用 ', 'tool-result': '· 结果 ', 'turn-end': '· 本轮 ', raw: '· ',
     })[kind] ?? ''
+
+    /**
+     * 连续内部事件折成一行。
+     * 真机上 permission/preset、turn/start、request/header 这类事件占绝大多数，
+     * 一条条铺开会把用户真正要看的话淹没——但**也不能直接藏掉**：
+     * 藏了用户会以为「中间什么都没有」。折成「N 条内部事件」是诚实的做法。
+     */
+    const groupRows = (rows) => {
+      const out = []
+      for (const r of rows) {
+        const last = out[out.length - 1]
+        if (r.kind === 'context') {
+          if (last && last.kind === 'context-group') { last.count += 1; continue }
+          out.push({ kind: 'context-group', count: 1, labels: [], seq: r.seq })
+          continue
+        }
+        if (r.kind === 'raw') {
+          if (last && last.kind === 'raw-group') {
+            last.count += 1
+            if (last.labels.length < 3 && !last.labels.includes(r.text)) last.labels.push(r.text)
+            continue
+          }
+          out.push({ kind: 'raw-group', count: 1, labels: [r.text], seq: r.seq })
+          continue
+        }
+        out.push(r)
+      }
+      return out
+    }
 
     /**
      * 会话内视图。
@@ -368,6 +424,8 @@ window.__ModuleLoader__.load({
       const [sending, setSending] = useState(false)
       const [approvals, setApprovals] = useState([])
       const scroller = useRef(null)
+      const refilling = useRef(false)
+      const bootstrapped = useRef(false)
 
       const push = useCallback((row) => {
         setRows((prev) => {
@@ -375,6 +433,38 @@ window.__ModuleLoader__.load({
           return next.length > 400 ? next.slice(next.length - 400) : next
         })
       }, [])
+
+      /**
+       * 补读：老会话在 Relay 缓冲里可能一条都不剩（Relay 重启过就是这样），
+       * 此时 WS 只能给出「从你的位置往后没有缺口」，不等于「这段历史不存在」。
+       * 必须回头问 Host 的日志——否则打开老会话就是白屏，而电脑上明明有几百条事件。
+       * 只收**连续 seq**：跳帧等于撕裂视图，宁可停下等下一次补齐。
+       */
+      const refill = useCallback(async () => {
+        if (refilling.current) return
+        refilling.current = true
+        try {
+          for (let page = 0; page < 5; page++) {
+            const data = await authed(link, `/d/${encodeURIComponent(link.hostDeviceId)}/session/follow`, {
+              clientId: CLIENT_ID, sessionId, sinceSeq: lastSeq.current, pageSize: 200,
+            })
+            const events = Array.isArray(data?.events) ? data.events : []
+            let moved = false
+            for (const ev of events) {
+              if (Number.isInteger(ev?.seq) && ev.seq === lastSeq.current + 1) {
+                lastSeq.current = ev.seq
+                SESSION_LAST_SEQ.set(cacheKey, ev.seq)
+                const row = toRow(ev)
+                if (row) push(row)
+                moved = true
+              }
+            }
+            if (!data?.hasMore || !moved) break
+          }
+        } catch (e) {
+          setErr(`补读失败：${e.message}`)
+        } finally { refilling.current = false }
+      }, [link, sessionId, cacheKey, push])
 
       useEffect(() => {
         let closed = false
@@ -427,6 +517,15 @@ window.__ModuleLoader__.load({
               return
             }
 
+            if (msg.t === 'session/replay') {
+              // Relay 缓冲里一条都没有：complete 只说明「往后没缺口」，不代表历史不存在
+              if (msg.complete === true && msg.toSeq === -1 && !bootstrapped.current) {
+                bootstrapped.current = true
+                void refill()
+              }
+              return
+            }
+
             if (msg.t === 'approval/request' && msg.approvalId) {
               setApprovals((prev) => prev.some((a) => a.approvalId === msg.approvalId)
                 ? prev
@@ -443,7 +542,8 @@ window.__ModuleLoader__.load({
           ws.addEventListener('error', () => { try { ws?.close() } catch { /* 忽略 */ } })
         }
 
-        connect()
+        // 先补历史，再连实时流：WS 的 sinceSeq=lastSeq 会把两者接上
+        void refill().then(connect)
 
         return () => {
           // 组件卸载 = 页面不再看这个会话，连接必须立刻收掉
@@ -451,7 +551,7 @@ window.__ModuleLoader__.load({
           if (timer) window.clearTimeout(timer)
           try { ws?.close() } catch { /* 忽略 */ }
         }
-      }, [link.relayUrl, link.hostDeviceId, link.token, sessionId, cacheKey, push])
+      }, [link.relayUrl, link.hostDeviceId, link.token, sessionId, cacheKey, push, refill])
 
       useEffect(() => {
         const el = scroller.current
@@ -525,13 +625,17 @@ window.__ModuleLoader__.load({
             display: 'flex', flexDirection: 'column', gap: 6,
           },
         }, rows.length
-          ? rows.map((r, i) => h('div', {
+          ? groupRows(rows).map((r, i) => h('div', {
             key: `${r.seq}-${i}`,
-            'data-wbsync': 'flow-row',
+            'data-wbsync': (r.kind === 'raw-group' || r.kind === 'context-group') ? 'flow-group' : 'flow-row',
             style: rowStyle(r.kind),
-          }, r.kind === 'tool' || r.kind === 'tool-result' || r.kind === 'turn-end' || r.kind === 'raw'
-            ? rowPrefix(r.kind) + r.text
-            : r.text))
+          }, r.kind === 'context-group'
+            ? `· ${r.count} 段运行上下文（宿主注入，非用户输入）`
+            : r.kind === 'raw-group'
+            ? `· ${r.count} 条内部事件 · ${r.labels.join(' / ')}`
+            : (r.kind === 'tool' || r.kind === 'tool-result' || r.kind === 'turn-end'
+              ? rowPrefix(r.kind) + r.text
+              : r.text)))
           : h('div', { style: { fontSize: 12, color: 'var(--color-text-tertiary)' } },
             status === 'following' ? '这个会话还没有可显示的事件。' : '正在读取事件流…')),
 
@@ -623,7 +727,7 @@ window.__ModuleLoader__.load({
         }, h(Conversation, {
           key: picked,
           link, sessionId: picked,
-          title: row?.title || null,
+          title: row ? sessionLabel(row) : null,
           onBack: () => setPicked(null),
         }))
       }

@@ -133,3 +133,42 @@ relay 的 `GET /api/sessions` 把 `host`（`{deviceId,name,platform,online,lastS
 2. 手机连上电脑（Relay 地址 + 配对码）；
 3. 进会话确认：历史事件渲染、新消息实时到达、断网 10s 后恢复不丢不重、审批卡可作答；
 4. 切到别的面板再回来，确认连接被收掉且不重复堆叠（模块级 lastSeq 生效）。
+
+---
+
+## 8. 为什么最终选了「镜像」（ADR-012）
+
+### 8.1 先把「换数据源」排除了
+
+要让原生列表显示电脑会话，最干净的当然是**只换数据源**。探过宿主实现后确认不可行：
+
+- 客户端各服务的 `remote` 是**构造时由调用方注入**：`constructor(ctx, remote, model) { this.remote = remote }`；
+- `TypertRemoteService.typertRemote` 是 `readonly`；
+- `ctx.typert.remotes.register()` 注册的是**命名空间**（声明有哪些方法），不是新的传输通道。
+
+结论：客户端只认一个 transport，它指向手机自己的 host。**没有「切到另一台 host」的公开接口。**
+
+### 8.2 于是只剩镜像
+
+把电脑的会话**原始文件**搬到手机本地会话库，登记进 `storages/workspace.json` 的 `sessionIds`。
+宿主于是"真的拥有"这些会话，侧栏列表与会话页**完全是原生的**，一行 UI 都不用写。
+
+代价：正文落盘。因此 ADR-012 把 ADR-010 改成**有条件的承诺**（默认不落盘，显式开启才落盘）。
+
+### 8.3 本轮进度
+
+| 步骤 | 状态 |
+|---|---|
+| ADR-012 决策记录 | ✓ |
+| 电脑侧只读导出（`session/mirror-list` / `session/mirror-file`，分块 512 KiB） | ✓（5 条测试） |
+| 手机侧落盘 + `workspace.json` 登记 | 未做（下一步） |
+| 界面开关 / 体积显示 / 一键清理 | 未做 |
+
+### 8.4 下一步的实现要点
+
+1. 手机 host 插件拉 `mirror-list`，对每个会话按 512 KiB 分块取文件，**原子写入**
+   `sessions/<cwd编码>/<sid>/`（先写 `.part` 再 rename，避免半截文件被当成合法会话）；
+2. 更新 `storages/workspace.json`：把 sid 追加到独立工作区「我的电脑（镜像）」的 `sessionIds`；
+3. 调 `sessions.refresh()` 让侧栏立刻出现；
+4. 清理：删除该工作区目录 + 从 `sessionIds` 摘除；
+5. **不要**把镜像文件当作写目标：发消息/审批仍走 `session/prompt`、`$events/result`。
