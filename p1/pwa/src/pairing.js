@@ -52,6 +52,7 @@ export async function pairWithRelay({
   baseUrl,
   code,
   phoneId = null,       // 本机既有身份：带上就只轮换自己那枚令牌（r9）
+  phoneIdFor = null,    // (hostDeviceId) => phoneId | null：两段式配对用，见下
   clientName = null,    // 仅作管理台展示，不参与任何判定
   fetchImpl = globalThis.fetch,
   subtle = globalThis.crypto?.subtle,
@@ -86,8 +87,15 @@ export async function pairWithRelay({
   }
   const sig = await signHmac(subtle, challenge.pairSecret, challenge.challenge)
 
+  // **两段式**：走到这里才知道目标 Host 是谁（challenge.deviceId），再决定用哪个本机身份。
+  // 为什么必须这样：换地址重配时若拿不到旧身份，服务端会当成一台**新手机**——
+  // 旧的那行就变成「僵尸」（令牌仍有效、但已没人用，还在占手机名额）。
+  // 用 hostDeviceId 去档案里找回旧 phoneId，重配就还是同一台手机。
+  const hostDeviceId = challenge.deviceId ?? null
+  const resolvedPhoneId = (typeof phoneIdFor === 'function' ? phoneIdFor(hostDeviceId) : null) ?? phoneId
+
   const verifyBody = { challenge: challenge.challenge, sig }
-  if (phoneId) verifyBody.phoneId = phoneId
+  if (resolvedPhoneId) verifyBody.phoneId = resolvedPhoneId
   if (clientName) verifyBody.clientName = clientName
   const done = await post('/pair/verify', verifyBody)
   if (!done?.deviceToken) throw fail('INVALID_RESPONSE', '配对响应缺少 deviceToken')

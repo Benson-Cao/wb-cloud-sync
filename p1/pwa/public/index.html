@@ -654,9 +654,12 @@
         $('save').disabled = true
         say('配对中…')
         try {
-          // phoneId 是「本机身份」：带上它重配只轮换自己那枚令牌，不会占掉第二台手机的名额
+          // 两段式配对：先 /pair 拿到 hostDeviceId，再按「这台电脑」找回旧的本机身份。
+          // 这样换地址（192.168 → 100.x）重配还是同一台手机，不会多出一行僵尸记录。
           const r = await pairWithRelay({
-            baseUrl: base, code, phoneId: profile?.phoneId ?? null,
+            baseUrl: base, code,
+            phoneIdFor: (hostDeviceId) =>
+              profiles.find((p) => p.hostDeviceId === hostDeviceId)?.phoneId ?? profile?.phoneId ?? null,
             // 只给管理台看「这是谁的手机」用，不参与任何判定；取不到就退回「浏览器」
             clientName: (/iPad/i.test(navigator.userAgent) ? 'iPad'
               : /iPhone/i.test(navigator.userAgent) ? 'iPhone'

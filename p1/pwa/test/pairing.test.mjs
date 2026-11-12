@@ -136,3 +136,26 @@ test('P8 重配轮换：带上 phoneId 只作废本机旧令牌，不带就是�
     '第二台手机配对不该顶掉第一台')
   assert.equal((await call('/api/sessions?deviceId=pc-re', { token: other.deviceToken })).status, 200)
 })
+
+test('P10 两段式配对：换地址重配仍认同一台手机（不再产生僵尸行）', async () => {
+  const g = await call('/pair/generate', { method: 'POST', body: { deviceId: 'pc-move' } })
+  const first = await pairWithRelay({ baseUrl: base, code: g.json.data.code, phoneId: 'phone-move001' })
+  assert.equal(first.phoneId, 'phone-move001')
+  assert.equal(relay.cp.listPhones('pc-move').length, 1)
+
+  // 同一台 relay 的另一个地址 —— 真机踩过的坑就是这么来的：
+  // 192.168.x 换到 100.x（Tailscale）重配，按 base 找不到旧档案，被当成一台新手机
+  const altBase = base.replace('127.0.0.1', 'localhost')
+  const g2 = await call('/pair/generate', { method: 'POST', body: { deviceId: 'pc-move' } })
+  const second = await pairWithRelay({
+    baseUrl: altBase,
+    code: g2.json.data.code,
+    phoneIdFor: (hostId) => (hostId === 'pc-move' ? 'phone-move001' : null),
+  })
+  assert.equal(second.phoneId, 'phone-move001', '换地址也要认回旧身份')
+  assert.equal(relay.cp.listPhones('pc-move').length, 1, '不该多出一台手机')
+
+  // 认回身份的代价是轮换：旧令牌作废，新令牌可用
+  assert.equal((await call('/api/sessions?deviceId=pc-move', { token: first.deviceToken })).status, 401)
+  assert.equal((await call('/api/sessions?deviceId=pc-move', { token: second.deviceToken })).status, 200)
+})

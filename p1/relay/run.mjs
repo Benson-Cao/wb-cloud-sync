@@ -13,6 +13,11 @@
  *   WBSYNC_ADMIN_TOKEN Relay 管理台令牌；设置后 /admin 与 /host/indexes 需 Bearer
  *   WBSYNC_CP_FILE     CP 落盘文件，默认 `~/.wbsync/cp.json`；设成 `:memory:` 关闭落盘
  *                      （关掉后重启即失忆：所有手机都得重新配对）
+ *   WBSYNC_RELAY_CONFIG 配置文件，默认 `~/.wbsync/relay-config.json`
+ *
+ * **配置文件**（开机自启 / 计划任务用）：`{ port, host, hostToken, adminToken, cpFile }`
+ * 都可省略。为什么要有它——计划任务里写密钥会跟着任务定义一起被看见，
+ * 而配置文件在用户目录里、权限随用户；环境变量仍然**优先**，方便调试时临时覆盖。
  *
  * 启动后控制台会打印所有可用的「Relay 地址」（含局域网 IP）：
  *   - 手机浏览器打开  http://<局域网IP>:<PORT>/app          （PWA 壳页面）
@@ -21,13 +26,21 @@
 import { createRelay } from './src/server.js'
 import { createControlPlane } from '../cp/src/index.js'
 import { createFileStore, defaultCpFile } from '../cp/src/persist.js'
-import { networkInterfaces } from 'node:os'
+import { readFileSync } from 'node:fs'
+import { homedir, networkInterfaces } from 'node:os'
+import { join } from 'node:path'
 
-const PORT = Number(process.env.PORT ?? 8787)
-const HOST = process.env.HOST ?? '0.0.0.0'
-const HOST_TOKEN = process.env.WBSYNC_HOST_TOKEN ?? ''
-const ADMIN_TOKEN = process.env.WBSYNC_ADMIN_TOKEN ?? ''
-const CP_FILE = process.env.WBSYNC_CP_FILE ?? defaultCpFile()
+// 配置文件 → 环境变量 → 默认值（前者让自启不靠环境，后者让调试能临时覆盖）
+const configFile = process.env.WBSYNC_RELAY_CONFIG ?? join(homedir(), '.wbsync', 'relay-config.json')
+let fileCfg = {}
+try { fileCfg = JSON.parse(readFileSync(configFile, 'utf8')) } catch { /* 没有就不读 */ }
+const pick = (envKey, cfgKey, dflt) => process.env[envKey] ?? (fileCfg[cfgKey] ?? dflt)
+
+const PORT = Number(pick('PORT', 'port', 8787))
+const HOST = pick('HOST', 'host', '0.0.0.0')
+const HOST_TOKEN = pick('WBSYNC_HOST_TOKEN', 'hostToken', '')
+const ADMIN_TOKEN = pick('WBSYNC_ADMIN_TOKEN', 'adminToken', '')
+const CP_FILE = pick('WBSYNC_CP_FILE', 'cpFile', defaultCpFile())
 const CP_PERSIST = CP_FILE !== ':memory:'
 
 if (!HOST_TOKEN) {
@@ -66,6 +79,7 @@ for (const url of lanUrls) {
 if (!lanUrls.length) console.log('  （未发现局域网 IPv4 网卡——手机将无法访问，检查网络）')
 console.log(`[wbsync] 本机回环：http://127.0.0.1:${port}/app`)
 console.log('[wbsync] 健康检查：GET /health · 管理台：GET /admin' + (ADMIN_TOKEN ? '（需 Bearer）' : '（未设 adminToken，公开）'))
+console.log(`[wbsync] 配置来源：${fileCfg && Object.keys(fileCfg).length ? configFile : '（仅环境变量/默认值）'} · hostToken ${HOST_TOKEN ? '已设置' : '未设置'}`)
 if (CP_PERSIST) {
   const r = cp.restoredSnapshot
   const tail = r ? ` 已恢复 ${r.devices} 台设备 / ${r.sessions} 个会话` : ''
