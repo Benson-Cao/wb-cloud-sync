@@ -974,3 +974,46 @@ test('配置了 deviceName / platform 时，注册帧把它们带给 Relay（手
     await relay.stop()
   }
 })
+
+test('下行端点用到的适配器方法都在包装层转发了（漏一个就是运行时 undefined）', () => {
+  const ctx = createMockCtx()
+  try {
+    const plugin = apply(ctx, { relayUrl: 'http://127.0.0.1:1', autoConnect: false })
+    // 这里的清单对应 handleDownlink 里所有 `adapters.xxx(...)` 调用。
+    // 真机踩过：setPinned 加在 createHostAdapters 上却忘了转发，下行报 "not a function"。
+    for (const name of [
+      'submitPrompt', 'setPinned', 'cancelTurn', 'createSession',
+      'uploadAttachment', 'backfill', 'listArtifacts', 'replay',
+    ]) {
+      assert.equal(typeof plugin.adapters[name], 'function', `${name} 忘了在 adapters 包装层转发`)
+    }
+  } finally {
+    ctx.dispose()
+  }
+})
+
+test('session/pin 下行：调到 setPinned 并原样回响应（r11）', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  const seen = []
+  try {
+    const plugin = apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true,
+      setPinned: async (args) => {
+        seen.push(args)
+        return { ok: true, value: { pinned: true, pinnedSessionIds: ['session-9'] } }
+      },
+    })
+    await waitFor(() => plugin.state.connected, '已连接')
+    relay.send({ t: 'http/request', reqId: 'r-pin', method: 'PATCH', endpoint: 'session/pin', body: { sessionId: 'session-9', pinned: true } })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '回响应')
+    const resp = framesOf(relay, 'http/response')[0]
+    assert.equal(resp.status, 200)
+    assert.equal(resp.body.ok, true)
+    assert.deepEqual(resp.body.data, { pinned: true, pinnedSessionIds: ['session-9'] })
+    assert.deepEqual(seen, [{ sessionId: 'session-9', pinned: true }])
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})

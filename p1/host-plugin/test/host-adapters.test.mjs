@@ -533,3 +533,18 @@ test('HA26 setPinned：转发 workspaces.pinSession/unpinSession，回完整置�
   const noId = await adapters.setPinned({})
   assert.equal(noId.code, 'HOST_ADAPTER_ERROR')
 })
+
+test('HA27 真机形态：workspaceRegistry 的 command 返回空，但服务带实时置顶集合', async () => {
+  const calls = []
+  const ctx = { workspaceRegistry: {
+    pinnedSessionIds: ['s-1', 'older'],
+    pinSession: async (id) => { calls.push(['pin', id]) },   // 成功不返回值，失败才抛
+    unpinSession: async (id) => { calls.push(['unpin', id]) },
+  } }
+  const adapters = createHostAdapters(ctx)
+  const on = await adapters.setPinned({ sessionId: 's-1', pinned: true })
+  assert.equal(on.ok, true)
+  assert.deepEqual(on.value.pinnedSessionIds, ['s-1', 'older'], 'command 不返回时读服务的实时集合')
+  await adapters.setPinned({ sessionId: 's-1', pinned: false })
+  assert.deepEqual(calls, [['pin', 's-1'], ['unpin', 's-1']])
+})

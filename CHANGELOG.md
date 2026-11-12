@@ -4,6 +4,35 @@
 
 ---
 
+## [P1 W7 · 续] · 2026-11-12 14:1x · 置顶真机联调：两次「我以为接上了」
+
+上一条写完就上真机，结果连吃两个闭门羹——两处都不是逻辑错，是**接线**错：
+
+1. `adapters.setPinned is not a function`：`index.js` 里的 `adapters` 是手工白名单
+   （注释还写着「必须逐个转发」），只在 `createHostAdapters` 上加方法没用。
+   → 补转发，并加一条**包装层完整性**测试：遍历所有下行端点用到的适配器方法，
+   缺一个就红。这类漏接以后不会再靠真机发现。
+2. `WRITER_UNAVAILABLE: 宿主未提供 workspaces.pinSession`：`WorkspaceController`
+   （cordis 名 `workspaces`）在**渲染进程**，插件所在的主进程看不到。
+   查 `/__wbsync/status` 的服务清单，真正可用的是 **`workspaceRegistry`**
+   （lateBound，`pinSession/unpinSession/pinnedSessionIds/archiveSession/delete` 都在）。
+   → 两个服务都探，主进程优先；`pinnedSessionIds` 兼容属性 / getter / command 返回值三种形态。
+
+真机结果（0.1.16）：
+
+```
+PATCH 置顶: 200 {"pinned":true,"pinnedSessionIds":["session-fb7066fb-…"]}
+置顶后 pinned = true | pinnedOrder = 0
+已还原为未置顶
+```
+
+- bundle 迭代 0.1.14 → 0.1.15 → **0.1.16**（可用版）；测试 299 → **302**。
+- relay 也重启过一次才带上 PATCH 路由；用系统 Node + `relay-config.json` 冷启动成功
+  （配置来源日志、hostToken、CP 16 设备 / 24 会话恢复都对）——**VBS 自启那条路验证过了**。
+- 顺带发现：局域网 IP 已从 `192.168.0.103` 漂到 `192.168.0.110`，更说明手机该用 Tailscale 那个固定地址。
+
+---
+
 ## [P1 W7 · 续] · 2026-11-12 13:4x · 置顶（真实状态 + 手机可置顶 + 分组显示，协议 r11）
 
 列表已经 24 个会话了，找一个常用会话要滑半天。置顶在协议里躺着（`pinned / pinnedOrder` 两个字段、`PATCH /api/sessions/:id` 一个端点），但整条链没人接——索引里 `pinned` 恒为 `false`，PATCH 连路由都没有。

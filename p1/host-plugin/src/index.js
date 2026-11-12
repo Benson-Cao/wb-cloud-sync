@@ -138,6 +138,8 @@ export function apply(ctx, config = {}) {
 
   const adapters = {
     submitPrompt: cfg.submitPrompt ?? hostAdapters.submitPrompt,
+    // 置顶（r11）：同样要在这个包装层逐个转发，漏了下行分派就拿到 undefined
+    setPinned: cfg.setPinned ?? hostAdapters.setPinned,
     cancelTurn: cfg.cancelTurn ?? hostAdapters.cancelTurn,
     createSession: cfg.createSession ?? hostAdapters.createSession,
     // 适配器返回对象上的方法必须在包装层逐个转发，否则下行分派拿到 undefined
@@ -183,9 +185,20 @@ export function apply(ctx, config = {}) {
   // 读不到就返回空——置顶是 PC 侧状态，**猜出来的比空着更糟**。
   const readPinnedIds = () => {
     try {
-      const w = typeof ctx.get === 'function' ? ctx.get('workspaces') : ctx.workspaces
-      const ids = w?.model?.pinnedSessionIds ?? w?.list?.pinnedSessionIds ?? w?.pinnedSessionIds
-      return Array.isArray(ids) ? ids : []
+      const get = (name) => {
+        try { return typeof ctx.get === 'function' ? ctx.get(name) : ctx[name] } catch { return null }
+      }
+      // 主进程是 workspaceRegistry（lateBound）；渲染进程的 workspaces 作兜底
+      for (const w of [get('workspaceRegistry'), get('workspaces')]) {
+        if (!w) continue
+        for (const holder of [w, w.model, w.list]) {
+          if (!holder) continue
+          let ids = holder.pinnedSessionIds
+          if (typeof ids === 'function') ids = ids()
+          if (Array.isArray(ids)) return ids
+        }
+      }
+      return []
     } catch { return [] }
   }
 

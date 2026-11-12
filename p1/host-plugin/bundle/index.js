@@ -629,11 +629,16 @@ const promptEntry = (services) => {
  * 找不到就如实报「没有这个入口」，绝不自己改索引假装成功。
  */
 const workspaceEntry = (services) => {
-  const w = services.workspaces
-  if (!w) return null
-  if (typeof w.pinSession === 'function' && typeof w.unpinSession === 'function') return w
-  const inner = w.workspace ?? w.model
-  if (inner && typeof inner.pinSession === 'function' && typeof inner.unpinSession === 'function') return inner
+  // 真机 status 取证：插件在主进程里看到的是 **workspaceRegistry**（lateBound，
+  // 带 pinSession/unpinSession/pinnedSessionIds/archiveSession/delete）；
+  // 渲染进程的 `workspaces` 服务在这边不可见，保留它只作兼容。
+  const candidates = [services.workspaceRegistry, services.workspaces]
+  for (const w of candidates) {
+    if (!w) continue
+    if (typeof w.pinSession === 'function' && typeof w.unpinSession === 'function') return w
+    const inner = w.workspace ?? w.model
+    if (inner && typeof inner.pinSession === 'function' && typeof inner.unpinSession === 'function') return inner
+  }
   return null
 }
 
@@ -837,8 +842,15 @@ function createHostAdapters(ctx, options = {}) {
       if (!w) return unavailable('workspaces.pinSession/unpinSession', services)
       try {
         const r = pinned ? await w.pinSession(sessionId) : await w.unpinSession(sessionId)
-        const ids = r?.value?.pinnedSessionIds ?? (Array.isArray(r) ? r : [])
-        return { ok: r?.ok !== false, value: { pinned: Boolean(pinned), pinnedSessionIds: ids } }
+        let ids = r?.value?.pinnedSessionIds ?? (Array.isArray(r) ? r : null)
+        if (!Array.isArray(ids)) {
+          // workspaceRegistry 的 command 方法成功时不返回值（失败才抛），
+          // 但服务本身带实时集合——读它，别让调用方退化成「猜一个布尔」。
+          let live = w.pinnedSessionIds
+          if (typeof live === 'function') live = live()
+          if (Array.isArray(live)) ids = live
+        }
+        return { ok: r?.ok !== false, value: { pinned: Boolean(pinned), pinnedSessionIds: Array.isArray(ids) ? ids : [] } }
       } catch (error) {
         return asError(error, { name: 'workspaces', kind: pinned ? 'pinSession' : 'unpinSession' })
       }
@@ -1388,6 +1400,8 @@ function __apply(ctx, config = {}) {
 
   const adapters = {
     submitPrompt: cfg.submitPrompt ?? hostAdapters.submitPrompt,
+    // 置顶（r11）：同样要在这个包装层逐个转发，漏了下行分派就拿到 undefined
+    setPinned: cfg.setPinned ?? hostAdapters.setPinned,
     cancelTurn: cfg.cancelTurn ?? hostAdapters.cancelTurn,
     createSession: cfg.createSession ?? hostAdapters.createSession,
     // 适配器返回对象上的方法必须在包装层逐个转发，否则下行分派拿到 undefined
@@ -1433,9 +1447,20 @@ function __apply(ctx, config = {}) {
   // 读不到就返回空——置顶是 PC 侧状态，**猜出来的比空着更糟**。
   const readPinnedIds = () => {
     try {
-      const w = typeof ctx.get === 'function' ? ctx.get('workspaces') : ctx.workspaces
-      const ids = w?.model?.pinnedSessionIds ?? w?.list?.pinnedSessionIds ?? w?.pinnedSessionIds
-      return Array.isArray(ids) ? ids : []
+      const get = (name) => {
+        try { return typeof ctx.get === 'function' ? ctx.get(name) : ctx[name] } catch { return null }
+      }
+      // 主进程是 workspaceRegistry（lateBound）；渲染进程的 workspaces 作兜底
+      for (const w of [get('workspaceRegistry'), get('workspaces')]) {
+        if (!w) continue
+        for (const holder of [w, w.model, w.list]) {
+          if (!holder) continue
+          let ids = holder.pinnedSessionIds
+          if (typeof ids === 'function') ids = ids()
+          if (Array.isArray(ids)) return ids
+        }
+      }
+      return []
     } catch { return [] }
   }
 
