@@ -4,6 +4,18 @@
 
 ---
 
+## [P1 W7 · 续] · 2026-11-12 14:3x · 归档代替真删（协议 r12，host-plugin 0.1.17）
+
+W7 剩下的「移除工作空间」——选了**归档**：手机误点的代价应该只是「从列表消失、能一键恢复」，而不是不可逆地删掉宿主落盘日志。
+
+- `SessionIndex` 加可选 `archived`；CP `listSessions` 默认只回未归档、`?archived=true` 只回已归档（行还在，可恢复）。
+- `PATCH /api/sessions/:id { archived }` + 下行 `session/archive` → 宿主 `workspaceRegistry.archiveSession/unarchiveSession`；`DELETE /api/sessions/:id` 是**归档别名**（强制 true，body 反转无效）。真删仅 PC。
+- 手机端：会话里「归档此会话」（带确认），列表顶部「🗄 已归档」展开恢复；归档列表单独拉，不覆盖主列表缓存。
+- 一次只做一件事：`PATCH` 同时给 `pinned` 与 `archived` → 400。
+- 协议 r12；SW **v24**；host-plugin bundle **0.1.17**。
+
+---
+
 ## [P1 W7 · 续] · 2026-11-12 14:1x · 置顶真机联调：两次「我以为接上了」
 
 上一条写完就上真机，结果连吃两个闭门羹——两处都不是逻辑错，是**接线**错：

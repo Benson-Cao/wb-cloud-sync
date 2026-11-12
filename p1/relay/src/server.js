@@ -711,6 +711,8 @@ export function createRelay(options = {}) {
         }
         const rawPinned = url.searchParams.get('pinned')
         const pinned = rawPinned === null ? null : rawPinned === 'true'
+        // r12：archived=true 只回已归档（恢复列表用），缺省 false 只回未归档
+        const archived = url.searchParams.get('archived') === 'true'
         const host = cp.getDevice(deviceId)
         return ok(res, {
           deviceId,
@@ -723,7 +725,7 @@ export function createRelay(options = {}) {
             online: isOnline(deviceId),
             lastSeenAt: host?.lastSeenAt ?? null,
           },
-          rows: cp.listSessions({ ownerDeviceId: deviceId, pinned }),
+          rows: cp.listSessions({ ownerDeviceId: deviceId, pinned, archived }),
         })
       }
 
@@ -762,10 +764,11 @@ export function createRelay(options = {}) {
         })
       }
 
-      // 置顶 / 取消置顶（r11）：PATCH /api/sessions/:id { pinned: true|false }
-      // 旧协议写的是「置顶仅 PC、手机 403」——内测后改了：手机也能置顶，但**排序**
-      // （pinnedOrder）仍由宿主权威（最近置顶在前），手机不改序，避免两端抢排序。
-      if (method === 'PATCH' && path.startsWith('/api/sessions/')) {
+      // 置顶（r11）/ 归档（r12）：PATCH /api/sessions/:id { pinned } 或 { archived }
+      // DELETE /api/sessions/:id = 归档（软移除别名，协议 §4 的「移除工作空间」）。
+      // 为什么不真删：手机误点的代价应该只是「从列表消失、能一键恢复」，
+      // 而不是把宿主落盘日志删掉。归档集合由宿主权威，Relay 照它刷新 CP。
+      if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/api/sessions/')) {
         const sessionId = decodeURIComponent(path.slice('/api/sessions/'.length))
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
@@ -774,15 +777,32 @@ export function createRelay(options = {}) {
         if (!cp.verifyClientToken(deviceId, token).ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
-        if (body.pinned !== true && body.pinned !== false) {
-          return fail(res, 400, 'INVALID_JSON', 'PATCH 需要 { pinned: true|false }')
+        const wantPin = body.pinned === true || body.pinned === false
+        const wantArchive = method === 'DELETE' || body.archived === true || body.archived === false
+        if (!wantPin && !wantArchive) {
+          return fail(res, 400, 'INVALID_JSON', 'PATCH 需要 { pinned } 或 { archived }（布尔）')
+        }
+        if (wantPin && wantArchive) {
+          return fail(res, 400, 'INVALID_JSON', '一次只做一件事：pinned 与 archived 不能同时给')
         }
         if (!isOnline(deviceId)) {
           cp.markDeviceOffline(deviceId)
           return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
         }
-        return bridge(req, res, deviceId, 'session/pin', { sessionId, pinned: body.pinned }, (response) => {
+        const archived = method === 'DELETE' ? true : body.archived
+        const endpoint = wantArchive ? 'session/archive' : 'session/pin'
+        const frameBody = wantArchive
+          ? { sessionId, archived }
+          : { sessionId, pinned: body.pinned }
+        return bridge(req, res, deviceId, endpoint, frameBody, (response) => {
           if (response?.status !== 200) return
+          if (wantArchive) {
+            const ids = response?.body?.data?.archivedSessionIds
+            cp.patchSession(sessionId, {
+              archived: Array.isArray(ids) ? ids.includes(sessionId) : Boolean(archived),
+            })
+            return
+          }
           // 宿主回的是**全局**置顶集合（最近置顶在前）：照它刷新 pinnedOrder，
           // 不用「本地翻转布尔」去猜——别的端（PC）也可能改过。
           const ids = response?.body?.data?.pinnedSessionIds

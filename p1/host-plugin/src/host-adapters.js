@@ -379,6 +379,35 @@ export function createHostAdapters(ctx, options = {}) {
       }
     },
 
+    /**
+     * 归档 / 恢复（r12）：委托宿主 `workspaceRegistry.archiveSession/unarchiveSession`。
+     * **软移除**——只把它从「Workspace 分组表面」藏起来，落盘日志一行都不删；
+     * 手机端默认列表看不到，显式查询还能看到并恢复。真删不在手机端开放。
+     * 返回宿主给的**完整**归档集合，调用方照它刷新，别自己翻转布尔。
+     */
+    setArchived: async ({ sessionId, archived = true } = {}) => {
+      if (!sessionId) {
+        return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'setArchived 缺 sessionId' }
+      }
+      const services = current()
+      const w = workspaceEntry(services)
+      if (!w || typeof w.archiveSession !== 'function' || typeof w.unarchiveSession !== 'function') {
+        return unavailable('workspaceRegistry.archiveSession/unarchiveSession', services)
+      }
+      try {
+        const r = archived ? await w.archiveSession(sessionId) : await w.unarchiveSession(sessionId)
+        let ids = r?.value?.archivedSessionIds ?? (Array.isArray(r) ? r : null)
+        if (!Array.isArray(ids)) {
+          let live = w.archivedSessionIds
+          if (typeof live === 'function') live = live()
+          if (Array.isArray(live)) ids = live
+        }
+        return { ok: r?.ok !== false, value: { archived: Boolean(archived), archivedSessionIds: Array.isArray(ids) ? ids : [] } }
+      } catch (error) {
+        return asError(error, { name: 'workspaceRegistry', kind: archived ? 'archiveSession' : 'unarchiveSession' })
+      }
+    },
+
     /** 取消当前轮次：官方 session/cancel 只吃 { sessionId }，保留 pending inbox。 */
     cancelTurn: async ({ sessionId } = {}) => {
       const services = current()

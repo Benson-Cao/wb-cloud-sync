@@ -427,22 +427,28 @@ export function createControlPlane({
 
   const getSession = (sessionId) => cloneSession(sessions.get(sessionId))
 
-  const listSessions = ({ ownerDeviceId = null, pinned = null, accountId = null } = {}) =>
+  /**
+   * `archived`：false（默认）只回未归档，true 只回已归档，null 全回（r12）。
+   * 归档是**软移除**——行还在 CP 里，只是不进手机默认列表，随时能恢复。
+   */
+  const listSessions = ({ ownerDeviceId = null, pinned = null, accountId = null, archived = false } = {}) =>
     [...sessions.values()]
       .filter((s) => (ownerDeviceId === null || s.ownerDeviceId === ownerDeviceId))
       .filter((s) => (accountId === null || s.accountId === accountId))
       .filter((s) => (pinned === null || s.pinned === Boolean(pinned)))
+      .filter((s) => archived === null || (s.archived === true) === (archived === true))
       .sort((a, b) => (Number(b.pinned) - Number(a.pinned))
         || (a.pinnedOrder - b.pinnedOrder)
         || ((b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0)))
       .map(cloneSession)
 
-  /** 置顶 / 调序 / 状态修正：只有 PC 侧该调这个，手机端只读（协议 §4 约束）。 */
+  /** 置顶 / 归档 / 调序 / 状态修正：Relay 在收到 Host 响应后调用，手机端不直接改 CP。 */
   const patchSession = (sessionId, patch = {}) => {
     const row = sessions.get(sessionId)
     if (!row) return null
     if (patch.pinned !== undefined) row.pinned = Boolean(patch.pinned)
     if (patch.pinnedOrder !== undefined) row.pinnedOrder = num(patch.pinnedOrder, row.pinnedOrder)
+    if (patch.archived !== undefined) row.archived = Boolean(patch.archived)
     if (patch.title !== undefined) row.title = patch.title
     if (SESSION_STATES.includes(patch.state)) row.state = patch.state
     row.updatedAt = now()

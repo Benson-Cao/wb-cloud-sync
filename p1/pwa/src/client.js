@@ -425,6 +425,44 @@ export function createPwaClient({
   }
 
   /**
+   * 归档 / 恢复（r12）：`PATCH /api/sessions/:id { archived }`。
+   * 软移除——只把会话从默认列表藏起来，落盘日志不动，随时能恢复。
+   */
+  const setArchived = async ({ sessionId, archived = true } = {}) => {
+    if (!sessionId) {
+      throw Object.assign(new Error('归档缺 sessionId'), { code: 'INVALID_ARGUMENT' })
+    }
+    const r = await fetchImpl(`${base}/api/sessions/${encodeURIComponent(sessionId)}?deviceId=${encodeURIComponent(deviceId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ deviceId, archived: Boolean(archived) }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      const detail = typeof payload?.error?.message === 'string' ? payload.error.message : ''
+      throw Object.assign(
+        new Error(`归档失败：${code}${detail && detail !== code ? ` · ${detail}` : ''}`),
+        { code, detail },
+      )
+    }
+    return payload.data
+  }
+
+  /** 只查已归档的行（恢复列表用）；不覆盖 refreshSessions 的内部缓存。 */
+  const getArchivedSessions = async () => {
+    const r = await fetchImpl(`${base}/api/sessions?deviceId=${encodeURIComponent(deviceId)}&archived=true`, {
+      headers: authHeaders(),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      throw Object.assign(new Error(`读取归档失败：${code}`), { code })
+    }
+    return payload.data?.rows ?? []
+  }
+
+  /**
    * 向已有会话发一条消息：文本 + 已上传附件的 receiptId。
    * 走白名单 `session/prompt`；`clientMsgId` 是宿主原生幂等键，重发同一条不会重复落库。
    */
@@ -617,7 +655,7 @@ export function createPwaClient({
   })
 
   return {
-    refreshSessions, createSession, cancelTurn, setPinned, submitPrompt, uploadAttachment,
+    refreshSessions, createSession, cancelTurn, setPinned, setArchived, getArchivedSessions, submitPrompt, uploadAttachment,
     getHostStatus: () => ({ ...hostStatus }),
     listApprovals, answerApproval, getArtifacts, backfill, openWindow,
     follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null,

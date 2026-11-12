@@ -16,7 +16,7 @@ import {
 /* ---------------------------------------------------------------- 夹具 */
 
 const CONTRACT_KEYS = [
-  'sessionId', 'ownerDeviceId', 'workspace', 'title', 'pinned', 'pinnedOrder',
+  'sessionId', 'ownerDeviceId', 'workspace', 'title', 'pinned', 'pinnedOrder', 'archived',
   'state', 'lastSeq', 'lastActiveAt', 'headerRef',
 ].sort()
 
@@ -306,4 +306,18 @@ test('Z1 置顶来自宿主全局集合（r11）：问不到就全当未置顶�
   })
   const rows3 = (await throws({ mode: 'full' })).rows
   assert.ok(rows3.every((r) => r.pinned === false), '抛异常也不能把列表搞坏')
+})
+
+test('Z2 归档标记来自宿主集合（r12）：只标记不过滤，问不到就全当未归档', async () => {
+  const list = async () => [snapshot('s-1'), snapshot('s-2')]
+  const withArchived = createSessionIndexReporter({
+    listSessions: list, deviceId: 'pc-1', archivedIds: () => ['s-2'],
+  })
+  const rows = (await withArchived({ mode: 'full' })).rows
+  assert.equal(rows.find((r) => r.sessionId === 's-2').archived, true)
+  assert.equal(rows.find((r) => r.sessionId === 's-1').archived, false)
+  assert.equal(rows.length, 2, '归档行仍在索引里——过滤是 CP / 手机端的事')
+
+  const bare = createSessionIndexReporter({ listSessions: list, deviceId: 'pc-1' })
+  assert.ok((await bare({ mode: 'full' })).rows.every((r) => r.archived === false))
 })

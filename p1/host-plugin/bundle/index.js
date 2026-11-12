@@ -328,6 +328,8 @@ function createSessionIndexReporter({
   // 可选：() => string[]，宿主 workspaces 的全局置顶集合（最近置顶在前）。
   // 没有就都当未置顶——**不猜**：置顶是 PC 侧状态，猜出来的比空着更糟。
   pinnedIds = null,
+  // 可选：() => string[]，宿主已归档的会话集合（r12 软移除）
+  archivedIds = null,
   deviceId = null,
   limit = DEFAULT_LIMIT,
   maxDecodeBytes = DEFAULT_MAX_DECODE_BYTES,
@@ -404,6 +406,13 @@ function createSessionIndexReporter({
       .sort((a, b) => (b.header.createdAt ?? 0) - (a.header.createdAt ?? 0))
       .slice(0, cap)
 
+    // 归档集合：只做标记，不在这里过滤——CP 与手机端各自决定要不要显示（软移除）
+    const archivedSet = new Set()
+    try {
+      const ids = typeof archivedIds === 'function' ? archivedIds() : null
+      if (Array.isArray(ids)) for (const id of ids) archivedSet.add(id)
+    } catch { /* 读不到就当没归档 */ }
+
     // 置顶集合：宿主口径是「最近置顶在前」，索引就按它给 pinnedOrder（0 = 最近）
     const pinIndex = new Map()
     try {
@@ -432,6 +441,7 @@ function createSessionIndexReporter({
         // 置顶来自宿主 workspaces 的全局集合（r11）：日志里没有这份状态，问宿主要
         pinned: pinIndex.has(header.id),
         pinnedOrder: pinIndex.get(header.id) ?? 0,
+        archived: archivedSet.has(header.id),
         state: stateOf(header, unreadable),
         lastSeq: p.lastSeq,
         lastActiveAt: p.lastActiveAt ?? pick(header, 'createdAt'),
@@ -853,6 +863,35 @@ function createHostAdapters(ctx, options = {}) {
         return { ok: r?.ok !== false, value: { pinned: Boolean(pinned), pinnedSessionIds: Array.isArray(ids) ? ids : [] } }
       } catch (error) {
         return asError(error, { name: 'workspaces', kind: pinned ? 'pinSession' : 'unpinSession' })
+      }
+    },
+
+    /**
+     * 归档 / 恢复（r12）：委托宿主 `workspaceRegistry.archiveSession/unarchiveSession`。
+     * **软移除**——只把它从「Workspace 分组表面」藏起来，落盘日志一行都不删；
+     * 手机端默认列表看不到，显式查询还能看到并恢复。真删不在手机端开放。
+     * 返回宿主给的**完整**归档集合，调用方照它刷新，别自己翻转布尔。
+     */
+    setArchived: async ({ sessionId, archived = true } = {}) => {
+      if (!sessionId) {
+        return { ok: false, code: 'HOST_ADAPTER_ERROR', message: 'setArchived 缺 sessionId' }
+      }
+      const services = current()
+      const w = workspaceEntry(services)
+      if (!w || typeof w.archiveSession !== 'function' || typeof w.unarchiveSession !== 'function') {
+        return unavailable('workspaceRegistry.archiveSession/unarchiveSession', services)
+      }
+      try {
+        const r = archived ? await w.archiveSession(sessionId) : await w.unarchiveSession(sessionId)
+        let ids = r?.value?.archivedSessionIds ?? (Array.isArray(r) ? r : null)
+        if (!Array.isArray(ids)) {
+          let live = w.archivedSessionIds
+          if (typeof live === 'function') live = live()
+          if (Array.isArray(live)) ids = live
+        }
+        return { ok: r?.ok !== false, value: { archived: Boolean(archived), archivedSessionIds: Array.isArray(ids) ? ids : [] } }
+      } catch (error) {
+        return asError(error, { name: 'workspaceRegistry', kind: archived ? 'archiveSession' : 'unarchiveSession' })
       }
     },
 
@@ -1402,6 +1441,8 @@ function __apply(ctx, config = {}) {
     submitPrompt: cfg.submitPrompt ?? hostAdapters.submitPrompt,
     // 置顶（r11）：同样要在这个包装层逐个转发，漏了下行分派就拿到 undefined
     setPinned: cfg.setPinned ?? hostAdapters.setPinned,
+    // 归档（r12）：同样要逐个转发，漏了下行就拿到 undefined
+    setArchived: cfg.setArchived ?? hostAdapters.setArchived,
     cancelTurn: cfg.cancelTurn ?? hostAdapters.cancelTurn,
     createSession: cfg.createSession ?? hostAdapters.createSession,
     // 适配器返回对象上的方法必须在包装层逐个转发，否则下行分派拿到 undefined
@@ -1443,9 +1484,9 @@ function __apply(ctx, config = {}) {
       ? (options) => ctx.sessionPersistence.list(options)
       : null)
 
-  // 置顶集合（r11）：问宿主 workspaces 的全局 pinnedSessionIds（最近置顶在前）。
-  // 读不到就返回空——置顶是 PC 侧状态，**猜出来的比空着更糟**。
-  const readPinnedIds = () => {
+  // 宿主 workspaceRegistry 上的集合（r11 置顶 / r12 归档）：问不到就返回空，
+  // **猜出来的比空着更糟**。主进程服务 lateBound，所以每次读都重新探。
+  const readRegistryIds = (key) => {
     try {
       const get = (name) => {
         try { return typeof ctx.get === 'function' ? ctx.get(name) : ctx[name] } catch { return null }
@@ -1455,7 +1496,7 @@ function __apply(ctx, config = {}) {
         if (!w) continue
         for (const holder of [w, w.model, w.list]) {
           if (!holder) continue
-          let ids = holder.pinnedSessionIds
+          let ids = holder[key]
           if (typeof ids === 'function') ids = ids()
           if (Array.isArray(ids)) return ids
         }
@@ -1467,7 +1508,8 @@ function __apply(ctx, config = {}) {
   const collectIndex = listSessions
     ? createSessionIndexReporter({
       listSessions,
-      pinnedIds: readPinnedIds,
+      pinnedIds: () => readRegistryIds('pinnedSessionIds'),
+      archivedIds: () => readRegistryIds('archivedSessionIds'),
       openSession,
       deviceId: cfg.deviceId,
       limit: cfg.indexLimit,
@@ -1538,6 +1580,12 @@ function __apply(ctx, config = {}) {
         // 置顶/取消置顶（r11）：转发给宿主 workspaces，成功后由索引刷新把新集合带下去
         const r = await adapters.setPinned({ sessionId: body?.sessionId, pinned: body?.pinned !== false })
         const { status, body: payload } = unwrap(r, { pinned: body?.pinned !== false })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/archive') {
+        // 归档/恢复（r12）：软移除，返回宿主给的完整归档集合
+        const r = await adapters.setArchived({ sessionId: body?.sessionId, archived: body?.archived !== false })
+        const { status, body: payload } = unwrap(r, { archived: body?.archived !== false })
         return send({ t: 'http/response', reqId, status, body: payload })
       }
       if (endpoint === 'session/cancel') {

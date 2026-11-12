@@ -7,7 +7,7 @@
  * 生效，不必等旧 SW 的缓存优先策略把旧 index.html 一直发回来。其余静态资源
  * 仍缓存优先；缓存名随外壳清单变更递增（activate 时清掉旧壳）。
  */
-const SHELL_CACHE = 'wbsync-shell-v23'
+const SHELL_CACHE = 'wbsync-shell-v24'
 const SHELL_ASSETS = [
   './index.html', './manifest.webmanifest', './icon.svg',
   '../src/client.js', '../src/pairing.js', '../src/hmac-sha256.js', '../src/transcript.js',

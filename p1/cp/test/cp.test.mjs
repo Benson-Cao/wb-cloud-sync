@@ -409,3 +409,20 @@ test('r9 之前配对的手机（令牌落在 Host 行）仍可鉴权，标记 l
   assert.deepEqual(cp.verifyClientToken('pc-1', 'old-host-token'), { ok: true, clientId: null, legacy: true })
   assert.equal(cp.verifyClientToken('pc-1', 'whatever').ok, false)
 })
+
+test('归档是软移除（r12）：默认不进列表，显式查才看得到，可恢复', () => {
+  const { cp } = makeCp()
+  cp.upsertDevice(device('pc-1'))
+  cp.upsertSessions('pc-1', [sessionRow('s1'), sessionRow('s2')])
+
+  cp.patchSession('s1', { archived: true })
+  assert.deepEqual(cp.listSessions({ ownerDeviceId: 'pc-1' }).map((s) => s.sessionId), ['s2'],
+    '归档后不该出现在手机的默认列表')
+  assert.deepEqual(cp.listSessions({ ownerDeviceId: 'pc-1', archived: true }).map((s) => s.sessionId), ['s1'],
+    '但行还在，显式查能看到——这就是「可恢复」')
+  assert.equal(cp.getSession('s1').archived, true)
+
+  cp.patchSession('s1', { archived: false })
+  assert.equal(cp.listSessions({ ownerDeviceId: 'pc-1' }).length, 2, '恢复后回到列表')
+  assert.equal(cp.listSessions({ archived: null }).length, 2, 'null = 全回，调试用')
+})

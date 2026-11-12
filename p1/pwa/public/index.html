@@ -41,6 +41,7 @@
     .grouphead { margin: 10px 2px 6px; font-size: 12px; color: #7a8699; letter-spacing: .5px; }
     .pinbtn { background: none; border: none; cursor: pointer; font-size: 15px; padding: 4px 2px; opacity: .35; }
     .pinbtn.on { opacity: 1; }
+    .row.archived { opacity: .62; }
     /* 内容区必须能收缩：内层 div 不设 min-width:0 时，长标题会把右侧状态徽章顶出屏幕 */
     .row > div { min-width: 0; flex: 1 1 auto; }
     .row .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -129,6 +130,8 @@
   <div id="newbar" hidden>
     <input id="newText" placeholder="第一句话（可选，空=建空会话）" />
     <button id="create">新建会话</button>
+    <!-- r12：归档是软移除，入口收在这里，默认不占列表空间 -->
+    <button id="archivedToggle" title="显示/收起已归档的会话">🗄 已归档</button>
   </div>
   <!-- 审批是设备级的（与当前看哪个会话无关），所以放在事件流之外 -->
   <div id="approvals" hidden></div>
@@ -138,6 +141,7 @@
     <div id="stream" hidden>
       <h2 id="streamTitle">事件流</h2>
       <button id="cancel" title="取消该会话当前正在运行的轮次">取消当前轮次</button>
+      <button id="archive" title="从列表藏起来，可在「已归档」里恢复，不删除日志">归档此会话</button>
       <div id="compose">
         <input id="msgText" placeholder="向该会话发消息…" />
         <input id="file" type="file" />
@@ -282,6 +286,10 @@
       return tail || null
     }
 
+    // 已归档列表（r12）：默认折叠，展开时单独拉，不混入主列表缓存
+    let showArchived = false
+    let archivedRows = []
+
     /**
      * 会话列表：置顶在前（按宿主给的 pinnedOrder，最近置顶在前），其余按最近活跃。
      * 置顶是宿主的全局集合（r11），这里只负责分组显示与逐条置顶/取消——**不改序**。
@@ -338,6 +346,61 @@
         div.addEventListener('click', () => openStream(r.sessionId))
         box.appendChild(div)
       }
+      // 已归档（r12）：软移除，默认折叠；展开时给「恢复」，不给「删除」
+      if (showArchived) {
+        const head = document.createElement('div')
+        head.className = 'grouphead'
+        head.textContent = '已归档'
+        box.appendChild(head)
+        if (!archivedRows.length) {
+          const empty = document.createElement('div')
+          empty.className = 'hint'
+          empty.textContent = '没有已归档的会话。'
+          box.appendChild(empty)
+        }
+        for (const r of archivedRows) {
+          const div = document.createElement('div')
+          div.className = 'row archived'
+          const left = document.createElement('div')
+          const title = document.createElement('div')
+          title.className = 'title'
+          title.textContent = r.title || workspaceName(r.workspace) || shortId(r.sessionId)
+          const meta = document.createElement('div')
+          meta.className = 'meta'
+          meta.textContent = `${shortId(r.sessionId)} · 归档`
+          left.appendChild(title); left.appendChild(meta)
+          const restore = document.createElement('button')
+          restore.className = 'pinbtn'
+          restore.textContent = '↩'
+          restore.title = '恢复到列表'
+          restore.addEventListener('click', (e) => { e.stopPropagation(); void restoreArchived(r.sessionId) })
+          div.appendChild(left); div.appendChild(restore)
+          box.appendChild(div)
+        }
+      }
+    }
+
+    /** 展开/收起已归档；展开时单独查，不覆盖列表缓存。 */
+    const toggleArchived = async () => {
+      if (!client) return
+      showArchived = !showArchived
+      $('archivedToggle').textContent = showArchived ? '🗄 收起归档' : '🗄 已归档'
+      if (showArchived) {
+        try { archivedRows = await client.getArchivedSessions() }
+        catch (e) { archivedRows = []; say(`读取归档失败：${e.message}`, true) }
+      }
+      renderList(client.snapshot().sessions)
+    }
+
+    const restoreArchived = async (sessionId) => {
+      if (!client) return
+      try {
+        await client.setArchived({ sessionId, archived: false })
+        archivedRows = await client.getArchivedSessions()
+        const rows = await client.refreshSessions()
+        renderList(rows)
+        say('已恢复到列表')
+      } catch (e) { say(`恢复失败：${e.message}`, true) }
     }
 
     /** 置顶/取消置顶：成功后按宿主回的最新行刷新列表（排序跟着宿主走）。 */
@@ -845,6 +908,7 @@
       if (row) row.scrollIntoView({ block: 'center' })
     }
 
+    $('archivedToggle').addEventListener('click', () => { void toggleArchived() })
     $('back').addEventListener('click', backToList)
 
     $('earlier').addEventListener('click', () => { void loadEarlier() })
@@ -894,6 +958,23 @@
         say(`新建失败：${e.message}${e.code === 'HOST_OFFLINE' ? '（Host 离线）' : ''}`, true)
       } finally {
         $('create').disabled = false
+      }
+    })
+    $('archive').addEventListener('click', async () => {
+      if (!client || !activeSession) return
+      if (!window.confirm('归档这个会话？它会从列表消失，可在「已归档」里恢复（不删除日志）。')) return
+      try {
+        await client.setArchived({ sessionId: activeSession, archived: true })
+        activeSession = null
+        evBuf = new Map(); evOrigin = new Map(); windowStart = -1
+        $('events').innerHTML = ''
+        $('stream').hidden = true
+        if (showArchived) archivedRows = await client.getArchivedSessions()
+        const rows = await client.refreshSessions()
+        renderList(rows)
+        say('已归档（可在「🗄 已归档」里恢复）')
+      } catch (e) {
+        say(`归档失败：${e.message}`, true)
       }
     })
     $('cancel').addEventListener('click', async () => {

@@ -548,3 +548,24 @@ test('HA27 真机形态：workspaceRegistry 的 command 返回空，但服务带
   await adapters.setPinned({ sessionId: 's-1', pinned: false })
   assert.deepEqual(calls, [['pin', 's-1'], ['unpin', 's-1']])
 })
+
+test('HA28 setArchived：软移除委托 workspaceRegistry，回完整归档集合', async () => {
+  const calls = []
+  const ctx = { workspaceRegistry: {
+    archivedSessionIds: ['s-1'],
+    pinSession: async () => {}, unpinSession: async () => {},
+    archiveSession: async (id) => { calls.push(['archive', id]) },
+    unarchiveSession: async (id) => { calls.push(['restore', id]) },
+  } }
+  const adapters = createHostAdapters(ctx)
+  const on = await adapters.setArchived({ sessionId: 's-1', archived: true })
+  assert.equal(on.ok, true)
+  assert.deepEqual(on.value.archivedSessionIds, ['s-1'])
+  await adapters.setArchived({ sessionId: 's-1', archived: false })
+  assert.deepEqual(calls, [['archive', 's-1'], ['restore', 's-1']])
+
+  // 服务在、但没有归档入口 → 如实报缺，不假装成功
+  const noEntry = createHostAdapters({ sessionController: {} })
+  assert.equal((await noEntry.setArchived({ sessionId: 's-1' })).code, 'WRITER_UNAVAILABLE')
+  assert.equal((await adapters.setArchived({})).code, 'HOST_ADAPTER_ERROR')
+})

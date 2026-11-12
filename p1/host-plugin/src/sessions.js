@@ -59,6 +59,8 @@ export function createSessionIndexReporter({
   // 可选：() => string[]，宿主 workspaces 的全局置顶集合（最近置顶在前）。
   // 没有就都当未置顶——**不猜**：置顶是 PC 侧状态，猜出来的比空着更糟。
   pinnedIds = null,
+  // 可选：() => string[]，宿主已归档的会话集合（r12 软移除）
+  archivedIds = null,
   deviceId = null,
   limit = DEFAULT_LIMIT,
   maxDecodeBytes = DEFAULT_MAX_DECODE_BYTES,
@@ -135,6 +137,13 @@ export function createSessionIndexReporter({
       .sort((a, b) => (b.header.createdAt ?? 0) - (a.header.createdAt ?? 0))
       .slice(0, cap)
 
+    // 归档集合：只做标记，不在这里过滤——CP 与手机端各自决定要不要显示（软移除）
+    const archivedSet = new Set()
+    try {
+      const ids = typeof archivedIds === 'function' ? archivedIds() : null
+      if (Array.isArray(ids)) for (const id of ids) archivedSet.add(id)
+    } catch { /* 读不到就当没归档 */ }
+
     // 置顶集合：宿主口径是「最近置顶在前」，索引就按它给 pinnedOrder（0 = 最近）
     const pinIndex = new Map()
     try {
@@ -163,6 +172,7 @@ export function createSessionIndexReporter({
         // 置顶来自宿主 workspaces 的全局集合（r11）：日志里没有这份状态，问宿主要
         pinned: pinIndex.has(header.id),
         pinnedOrder: pinIndex.get(header.id) ?? 0,
+        archived: archivedSet.has(header.id),
         state: stateOf(header, unreadable),
         lastSeq: p.lastSeq,
         lastActiveAt: p.lastActiveAt ?? pick(header, 'createdAt'),

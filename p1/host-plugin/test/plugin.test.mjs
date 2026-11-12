@@ -982,7 +982,7 @@ test('下行端点用到的适配器方法都在包装层转发了（漏一个�
     // 这里的清单对应 handleDownlink 里所有 `adapters.xxx(...)` 调用。
     // 真机踩过：setPinned 加在 createHostAdapters 上却忘了转发，下行报 "not a function"。
     for (const name of [
-      'submitPrompt', 'setPinned', 'cancelTurn', 'createSession',
+      'submitPrompt', 'setPinned', 'setArchived', 'cancelTurn', 'createSession',
       'uploadAttachment', 'backfill', 'listArtifacts', 'replay',
     ]) {
       assert.equal(typeof plugin.adapters[name], 'function', `${name} 忘了在 adapters 包装层转发`)
@@ -1012,6 +1012,31 @@ test('session/pin 下行：调到 setPinned 并原样回响应（r11）', async 
     assert.equal(resp.body.ok, true)
     assert.deepEqual(resp.body.data, { pinned: true, pinnedSessionIds: ['session-9'] })
     assert.deepEqual(seen, [{ sessionId: 'session-9', pinned: true }])
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('session/archive 下行：软移除调到 setArchived 并原样回响应（r12）', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  const seen = []
+  try {
+    const plugin = apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true,
+      setArchived: async (args) => {
+        seen.push(args)
+        return { ok: true, value: { archived: true, archivedSessionIds: ['session-9'] } }
+      },
+    })
+    await waitFor(() => plugin.state.connected, '已连接')
+    relay.send({ t: 'http/request', reqId: 'r-arc', method: 'PATCH', endpoint: 'session/archive', body: { sessionId: 'session-9', archived: true } })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '回响应')
+    const resp = framesOf(relay, 'http/response')[0]
+    assert.equal(resp.status, 200)
+    assert.deepEqual(resp.body.data, { archived: true, archivedSessionIds: ['session-9'] })
+    assert.deepEqual(seen, [{ sessionId: 'session-9', archived: true }])
   } finally {
     ctx.dispose()
     await relay.stop()

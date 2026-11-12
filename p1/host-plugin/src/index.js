@@ -140,6 +140,8 @@ export function apply(ctx, config = {}) {
     submitPrompt: cfg.submitPrompt ?? hostAdapters.submitPrompt,
     // 置顶（r11）：同样要在这个包装层逐个转发，漏了下行分派就拿到 undefined
     setPinned: cfg.setPinned ?? hostAdapters.setPinned,
+    // 归档（r12）：同样要逐个转发，漏了下行就拿到 undefined
+    setArchived: cfg.setArchived ?? hostAdapters.setArchived,
     cancelTurn: cfg.cancelTurn ?? hostAdapters.cancelTurn,
     createSession: cfg.createSession ?? hostAdapters.createSession,
     // 适配器返回对象上的方法必须在包装层逐个转发，否则下行分派拿到 undefined
@@ -181,9 +183,9 @@ export function apply(ctx, config = {}) {
       ? (options) => ctx.sessionPersistence.list(options)
       : null)
 
-  // 置顶集合（r11）：问宿主 workspaces 的全局 pinnedSessionIds（最近置顶在前）。
-  // 读不到就返回空——置顶是 PC 侧状态，**猜出来的比空着更糟**。
-  const readPinnedIds = () => {
+  // 宿主 workspaceRegistry 上的集合（r11 置顶 / r12 归档）：问不到就返回空，
+  // **猜出来的比空着更糟**。主进程服务 lateBound，所以每次读都重新探。
+  const readRegistryIds = (key) => {
     try {
       const get = (name) => {
         try { return typeof ctx.get === 'function' ? ctx.get(name) : ctx[name] } catch { return null }
@@ -193,7 +195,7 @@ export function apply(ctx, config = {}) {
         if (!w) continue
         for (const holder of [w, w.model, w.list]) {
           if (!holder) continue
-          let ids = holder.pinnedSessionIds
+          let ids = holder[key]
           if (typeof ids === 'function') ids = ids()
           if (Array.isArray(ids)) return ids
         }
@@ -205,7 +207,8 @@ export function apply(ctx, config = {}) {
   const collectIndex = listSessions
     ? createSessionIndexReporter({
       listSessions,
-      pinnedIds: readPinnedIds,
+      pinnedIds: () => readRegistryIds('pinnedSessionIds'),
+      archivedIds: () => readRegistryIds('archivedSessionIds'),
       openSession,
       deviceId: cfg.deviceId,
       limit: cfg.indexLimit,
@@ -276,6 +279,12 @@ export function apply(ctx, config = {}) {
         // 置顶/取消置顶（r11）：转发给宿主 workspaces，成功后由索引刷新把新集合带下去
         const r = await adapters.setPinned({ sessionId: body?.sessionId, pinned: body?.pinned !== false })
         const { status, body: payload } = unwrap(r, { pinned: body?.pinned !== false })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/archive') {
+        // 归档/恢复（r12）：软移除，返回宿主给的完整归档集合
+        const r = await adapters.setArchived({ sessionId: body?.sessionId, archived: body?.archived !== false })
+        const { status, body: payload } = unwrap(r, { archived: body?.archived !== false })
         return send({ t: 'http/response', reqId, status, body: payload })
       }
       if (endpoint === 'session/cancel') {

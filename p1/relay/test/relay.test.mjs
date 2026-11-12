@@ -373,3 +373,48 @@ test('T13 PATCH 置顶：转发 session/pin，CP 按宿主回的全局集合刷�
   assert.equal(bad.status, 400)
   assert.equal(bad.json.error.code, 'INVALID_JSON')
 })
+
+test('T14 归档（r12）：DELETE 是软移除别名，列表默认看不到、显式查得到、可恢复', async () => {
+  const p = await pair('arc-dev')
+  await call('/host/register', { method: 'POST', body: { deviceId: 'arc-dev' } })
+  relay.cp.putSession('arc-dev', { sessionId: 'session-arc', state: 'stopped', lastSeq: 1 })
+
+  const archiveOnce = async (method, body) => {
+    const inflight = call('/api/sessions/session-arc?deviceId=arc-dev', { method, token: p.token, body })
+    await waitForQueue('arc-dev')
+    const polled = await call('/host/poll?deviceId=arc-dev')
+    const frame = polled.json.data.frames[0]
+    await call('/host/respond', {
+      method: 'POST', body: {
+        reqId: frame.reqId, status: 200,
+        body: { ok: true, data: { archived: true, archivedSessionIds: ['session-arc'] }, protocol: PROTOCOL },
+      },
+    })
+    return { r: await inflight, frame }
+  }
+
+  // PATCH { archived: true }
+  const viaPatch = await archiveOnce('PATCH', { deviceId: 'arc-dev', archived: true })
+  assert.equal(viaPatch.r.status, 200)
+  assert.equal(viaPatch.frame.endpoint, 'session/archive')
+  assert.equal(viaPatch.frame.body.archived, true)
+
+  // 默认列表不该出现，archived=true 才看得到
+  const normal = await call('/api/sessions?deviceId=arc-dev', { token: p.token })
+  assert.equal(normal.json.data.rows.some((r) => r.sessionId === 'session-arc'), false)
+  const hidden = await call('/api/sessions?deviceId=arc-dev&archived=true', { token: p.token })
+  assert.equal(hidden.json.data.rows.some((r) => r.sessionId === 'session-arc'), true)
+  assert.equal(relay.cp.getSession('session-arc').archived, true)
+
+  // DELETE = 归档别名（强制 archived=true，body 里写什么都盖掉）
+  const viaDelete = await archiveOnce('DELETE', { deviceId: 'arc-dev', archived: false })
+  assert.equal(viaDelete.r.status, 200)
+  assert.equal(viaDelete.frame.body.archived, true, 'DELETE 永远是归档，不能被 body 反转')
+
+  // 两个字段同时给：一次只做一件事
+  const both = await call('/api/sessions/session-arc?deviceId=arc-dev', {
+    method: 'PATCH', token: p.token, body: { deviceId: 'arc-dev', pinned: true, archived: true },
+  })
+  assert.equal(both.status, 400)
+  assert.equal(both.json.error.code, 'INVALID_JSON')
+})
