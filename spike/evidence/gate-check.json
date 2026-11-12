@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-12T07:31:44.790Z",
+  "capturedAt": "2026-11-12T07:56:02.804Z",
   "git": {
-    "head": "0aa9917e3bf2fe2ff1a36186113379170be48eb4",
+    "head": "24a0c164456d2c4e7282652ac0c339162acb51ec",
     "branch": "main",
     "worktreeClean": true
   },
@@ -12,25 +12,20 @@
     "dataChanged": [],
     "signoffChanged": [],
     "artifactChanged": [],
-    "narrativeChanged": [
-      "PROTOCOL.md"
-    ],
+    "narrativeChanged": [],
     "notes": [],
-    "previousCapturedAt": "2026-11-12T06:09:27.509Z",
-    "previousGitHead": "22f58eac8676a1725f9e632aba44c00ed23b40fc",
+    "previousCapturedAt": "2026-11-12T07:31:44.790Z",
+    "previousGitHead": "0aa9917e3bf2fe2ff1a36186113379170be48eb4",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "DRIFTED",
-      "previousReason": "描述文字变化（不阻断）：PROTOCOL.md",
-      "capturedAt": "2026-11-12T06:09:27.509Z",
-      "gitHead": "22f58eac8676a1725f9e632aba44c00ed23b40fc",
+      "previousStatus": "CURRENT",
+      "capturedAt": "2026-11-12T07:31:44.790Z",
+      "gitHead": "0aa9917e3bf2fe2ff1a36186113379170be48eb4",
       "dataChanged": [],
       "signoffChanged": [],
       "artifactChanged": [],
-      "narrativeChanged": [
-        "PROTOCOL.md"
-      ]
+      "narrativeChanged": []
     }
   },
   "fingerprints": {
