@@ -34,7 +34,7 @@ const topLevelNames = (source, label) => {
 
 const stripExports = (source) => source.replace(/^export\s+(?=(?:async\s+)?(?:const|let|function|class))/gm, '')
 
-const [helperReplay, helperSessions, helperHostAdapters, helperApprovals, helperArtifacts, helperMirror, helperRoutes, mainSrc] = [
+const [helperReplay, helperSessions, helperHostAdapters, helperApprovals, helperArtifacts, helperMirror, helperRoutes, helperMirrorSync, mainSrc] = [
   read('src/replay.js'), read('src/sessions.js'), read('src/host-adapters.js'),
   // approvals.js 自带 node:crypto 的 randomUUID 导入，内联前要掐掉（BANNER 已提供）
   read('src/approvals.js').replace(/^import \{ randomUUID \} from 'node:crypto'\n/m, ''),
@@ -44,6 +44,11 @@ const [helperReplay, helperSessions, helperHostAdapters, helperApprovals, helper
     .replace(/^import \{ promises as fs \} from 'node:fs'\n/m, '')
     .replace(/^import \{ join, resolve, sep \} from 'node:path'\n/m, ''),
   read('src/routes.js'),
+  // mirror-sync.js 的 fs / path / crypto 由 BANNER 提供，内联前掐掉
+  read('src/mirror-sync.js')
+    .replace(/^import \{ promises as fs \} from 'node:fs'\n/m, '')
+    .replace(/^import \{ randomUUID \} from 'node:crypto'\n/m, '')
+    .replace(/^import \{ join \} from 'node:path'\n/m, ''),
   read('src/index.js'),
 ]
 
@@ -56,6 +61,7 @@ const groups = [
   topLevelNames(helperArtifacts, 'artifacts.js'),
   topLevelNames(helperMirror, 'mirror.js'),
   topLevelNames(helperRoutes, 'routes.js'),
+  topLevelNames(helperMirrorSync, 'mirror-sync.js'),
   topLevelNames(mainSrc, 'index.js'),
 ]
 const seen = new Map()
@@ -73,7 +79,8 @@ const helpers = `// ===== 内联自 src/replay.js（重启后历史补齐，只�
 // ===== 内联自 src/approvals.js（审批瀑布 → 手机，先答先得） =====\n${stripExports(helperApprovals).trim()}
 // ===== 内联自 src/artifacts.js（产物索引，只读日志扫描） =====\n${stripExports(helperArtifacts).trim()}
 // ===== 内联自 src/mirror.js（会话镜像：电脑侧只读导出，ADR-012） =====\n${stripExports(helperMirror).trim()}
-// ===== 内联自 src/routes.js（下行端点表：协议名唯一落点） =====\n${stripExports(helperRoutes).trim()}`
+// ===== 内联自 src/routes.js（下行端点表：协议名唯一落点） =====\n${stripExports(helperRoutes).trim()}
+// ===== 内联自 src/mirror-sync.js（手机侧镜像落盘 + 注册表，ADR-012） =====\n${stripExports(helperMirrorSync).trim()}`
 
 // ---- 主模块：去掉相对导入；apply 改名 __apply（wrapper 接管配置合并） ----
 const EXPECTED_IMPORTS = [
@@ -84,6 +91,7 @@ const EXPECTED_IMPORTS = [
   /^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts\.js'$/m,
   /^import \{ listMirrorSessions, readSessionChunk \} from '\.\/mirror\.js'$/m,
   /^import \{ createRoutes, notAllowed \} from '\.\/routes\.js'$/m,
+  /^import \{ pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored \} from '\.\/mirror-sync\.js'$/m,
 ]
 for (const pattern of EXPECTED_IMPORTS) {
   if (!pattern.test(mainSrc)) throw new Error('src/index.js 的相对导入与打包器预期不一致——请同步更新本脚本')
@@ -96,6 +104,7 @@ const main = mainSrc
   .replace(/^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts\.js'\n/m, '')
   .replace(/^import \{ listMirrorSessions, readSessionChunk \} from '\.\/mirror\.js'\n/m, '')
   .replace(/^import \{ createRoutes, notAllowed \} from '\.\/routes\.js'\n/m, '')
+  .replace(/^import \{ pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored \} from '\.\/mirror-sync\.js'\n/m, '')
   .replace(/^export function apply\(/m, 'function __apply(')
 if (!main.includes('function __apply(')) throw new Error('apply 改名失败')
 
@@ -106,9 +115,9 @@ const BANNER = `/**
  * 改源码后运行 \`node p1/host-plugin/build-bundle.mjs\` 重新生成（CI 有 --check 同步校验）。
  * 外层 wrapper 负责默认配置：代码默认 ← ~/.dsh/wbsync-host.json ← WBSYNC_* 环境变量 ← apply 的 config。
  */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { promises as fs, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 `
 
@@ -153,7 +162,9 @@ export function apply(ctx, config = {}) {
     ? explicit.trim()
     : resolveStableDeviceId(fileCfg)
   return __apply(ctx, {
-    relayUrl: 'http://127.0.0.1:8787',
+    // 手机端（android）不是 host：默认不连 Relay，否则会以「一台电脑」的身份反复重连。
+    // 电脑端保持原来的默认值（本机 Relay）。
+    relayUrl: process.platform === 'android' ? '' : 'http://127.0.0.1:8787',
     hostToken: '',
     deviceName: hostname(),   // 默认就用这台机器的名字，手机端下拉才认得出是哪台
     platform: process.platform,

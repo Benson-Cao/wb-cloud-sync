@@ -4,6 +4,42 @@
 
 ---
 
+## [镜像真机验证] · 2026-11-13 03:3x · 注册表登记接通 + 修一个会毁侧栏的 bug（0.1.27）
+
+在真机上把镜像跑通：**配对 → 24 个会话 → 拉 20 个文件（5.41 MB）→ 侧栏出现「Benson」工作区**。
+工作区名用**电脑名字**（用户指定），与原生工作区并排显示，截图已存证。
+
+### 抓到一个会毁掉侧栏的 bug（真机复现，已修）
+镜像把 20 个会话全部登记进「Benson」，但其中 6 个**已经归属 dsh-nas-sync 的 wstest 工作区**。
+宿主 `workspaceRegistry` 直接判定：
+
+> `workspace domain is inconsistent: session is accounted by both workspace A and B`
+
+后果不是报错，而是 **workspaceRegistry 初始化失败 → session-controller 一直 pending → 侧栏全空**。
+修复：登记前先收集「别的工作区已占用的 sid」，命中就跳过并如实返回 `skipped` 数量。
+真机重跑：20 个里登记 14、跳过 6，注册表健康。测试 R11 复现该事故。
+
+### 现场处置
+事故后立刻用改动前留的 `workspace.json.wbsync.bak` 还原，重启确认侧栏恢复；
+验证完成后再用 `mirror-clear` 清掉镜像工作区，把手机还原成原样（4 个工作区、无冲突）。
+**这就是那条「先备份、只增不删」规矩买到的保险。**
+
+### 还差的最后一步（已定位，未做）
+会话文件在磁盘上、注册表里也有 sid，但侧栏**不列出会话**。根因指向
+`storages/session_projcache/sessions/<sid>.json` —— 该索引里的 `record.identity.cwd`
+决定会话归属哪个工作区。镜像只搬了 `sessions/`，没有搬这个索引。
+补它意味着**改写宿主缓存里的 cwd 字段**（把电脑路径换成手机侧镜像路径），这是第二次碰宿主内部结构，
+需要写进 ADR-012 再动手。
+
+### 顺带修的两个打包/配置问题
+- wrapper 默认 `relayUrl` 写死 `127.0.0.1:8787`：手机装上后**冒充一台 host 反复重连**。
+  改为按平台区分（android 默认空），手机端 `relayConfigured:false / reconnects:0`。
+- BANNER 没提供 `fs.promises`，镜像注册表一跑就 `fs is not defined`；已补。
+  另外 `build-bundle` 的 path 导入曾被我误改到脚本自身（而非 BANNER 模板），一并纠正。
+
+- 测试 347 → **353**（注册表 6 条 + 冲突 1 条）；bundle **0.1.27**。
+
+---
 ## [三件事并行] · 2026-11-13 02:5x · 端点表 / ADR-013 / 镜像落盘引擎（0.1.25）
 
 这一轮同时推进三件：**协议收口**、**为 transport 留缝**、**镜像手机侧**。

@@ -13,6 +13,7 @@
  *   用户点进去看到的是残缺历史——比"没有这个会话"更糟。
  */
 import { promises as fs } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
 /** 与宿主一致的路径编码：`C:\Users\me\p` → `--C-Users-me-p--`（非 ASCII 转 ~XXXX）。 */
@@ -111,4 +112,104 @@ export async function ensureMirrorDir(root) {
   await fs.writeFile(probe, '')
   await fs.rm(probe, { force: true })
   return root
+}
+
+/**
+ * 把镜像会话登记到宿主的侧栏注册表（`storages/workspace.json`）。
+ *
+ * 真机结构（2026-11-13 取证）：
+ *   { unit:{name:'workspace',version:2},
+ *     global:{ initialized, defaultWorkspaceId, workspaceIds:[], archivedSessionIds:[] },
+ *     tables:{ workspaces:{ [id]:{ path, title, sessionIds:[], createdAt, updatedAt } } } }
+ *
+ * 三条铁律：
+ *   1. **不重建**。文件缺失/损坏就报错返回，绝不从零写一个 —— 那会抹掉用户所有工作区。
+ *   2. **只增不删**。除了本工作区自己的 title/updatedAt，其他条目一个字节都不碰。
+ *   3. **先备份**。首次改动前留一份 `.wbsync.bak`，出问题用户还能自己换回来。
+ *
+ * `title` 用**电脑名字**：侧栏上要一眼看出这是哪台机器，而不是一个抽象的「镜像」。
+ */
+export async function upsertMirrorWorkspace({ registryPath, workspacePath, title, sids = [], now = new Date().toISOString(), makeId = randomUUID }) {
+  let raw
+  try { raw = await fs.readFile(registryPath, 'utf8') } catch (error) {
+    throw Object.assign(new Error(`读不到宿主的 workspace.json（${error?.code ?? error}）`), { code: 'REGISTRY_UNREADABLE' })
+  }
+  let reg
+  try { reg = JSON.parse(raw) } catch {
+    throw Object.assign(new Error('workspace.json 不是合法 JSON，拒绝改动'), { code: 'REGISTRY_INVALID' })
+  }
+  if (!reg || typeof reg !== 'object' || !reg.tables || typeof reg.tables !== 'object') {
+    throw Object.assign(new Error('workspace.json 结构不认识，拒绝改动'), { code: 'REGISTRY_INVALID' })
+  }
+  if (!reg.tables.workspaces || typeof reg.tables.workspaces !== 'object') reg.tables.workspaces = {}
+  if (!reg.global || typeof reg.global !== 'object') reg.global = {}
+  if (!Array.isArray(reg.global.workspaceIds)) reg.global.workspaceIds = Object.keys(reg.tables.workspaces)
+
+  const spaces = reg.tables.workspaces
+  let id = Object.keys(spaces).find((k) => spaces[k]?.path === workspacePath) ?? null
+  let created = false
+  if (!id) {
+    id = makeId()
+    spaces[id] = { path: workspacePath, title, sessionIds: [], createdAt: now, updatedAt: now }
+    reg.global.workspaceIds.push(id)
+    created = true
+  }
+
+  const entry = spaces[id]
+  if (!Array.isArray(entry.sessionIds)) entry.sessionIds = []
+  const before = entry.sessionIds.length
+
+  /*
+   * 真机踩到的坑（2026-11-13）：同一台手机上，dsh-nas-sync 已经把某些会话登记在
+   * wstest 工作区里。镜像再把这些 sid 登记到「Benson」→ 宿主的 workspaceRegistry
+   * 判定 `session is accounted by both workspace A and B` → **整个注册表初始化失败**，
+   * 侧栏全空、session-controller 一直 pending。
+   *
+   * 所以：**已经归属别的会话不能被我们抢**。跳过并如实返回，让人知道有几个没登记上。
+   */
+  const owned = new Set()
+  for (const [key, w] of Object.entries(spaces)) {
+    if (key === id) continue
+    for (const sid of Array.isArray(w?.sessionIds) ? w.sessionIds : []) owned.add(String(sid))
+  }
+  const skipped = []
+  for (const sid of sids) {
+    if (typeof sid !== 'string' || !sid) continue
+    if (owned.has(sid)) { skipped.push(sid); continue }
+    if (!entry.sessionIds.includes(sid)) entry.sessionIds.push(sid)
+  }
+  // 标题跟随电脑名：换了名字就更新，但不动其他字段
+  if (typeof title === 'string' && title && entry.title !== title) entry.title = title
+  entry.updatedAt = now
+
+  // 首次改动前留一份备份（不覆盖已有备份，保留最早的那份）
+  const bak = `${registryPath}.wbsync.bak`
+  await fs.access(bak).catch(() => fs.writeFile(bak, raw).catch(() => { /* 备份失败不阻断，但要能查 */ }))
+
+  const tmp = `${registryPath}.wbsync.tmp`
+  await fs.writeFile(tmp, JSON.stringify(reg, null, 2) + '\n')
+  await fs.rename(tmp, registryPath)
+
+  return { id, created, added: entry.sessionIds.length - before, total: entry.sessionIds.length, skipped }
+}
+
+/** 从注册表里摘掉镜像工作区（清理时用；同样只动自己那一条）。 */
+export async function removeMirrorWorkspace({ registryPath, workspacePath }) {
+  let reg
+  try { reg = JSON.parse(await fs.readFile(registryPath, 'utf8')) } catch {
+    return { removed: false, reason: 'REGISTRY_UNREADABLE' }
+  }
+  const spaces = reg?.tables?.workspaces
+  if (!spaces || typeof spaces !== 'object') return { removed: false, reason: 'NO_WORKSPACES' }
+  const id = Object.keys(spaces).find((k) => spaces[k]?.path === workspacePath)
+  if (!id) return { removed: false, reason: 'NOT_FOUND' }
+  const sids = Array.isArray(spaces[id].sessionIds) ? [...spaces[id].sessionIds] : []
+  delete spaces[id]
+  if (Array.isArray(reg?.global?.workspaceIds)) {
+    reg.global.workspaceIds = reg.global.workspaceIds.filter((x) => x !== id)
+  }
+  const tmp = `${registryPath}.wbsync.tmp`
+  await fs.writeFile(tmp, JSON.stringify(reg, null, 2) + '\n')
+  await fs.rename(tmp, registryPath)
+  return { removed: true, id, sids }
 }

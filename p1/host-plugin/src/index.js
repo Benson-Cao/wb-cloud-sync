@@ -28,6 +28,7 @@ import { createApprovalBridge } from './approvals.js'
 import { createArtifactIndex, createArtifactExporter } from './artifacts.js'
 import { listMirrorSessions, readSessionChunk } from './mirror.js'
 import { createRoutes, notAllowed } from './routes.js'
+import { pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored } from './mirror-sync.js'
 
 export const name = 'wbsync-host-dev'
 export const inject = ['webServer', 'sessionPersistence']
@@ -47,6 +48,22 @@ const DEFAULTS = {
   caps: ['attachments', 'artifacts', 'schedule', 'approval'],
   artifactMaxBytes: 512 * 1024,   // ADR-011：WS 帧 1 MiB - base64 膨胀后的安全上限
 }
+
+/** 读 JSON 请求体：超限直接拒，不做流式处理（这些路由只收小对象）。 */
+const readJson = (req, maxBytes = 256 * 1024) => new Promise((resolve, reject) => {
+  const chunks = []
+  let size = 0
+  req.on('data', (chunk) => {
+    size += chunk.length
+    if (size > maxBytes) { reject(new Error('请求体过大')); try { req.destroy() } catch { /* 忽略 */ } return }
+    chunks.push(chunk)
+  })
+  req.on('end', () => {
+    try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')) }
+    catch (error) { reject(error) }
+  })
+  req.on('error', (error) => reject(error))
+})
 
 const json = (res, status, payload) => {
   const body = JSON.stringify(payload)
@@ -560,6 +577,118 @@ export function apply(ctx, config = {}) {
         }
       },
     }))
+    /**
+     * 镜像同步（ADR-012）：客户端在同一个 web 页面里调这条同源路由，
+     * 由**宿主**去拉远端、写本地文件、登记侧栏。
+     *
+     * 为什么必须走宿主：WebView 里的 JS 没有文件系统权限，
+     * 而镜像的最后一步是「把字节写进本机会话目录 + 改 workspace.json」。
+     *
+     * 安全：这条路由在本机回环上，任何人都能 POST。所以要求 body 带 Relay 令牌
+     * （配对得到的 deviceToken）——它既是访问电脑的凭据，也证明调用方是已配对的客户端。
+     * 路由本身**不接受任意路径**：目标工作区由 hostName 推导，不接受客户端指定。
+     */
+    disposers.push(ctx.webServer.register({
+      kind: 'exact',
+      path: '/__wbsync/mirror-sync',
+      handler: async (req, res) => {
+        if ((req.method ?? 'GET') !== 'POST') {
+          return json(res, 405, errBody('ENDPOINT_NOT_ALLOWED', '仅支持 POST'))
+        }
+        let body
+        try { body = await readJson(req, 256 * 1024) } catch (error) {
+          return json(res, 400, errBody('INVALID_JSON', error?.message ?? '请求体不是 JSON'))
+        }
+        const relayUrl = String(body?.relayUrl ?? '').replace(/\/+$/, '')
+        const hostDeviceId = String(body?.hostDeviceId ?? '')
+        const token = String(body?.token ?? '')
+        const hostName = String(body?.hostName ?? '').trim() || '我的电脑'
+        if (!relayUrl || !hostDeviceId || !token) {
+          return json(res, 400, errBody('INVALID_ARGUMENT', '需要 relayUrl / hostDeviceId / token'))
+        }
+
+        const post = async (endpoint, payload) => {
+          const r = await fetch(`${relayUrl}/d/${encodeURIComponent(hostDeviceId)}/${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify(payload),
+          })
+          const out = await r.json().catch(() => null)
+          if (out?.ok !== true) {
+            throw Object.assign(new Error(out?.error?.message ?? `HTTP ${r.status}`), { code: out?.error?.code ?? `HTTP_${r.status}` })
+          }
+          return out.data
+        }
+
+        const base = join(homedir(), '.dsh')
+        const workspacePath = join(base, 'mirror', hostName.replace(/[\\/:*?"<>|]/g, '_'))
+        const sessionsRoot = join(base, 'sessions')
+        try {
+          await mkdirSync(workspacePath, { recursive: true })
+          const list = await post('session/mirror-list', {})
+          const rows = Array.isArray(list?.rows) ? list.rows : []
+          const cap = Math.max(1, Number(cfg.mirrorMaxSessions) || 20)
+          const picked = rows.slice(0, cap)
+
+          let files = 0
+          let bytes = 0
+          for (const row of picked) {
+            for (const f of row.files ?? []) {
+              const out = await pullSessionFile({
+                sessionsRoot, cwdPath: workspacePath, sid: row.sid, name: f.name,
+                fetchChunk: ({ offset, maxBytes }) => post('session/mirror-file', {
+                  sid: `${row.dir}/${row.sid}`, name: f.name, offset, maxBytes,
+                }),
+              })
+              files++
+              bytes += out.bytes
+              if (bytes > (Number(cfg.mirrorMaxTotalBytes) || 64 * 1024 * 1024)) {
+                throw Object.assign(new Error('单次镜像超过总量上限'), { code: 'MIRROR_TOO_LARGE' })
+              }
+            }
+          }
+
+          const reg = await upsertMirrorWorkspace({
+            registryPath: join(base, 'storages', 'workspace.json'),
+            workspacePath, title: hostName,
+            sids: picked.map((r) => r.sid),
+          })
+          return json(res, 200, okBody({
+            workspaceId: reg.id, workspaceTitle: hostName, created: reg.created,
+            sessions: picked.length, truncated: rows.length > picked.length,
+            files, bytes, totalInWorkspace: reg.total,
+            skipped: Array.isArray(reg.skipped) ? reg.skipped.length : 0,
+          }))
+        } catch (error) {
+          return json(res, 409, errBody(error?.code ?? 'MIRROR_FAILED', `镜像失败：${error?.message ?? error}`, true))
+        }
+      },
+    }))
+
+    disposers.push(ctx.webServer.register({
+      kind: 'exact',
+      path: '/__wbsync/mirror-clear',
+      handler: async (req, res) => {
+        if ((req.method ?? 'GET') !== 'POST') {
+          return json(res, 405, errBody('ENDPOINT_NOT_ALLOWED', '仅支持 POST'))
+        }
+        let body
+        try { body = await readJson(req, 256 * 1024) } catch {
+          return json(res, 400, errBody('INVALID_JSON', '请求体不是 JSON'))
+        }
+        const hostName = String(body?.hostName ?? '').trim() || '我的电脑'
+        const base = join(homedir(), '.dsh')
+        const workspacePath = join(base, 'mirror', hostName.replace(/[\\/:*?"<>|]/g, '_'))
+        try {
+          const reg = await removeMirrorWorkspace({ registryPath: join(base, 'storages', 'workspace.json'), workspacePath })
+          const dir = await clearMirrored({ sessionsRoot: join(base, 'sessions'), cwdPath: workspacePath })
+          return json(res, 200, okBody({ registry: reg.removed, files: dir.removed, workspaceTitle: hostName }))
+        } catch (error) {
+          return json(res, 409, errBody('MIRROR_FAILED', `清理失败：${error?.message ?? error}`, true))
+        }
+      },
+    }))
+
     return disposers
   }
 

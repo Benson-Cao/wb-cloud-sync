@@ -467,10 +467,11 @@ test('卸载即撤回：路由注销、监听移除、不再上行也不再重�
       reconnectBaseMs: 40, reconnectMaxMs: 80,
     })
     await waitFor(() => plugin.state.connected, '已连接')
-    assert.deepEqual(ctx.calls.registered.sort(), ['/__wbsync/pair', '/__wbsync/status'])
+    // 四条本地路由：状态 / 配对码 / 镜像同步 / 镜像清理（ADR-012）
+    assert.deepEqual(ctx.calls.registered.sort(), ['/__wbsync/mirror-clear', '/__wbsync/mirror-sync', '/__wbsync/pair', '/__wbsync/status'])
 
     ctx.dispose()
-    assert.deepEqual(ctx.calls.unregistered.sort(), ['/__wbsync/pair', '/__wbsync/status'])
+    assert.deepEqual(ctx.calls.unregistered.sort(), ['/__wbsync/mirror-clear', '/__wbsync/mirror-sync', '/__wbsync/pair', '/__wbsync/status'])
     assert.equal(ctx.listenerCount('session/event'), 0)
     assert.equal(ctx.routes.size, 0)
     assert.equal(plugin.state.connected, false)
