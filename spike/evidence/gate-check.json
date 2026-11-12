@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-12T15:06:45.125Z",
+  "capturedAt": "2026-11-12T15:45:47.920Z",
   "git": {
-    "head": "4d7b35859a970e3739822e8f25ea0426b58def39",
+    "head": "100a0e789dd0636c168eed55ee880a99ae759b0f",
     "branch": "main",
     "worktreeClean": false
   },
@@ -14,13 +14,13 @@
     "artifactChanged": [],
     "narrativeChanged": [],
     "notes": [],
-    "previousCapturedAt": "2026-11-12T15:06:41.624Z",
+    "previousCapturedAt": "2026-11-12T15:06:45.125Z",
     "previousGitHead": "4d7b35859a970e3739822e8f25ea0426b58def39",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-12T15:06:41.624Z",
+      "capturedAt": "2026-11-12T15:06:45.125Z",
       "gitHead": "4d7b35859a970e3739822e8f25ea0426b58def39",
       "dataChanged": [],
       "signoffChanged": [],
@@ -58,7 +58,7 @@
     }
   },
   "secretScan": {
-    "filesScanned": 122,
+    "filesScanned": 125,
     "patterns": [
       "github-classic",
       "github-fine-grained",
@@ -99,7 +99,7 @@
     "chaosFail": 0,
     "chaosError": null,
     "perfVerdict": "PASS",
-    "perfAgeDays": 2,
+    "perfAgeDays": 2.1,
     "perfReason": null
   },
   "automated": [

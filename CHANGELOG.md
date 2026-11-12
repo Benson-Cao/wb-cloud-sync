@@ -4,6 +4,43 @@
 
 ---
 
+## [形态] · 2026-11-12 23:5x · 手机端集成可行性 Spike（前端半边，0.1.21）
+
+用户确认手机端 DSH 是 **WebView 套壳**，所以「集成」的落点是它加载的 web 页面，不是原生 UI。
+宿主支持前端半边插件（`dsh.client` + `./client` 导出 + `window.__ModuleLoader__`），
+`dsh-nas-sync` 已验证这条路。于是写了最小 spike 去量真机。
+
+### 三条硬约束（全是踩出来的，已固化成测试）
+1. 声明 `dsh.client` 就必须在 `exports` 暴露 `"./client"` —— 缺这条**DSH 直接启动失败**
+   （`DesktopHostFatalError: 1 required plugin did not activate`），不是静默降级。
+2. `client.js` 的模块 `id` 必须等于包名，否则 `duplicate factory registration`，插件不激活。
+3. UI 插件必须是 **bundle**（有 `cordis.patch.yml`）并登记进 `dsh.profile.bundles`；
+   只加 `dependencies` 时页面清单里根本不会出现 `client.js`。
+
+### 槽位判断（读宿主 slot 契约表，不靠猜）
+- `sidebar.brand.name`：single + `replaceRisk: shadows-shipped-ui` → 会顶掉官方品牌名，**不采用**。
+- `sidebar.workspaces`：single 且已被 `ui-workspace` 占用（declaring is claiming）→
+  在那里做「真切换」= 重写整个浏览区（搜索/分组/右键/对话框）。**代价过高**。
+- 采用 `sidebar.footer.action`（追加型）+ `sidebar.panellist` + `main`（nas-sync 已验证）。
+
+### 真机实测（Android 360×740, dpr 3.5）
+```
+panel-icon  = 16×16 @ x=-260
+device-pill = 56×17 @ x=-272
+```
+- 尺寸够（56×17、11px 字，不比原生控件大）；
+- **但都在视口外**：手机是抽屉式侧栏，关闭时 x 为负 → 切换器**要多一步拉抽屉**。
+- 页面启动清单已含 `dsh-wbsync-spike/client.js`，证明前端半边真被加载。
+
+### 结论
+技术上可行且不用改 App；切换器放 `sidebar.footer.action`；先做 panel 式，
+「同一列表换数据源」的真切换成本过高，留待有明确收益再评估。
+手机端 spike 包留在 `files/home/node_modules/dsh-wbsync-spike/`，
+profile 备份在 `files/home/.dsh/profiles/web/package.json.bak-wbsync`，可按报告回滚。
+
+- 测试 328 → **329**（新增前端半边声明自洽断言）；bundle **0.1.21**；报告见 `docs/11_手机端集成_Spike报告.md`。
+
+---
 ## [P1 W8 · 续] · 2026-11-12 22:5x · Office→PDF 走同一张票（协议 r14，ADR-011 修订，0.1.20）
 
 上一轮我写过一句「宿主没有 PDF/DOCX 转换能力（asar 里 `exportPdf/exportDocx` 0 命中）」。**这句是错的**，

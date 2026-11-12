@@ -137,3 +137,23 @@ test('B3 wrapper 配置链：环境变量覆盖默认值（deviceId）', async (
   delete process.env.WBSYNC_DEVICE_ID
   ctx.dispose()
 })
+
+test('B-client 前端半边声明自洽：dsh.client 必须配 "./client" 导出与 bundle patch', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../bundle/package.json', import.meta.url), 'utf8'))
+  const hasClient = Boolean(pkg.dsh?.client)
+  assert.equal(hasClient, true, '前端半边必须声明 dsh.client')
+
+  // 缺这条会让 DSH **启动失败**（不是静默降级）：client-modules 明确的报错是
+  // "declares dsh.client but exports no './client' bundle"
+  assert.equal(pkg.exports?.['./client'], './client.js', 'dsh.client 必须有 ./client 导出')
+
+  // UI 插件要能被组合进条目图，才谈得上被扫描
+  assert.equal(pkg.dsh?.bundle?.patch, './cordis.patch.yml', 'UI 插件同时要是 bundle')
+  assert.ok((pkg.files ?? []).includes('client.js'), 'client.js 必须进 files，否则打包丢失')
+
+  // id 必须等于包名，否则报 duplicate factory registration 且插件不激活
+  const client = readFileSync(new URL('../bundle/client.js', import.meta.url), 'utf8')
+  assert.ok(client.includes("id: '" + pkg.name + "'"),
+    'client.js 的模块 id 必须等于包名')
+  assert.match(client, /window\.__ModuleLoader__\.load\(/, 'client.js 必须是自注册的浏览器模块')
+})

@@ -1,14 +1,16 @@
 {
   "name": "dsh-wb-cloud-sync-host",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "WB-Cloud-Sync P1 W3 host plugin bundle — uplink session events, downlink prompt/cancel/create/replay dispatch, session index reporting. Pairs with p1/relay.",
   "type": "module",
   "main": "index.js",
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./client": "./client.js"
   },
   "files": [
     "index.js",
+    "client.js",
     "cordis.patch.yml",
     "README.md"
   ],
@@ -25,6 +27,13 @@
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
     }
   }
 }

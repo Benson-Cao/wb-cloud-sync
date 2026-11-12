@@ -162,4 +162,13 @@ if (checkOnly) {
 } else {
   writeFileSync(join(here, 'bundle/index.js'), out)
   console.log(`bundle/index.js 已生成（${out.length} 字节，单文件自包含）`)
+  // 前端半边：客户端模块由宿主按 dsh.client 声明加载，不经 bundle 内联，
+  // 所以原样拷贝（它靠 window.__ModuleLoader__ 自注册）。
+  const clientSrc = join(here, 'client.js')
+  try {
+    writeFileSync(join(here, 'bundle/client.js'), read('client.js'))
+    console.log(`bundle/client.js 已同步（${clientSrc}）`)
+  } catch {
+    console.log('没有 client.js，跳过前端半边')
+  }
 }
