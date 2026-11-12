@@ -157,3 +157,27 @@ test('B-client 前端半边声明自洽：dsh.client 必须配 "./client" 导出
     'client.js 的模块 id 必须等于包名')
   assert.match(client, /window\.__ModuleLoader__\.load\(/, 'client.js 必须是自注册的浏览器模块')
 })
+
+test('B-client2 面板走真数据：真配对、真会话接口，不许再放样例行', () => {
+  const client = readFileSync(new URL('../bundle/client.js', import.meta.url), 'utf8')
+
+  // 配对必须两步：/pair 拿 challenge → HMAC 后 /pair/verify 换令牌
+  assert.match(client, /'\/pair'/, '要走 /pair 拿 challenge')
+  assert.match(client, /'\/pair\/verify'/, '要走 /pair/verify 换令牌')
+  assert.match(client, /importKey\('raw'/, '配对签名用 WebCrypto HMAC')
+  assert.match(client, /sign\('HMAC'/, '配对签名用 WebCrypto HMAC')
+
+  // 会话列表来自 Relay，不是本地编的
+  assert.match(client, /\/api\/sessions\?deviceId=/, '会话列表要打 Relay 的 /api/sessions')
+  // host（在线/名字）在响应**顶层**，不在每行；读错层会得到 undefined 且界面永远显示离线
+  assert.match(client, /data\?\.host/, '要读响应顶层的 host')
+  assert.ok(!client.includes('rows[0].host'), '不许从行里读 host')
+
+  // 令牌失效要能自愈：清链并提示重配，而不是一直转圈
+  assert.match(client, /HTTP_401|UNAUTHORIZED/, '要处理令牌失效')
+  assert.match(client, /writeLink\(null\)/, '失效时清掉链接')
+
+  // 样例数据不许回来（曾经为了量尺寸放过假行）
+  assert.equal(client.includes('季度报告整理'), false, '不许留样例会话名')
+  assert.equal(client.includes('半导体调研'), false, '不许留样例会话名')
+})

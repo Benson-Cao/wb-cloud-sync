@@ -273,8 +273,25 @@ $('refresh').onclick = load
 load()
 </script></body></html>`
 
-const reply = (res, status, payload, extraHeaders = {}) => {
-  const body = JSON.stringify(payload)
+/**
+ * 跨域（W10 前置）：独立 PWA 由 Relay 同源托管，从来不需要 CORS；嵌进 DSH 手机端后，
+ * 页面来自 WebView 的 `http://127.0.0.1:<port>`，Relay 在另一台机器 → 必然跨域。
+ *
+ * 只回显**本机源**与显式配置的来源，绝不 `*`：CORS 一旦放开到任意站点，
+ * 任何网页都能拿用户浏览器里的令牌去打 Relay（令牌仍要 Authorization，
+ * 但把「谁能发起请求」也交出去等于白送一半攻击面）。
+ */
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
+const isAllowedOrigin = (origin, cfg) => {
+  const extra = Array.isArray(cfg?.corsOrigins) ? cfg.corsOrigins : []
+  if (extra.includes(origin)) return true
+  try {
+    const u = new URL(origin)
+    return (u.protocol === 'http:' || u.protocol === 'https:') && LOOPBACK_HOSTS.has(u.hostname)
+  } catch { return false }
+}
+
+const reply = (res, status, payload, extraHeaders = {}) => {  const body = JSON.stringify(payload)
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
@@ -563,6 +580,23 @@ export function createRelay(options = {}) {
     const path = url.pathname
     const method = req.method ?? 'GET'
     const ip = req.socket?.remoteAddress ?? 'unknown'
+
+    // 预检与跨域头：写在分流之前，所有响应（含文件流）都带上
+    const origin = req.headers.origin
+    if (origin && isAllowedOrigin(origin, cfg)) {
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Vary', 'Origin')
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Protocol-Version')
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+      res.setHeader('Access-Control-Allow-Credentials', 'true')
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition')
+      res.setHeader('Access-Control-Max-Age', '600')
+    }
+    if (method === 'OPTIONS') {
+      // 未获准的 Origin 也回 204 但不给 ACAO：浏览器会自己拦下来
+      res.writeHead(204)
+      return res.end()
+    }
 
     try {
       if (method === 'GET' && path === '/health') {

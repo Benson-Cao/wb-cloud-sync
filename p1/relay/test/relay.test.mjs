@@ -577,3 +577,38 @@ test('T17 转 PDF 也走同一张票：format 透传 Host，convertedFrom 回手
   assert.equal(bad.status, 400)
   assert.equal(bad.json.error.code, 'INVALID_ARGUMENT')
 })
+
+test('T18 跨域：只回显本机源（WebView 场景），不对任意站点开放', async () => {
+  const pre = await fetch(`http://127.0.0.1:${port}/api/sessions?deviceId=x`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'http://127.0.0.1:3080',
+      'Access-Control-Request-Method': 'GET',
+      'Access-Control-Request-Headers': 'authorization',
+    },
+  })
+  assert.equal(pre.status, 204)
+  assert.equal(pre.headers.get('access-control-allow-origin'), 'http://127.0.0.1:3080')
+  assert.match(pre.headers.get('access-control-allow-headers') ?? '', /authorization/i)
+  assert.equal(pre.headers.get('vary'), 'Origin')
+
+  // 真实请求也要带 ACAO，否则浏览器读不到响应体
+  const real = await fetch(`http://127.0.0.1:${port}/health`, {
+    headers: { Origin: 'http://localhost:5173' },
+  })
+  assert.equal(real.status, 200)
+  assert.equal(real.headers.get('access-control-allow-origin'), 'http://localhost:5173')
+
+  // 陌生站点：不发放 ACAO（浏览器侧会被拦）
+  const evil = await fetch(`http://127.0.0.1:${port}/health`, {
+    headers: { Origin: 'https://evil.example' },
+  })
+  assert.equal(evil.status, 200)
+  assert.equal(evil.headers.get('access-control-allow-origin'), null, '不能对任意站点放开')
+
+  const evilPre = await fetch(`http://127.0.0.1:${port}/api/artifacts/ticket`, {
+    method: 'OPTIONS', headers: { Origin: 'https://evil.example' },
+  })
+  assert.equal(evilPre.status, 204)
+  assert.equal(evilPre.headers.get('access-control-allow-origin'), null)
+})

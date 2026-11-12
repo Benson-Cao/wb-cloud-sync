@@ -69,3 +69,50 @@ device-pill = 56×17 @ x=-272
 - 手机端 spike 包：`files/home/node_modules/dsh-wbsync-spike/`，profile 备份在 `files/home/.dsh/profiles/web/package.json.bak-wbsync`。
 - 回滚：恢复该备份并删除 spike 目录，重启 App。
 - 排错入口：`files/home/dsh-web.log`；桌面端用 `ELECTRON_ENABLE_LOGGING=1` 启动，渲染进程 console 会转进 stderr。
+
+---
+
+## 7. 第二轮：面板接真数据（0.1.22）
+
+假数据已替换为真链路：**配对 → GET /api/sessions → 列表**。
+
+### 7.1 必须先解决的跨域
+
+独立 PWA 由 Relay 同源托管，从来不需要 CORS；嵌进 WebView 后页面来自 `http://127.0.0.1:<port>`，
+Relay 在另一台机器 → **必然跨域**。Relay 现在：
+
+- 对所有响应回显 `Access-Control-Allow-Origin`（仅本机源 `127.0.0.1` / `localhost` / `[::1]`，可加配 `corsOrigins`）；
+- 处理 `OPTIONS` 预检（204）；
+- 暴露 `Content-Disposition`（下载票要用）。
+
+**不放开 `*`**：CORS 决定「谁能发起请求」，放开它等于白送一半攻击面（令牌仍需 Authorization）。
+
+### 7.2 一个层级错误
+
+relay 的 `GET /api/sessions` 把 `host`（`{deviceId,name,platform,online,lastSeenAt}`）放在**响应顶层**，
+不是每行一份。第一版面板从 `rows[0].host` 读，结果 `undefined`，界面永远显示「离线」且不报错。
+已修并加断言。
+
+### 7.3 已做的验证
+
+| 项 | 结果 |
+|---|---|
+| 配对链路 | 生成码 → `/pair` → HMAC → `/pair/verify` 拿到令牌 ✓ |
+| 会话接口 | `GET /api/sessions` 200，**24 行** ✓ |
+| 模块加载 | 桌面页面启动清单含 `dsh-wb-cloud-sync-host/client.js` ✓ |
+| 启动告警 | 无（`ELECTRON_ENABLE_LOGGING=1` 下 stderr 干净） |
+
+### 7.4 未做：手机端点击级验证
+
+当时手机 `192.168.0.100` ping 不通、无线调试端口也变了，无法驱动 WebView。复验步骤：
+
+1. `adb connect <手机>:<端口>`；`adb shell am force-stop com.dsh.harness && am start -n com.dsh.harness/.MainActivity`
+2. 把 `client.js`（模块 id 改成手机包的包名）推到手机插件目录；
+3. `adb shell cat /proc/net/unix | grep webview_devtools_remote` 取套接字，
+   `adb forward tcp:9222 localabstract:<套接字>`，用 CDP 读 DOM / 截图；
+4. 面板里填 Relay 地址（电脑局域网 IP:8787）与配对码，确认列表出现真实会话。
+
+### 7.5 仍未实现的（下一刀）
+
+- 会话内视图：事件流、发消息、审批作答、产物下载 —— 需要 `session/follow` + `session/prompt` 的客户端实现。
+- 跨设备「直读」时的写权限边界：手机发消息仍必须走 `session/prompt` 交给电脑唯一写者。
