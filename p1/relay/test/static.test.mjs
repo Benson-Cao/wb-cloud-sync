@@ -214,5 +214,11 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /id="archive"/, '会话里要有归档按钮')
   assert.match(page, /client\.getArchivedSessions/, '归档列表单独拉，不覆盖主列表缓存')
   assert.match(page, /client\.setArchived\(\{ sessionId, archived: false \}\)/, '恢复走 archived=false，不真删')
+
+  // 状态点六态（W7）：瞬时连接态 + 宿主事实，两半合起来才完整
+  assert.match(page, /DOT_OF = \{ online: '●', connecting: '◌'/, '六态里必须有连接中/重连中/失败')
+  assert.match(page, /const syncProfileLive = /, '瞬时态从 follows 状态机推导')
+  assert.match(page, /activeProfile\.online === false\) \{\n?\s*live = 'offline'/, '宿主 offline 优先于瞬时态')
+  assert.match(page, /meta0\?\.title/, '事件流标题用会话名，不用裸 UUID')
   assert.match(page, /\$\('save'\)\.disabled = true/, '配对期间按钮要置灰，否则用户会以为没反应再点一次')
 })

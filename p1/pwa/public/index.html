@@ -219,8 +219,17 @@
       saveProfiles()
       renderProfiles()
     }
-    /** 状态点：● 在线 / ○ 离线 / ? 还没探过（别把「不知道」画成「离线」）。 */
-    const dotOf = (p) => (p.online === true ? '●' : p.online === false ? '○' : '?')
+    /**
+     * 状态点六态（W7）：● 在线 / ◌ 连接中·重连中 / ✕ 失败 / ○ 离线 / ? 未探。
+     * `live` 是**瞬时连接态**（来自客户端 follows 的状态机），`online` 是宿主侧事实
+     * （来自 sessions 响应的 host.online）。两者不一致时，瞬时态优先——
+     * 用户关心的是「现在能不能用」，不是「最后一次探测说了什么」。
+     */
+    const DOT_OF = { online: '●', connecting: '◌', reconnecting: '◌', failed: '✕', offline: '○' }
+    const LIVE_LABEL = { online: '在线', connecting: '连接中', reconnecting: '重连中', failed: '失败', offline: '离线' }
+    const dotOf = (p) => (p.live && DOT_OF[p.live]) || (p.online === true ? '●' : p.online === false ? '○' : '?')
+    const liveLabel = (p) => (p.live && LIVE_LABEL[p.live])
+      || (p.online === true ? '在线' : p.online === false ? '离线' : '未探')
     const renderProfiles = () => {
       const sel = $('profile')
       sel.innerHTML = ''
@@ -238,6 +247,7 @@
         opt.value = p.hostDeviceId
         // 名字优先用电脑自报的名字，没有就退化到地址——地址一定认得出来
         opt.textContent = `${dotOf(p)} ${p.label || p.base.replace(/^https?:\/\//, '')}`
+        opt.title = liveLabel(p)      // 悬停/长按能看懂点号是什么意思
         sel.appendChild(opt)
       }
       if (activeProfile) sel.value = activeProfile.hostDeviceId
@@ -620,6 +630,7 @@
         },
         onStateChange: (snap) => {
           $('conn').textContent = connState(snap)
+          syncProfileLive(snap)
           // 重连回来补拉审批：断线期间 Host 可能发过审批，那时的推送已经丢了
           const following = Boolean(snap?.follows?.some((f) => f.status === 'following'))
           if (following && !approvalsPulled) { approvalsPulled = true; void refreshApprovals() }
@@ -654,6 +665,31 @@
       renderProfiles()
     }
 
+    /**
+     * 状态点六态的「瞬时」半边：从客户端 follows 的状态机推导
+     * online / connecting / reconnecting / failed；宿主侧 offline 优先
+     * （电脑都不在了，界面再说「连接中」就是在骗人）。
+     */
+    const syncProfileLive = (snap) => {
+      if (!activeProfile) return
+      let live = null
+      if (activeProfile.online === false) {
+        live = 'offline'
+      } else {
+        const follows = snap?.follows ?? []
+        const st = follows.map((f) => f.status)
+        if (st.includes('following')) live = 'online'
+        else if (st.includes('gap') || st.includes('refill-failed')) live = 'failed'
+        else if (follows.length) {
+          live = follows.some((f) => (f.attempts ?? 0) > 0) ? 'reconnecting' : 'connecting'
+        }
+      }
+      if (live !== activeProfile.live) {
+        activeProfile.live = live
+        renderProfiles()
+      }
+    }
+
     /** 切到另一台电脑：断开旧的订阅，按新档案重连。 */
     const switchProfile = (hostDeviceId) => {
       const next = profiles.find((p) => p.hostDeviceId === hostDeviceId)
@@ -661,6 +697,7 @@
       saveScroll()                       // 先记住旧会话读到哪
       client?.stop()
       client = null
+      if (activeProfile) activeProfile.live = null   // 旧档案不再有实时连接，状态点回「未探」
       activeProfile = next
       saveProfiles()
       renderProfiles()
@@ -872,7 +909,10 @@
       fold = { type: null, from: 0, to: 0, count: 0, div: null, pre: null }
       $('events').innerHTML = ''
       $('stream').hidden = false
-      $('streamTitle').textContent = `事件流 · ${sessionId}`
+      // 标题用会话名，不用裸 UUID——uuid 是给机器对账的，不是给人看的
+      const meta0 = client.getSession?.(sessionId) ?? null
+      $('streamTitle').textContent =
+        `事件流 · ${meta0?.title || workspaceName(meta0?.workspace) || shortId(sessionId)}`
       for (const el of document.querySelectorAll('.row')) el.classList.remove('active')
 
       // 首屏窗口交给 Host 按**字节预算**裁（最近一页），不再由客户端数 50 条：
