@@ -27,6 +27,7 @@ import { createHostAdapters, resolveService } from './host-adapters.js'
 import { createApprovalBridge } from './approvals.js'
 import { createArtifactIndex, createArtifactExporter } from './artifacts.js'
 import { listMirrorSessions, readSessionChunk } from './mirror.js'
+import { createRoutes, notAllowed } from './routes.js'
 
 export const name = 'wbsync-host-dev'
 export const inject = ['webServer', 'sessionPersistence']
@@ -405,135 +406,17 @@ export function apply(ctx, config = {}) {
     else state.dropped++
   }
 
+  // 协议名 → 处理逻辑，唯一落点（见 routes.js 顶部说明）
+  const routes = createRoutes({ adapters, approvals, unwrap, errBody, protocol: PROTOCOL })
+
   const handleDownlink = async (frame) => {
     state.downlinks++
     const { reqId, endpoint, body } = frame
     if (!reqId) return
     try {
-      if (endpoint === 'session/prompt') {
-        const r = await adapters.submitPrompt({
-          sessionId: body?.sessionId, text: body?.text, clientMsgId: body?.clientMsgId,
-          // 无附件时不带该字段，保持适配器收到的参数形状与旧版一致
-          ...(body?.attachments === undefined ? {} : { attachments: body.attachments }),
-        })
-        const { status, body: payload } = unwrap(r, { accepted: true })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/pin') {
-        // 置顶/取消置顶（r11）：转发给宿主 workspaces，成功后由索引刷新把新集合带下去
-        const r = await adapters.setPinned({ sessionId: body?.sessionId, pinned: body?.pinned !== false })
-        const { status, body: payload } = unwrap(r, { pinned: body?.pinned !== false })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/schedule-list') {
-        const r = await adapters.listSchedules({ limit: body?.limit, offset: body?.offset })
-        const { status, body: payload } = unwrap(r, { rows: [] })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/schedule-create') {
-        const r = await adapters.createSchedule({ title: body?.title, prompt: body?.prompt, afterSeconds: body?.afterSeconds, target: body?.target })
-        const { status, body: payload } = unwrap(r, {})
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/schedule-run') {
-        const r = await adapters.runSchedule({ id: body?.id })
-        const { status, body: payload } = unwrap(r, {})
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/rename') {
-        const r = await adapters.renameSession({ sessionId: body?.sessionId, title: body?.title })
-        const { status, body: payload } = unwrap(r, {})
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/artifact-ticket') {
-        // ADR-011：显式产物导出。校验在 Host，票据在 Relay；这里只回元数据 + 内存中转的字节
-        const r = await adapters.createArtifactTicket({ sessionId: body?.sessionId, relPath: body?.path, format: body?.format })
-        const { status, body: payload } = unwrap(r, {})
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/archive') {
-        // 归档/恢复（r12）：软移除，返回宿主给的完整归档集合
-        const r = await adapters.setArchived({ sessionId: body?.sessionId, archived: body?.archived !== false })
-        const { status, body: payload } = unwrap(r, { archived: body?.archived !== false })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/cancel') {
-        const r = await adapters.cancelTurn({ sessionId: body?.sessionId })
-        const { status, body: payload } = unwrap(r, { cancelled: true })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/create') {
-        const r = await adapters.createSession({
-          text: body?.text ?? '', cwd: body?.cwd ?? null, clientId: body?.clientId ?? null,
-        })
-        const { status, body: payload } = unwrap(r, { created: true })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/mirror-list') {
-        const r = await adapters.mirrorList()
-        const { status, body: payload } = unwrap(r, { rows: [] })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/mirror-file') {
-        // 一次一块：offset/limit 由手机决定，Host 只保证「不越界、不超上限」
-        const r = await adapters.mirrorFile({
-          sid: body?.sid, name: body?.name, offset: body?.offset, maxBytes: body?.maxBytes,
-        })
-        const { status, body: payload } = unwrap(r, { sid: body?.sid ?? null, bytes: '', eof: true })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/follow') {
-        const r = await adapters.replay({ sessionId: body?.sessionId, sinceSeq: body?.sinceSeq })
-        const { status, body: payload } = unwrap(r, { events: [] })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'fileUploads/upload') {
-        const r = await adapters.uploadAttachment({
-          sessionId: body?.sessionId, data: body?.data, name: body?.name,
-        })
-        const { status, body: payload } = unwrap(r, { receiptId: null })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/backfill') {
-        const r = await adapters.backfill({
-          sessionId: body?.sessionId, beforeSeq: body?.beforeSeq, limit: body?.limit,
-          // 首屏窗口可以要得比一页大；适配器会把上限锁在 4× 页预算。
-          // 只在客户端显式给时带上，避免把 bytes: undefined 透给适配器（参数形状保持旧样）。
-          ...(body?.bytes === undefined ? {} : { bytes: body.bytes }),
-        })
-        const { status, body: payload } = unwrap(r, {
-          sessionId: body?.sessionId ?? null, events: [], hasMoreEarlier: false,
-        })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === 'session/artifacts') {
-        // 只回元数据（路径 / 描述 / seq），文件字节绝不经过 Relay（ADR-010）
-        const r = await adapters.listArtifacts({ sessionId: body?.sessionId })
-        const { status, body: payload } = unwrap(r, {
-          sessionId: body?.sessionId ?? null, rows: [], count: 0, truncated: true,
-        })
-        return send({ t: 'http/response', reqId, status, body: payload })
-      }
-      if (endpoint === '$events/result') {
-        // 手机点了「允许 / 拒绝」：先答先得，第二个人点会被这里挡掉（409 APPROVAL_GONE）
-        const r = approvals.answer({ approvalId: body?.approvalId, outcome: body?.outcome })
-        if (!r.ok) {
-          const status = r.code === 'INVALID_OUTCOME' ? 400 : 409
-          const code = r.code === 'INVALID_OUTCOME' ? 'INVALID_JSON' : 'APPROVAL_GONE'
-          const msg = r.code === 'INVALID_OUTCOME'
-            ? 'outcome 必须是 allowed-once / rejected / cancelled'
-            : '该审批已被应答或已过期'
-          return send({ t: 'http/response', reqId, status, body: errBody(code, msg, r.code === 'APPROVAL_GONE') })
-        }
-        return send({
-          t: 'http/response', reqId, status: 200,
-          body: { ok: true, data: { approvalId: body?.approvalId, outcome: r.outcome }, protocol: PROTOCOL },
-        })
-      }
-      return send({
-        t: 'http/response', reqId, status: 403,
-        body: errBody('ENDPOINT_NOT_ALLOWED', `端点不在白名单：${endpoint}`),
-      })
+      const route = routes[endpoint]
+      const result = route ? await route(body) : notAllowed(endpoint, errBody)
+      return send({ t: 'http/response', reqId, status: result.status, body: result.body })
     } catch (error) {
       return send({
         t: 'http/response', reqId, status: 500,

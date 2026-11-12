@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-12T18:30:33.998Z",
+  "capturedAt": "2026-11-12T18:50:29.809Z",
   "git": {
-    "head": "7fcf4edb473ff4d781dd830e62869b7ff0186df1",
+    "head": "1d983b16381c05c22ed6803ec249a92cbcb60e20",
     "branch": "main",
     "worktreeClean": false
   },
@@ -14,14 +14,14 @@
     "artifactChanged": [],
     "narrativeChanged": [],
     "notes": [],
-    "previousCapturedAt": "2026-11-12T17:47:51.339Z",
-    "previousGitHead": "43e12fbc78a538847273607f23507f90e75a99d6",
+    "previousCapturedAt": "2026-11-12T18:30:33.998Z",
+    "previousGitHead": "7fcf4edb473ff4d781dd830e62869b7ff0186df1",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
       "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-12T17:47:51.339Z",
-      "gitHead": "43e12fbc78a538847273607f23507f90e75a99d6",
+      "capturedAt": "2026-11-12T18:30:33.998Z",
+      "gitHead": "7fcf4edb473ff4d781dd830e62869b7ff0186df1",
       "dataChanged": [],
       "signoffChanged": [],
       "artifactChanged": [],
@@ -58,7 +58,7 @@
     }
   },
   "secretScan": {
-    "filesScanned": 129,
+    "filesScanned": 132,
     "patterns": [
       "github-classic",
       "github-fine-grained",
