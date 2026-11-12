@@ -35,6 +35,8 @@ const DEFAULTS = {
   relayUrl: '',
   hostToken: '',
   deviceId: '',
+  deviceName: '',      // 电脑名（给手机端的电脑切换用）；空则由 bundle 用 hostname() 填
+  platform: '',        // 'win32' | 'darwin' | 'linux'
   autoConnect: true,
   reconnectBaseMs: 500,
   reconnectMaxMs: 15_000,
@@ -371,6 +373,9 @@ export function apply(ctx, config = {}) {
       state.attempts = 0
       send({
         t: 'host/register', deviceId: cfg.deviceId, protocol: PROTOCOL,
+        // 设备名只给手机端显示（切换电脑时要认得出来），不参与任何判定
+        ...(cfg.deviceName ? { deviceName: cfg.deviceName } : {}),
+        ...(cfg.platform ? { platform: cfg.platform } : {}),
         caps: cfg.caps, hostToken: cfg.hostToken,
       })
     })

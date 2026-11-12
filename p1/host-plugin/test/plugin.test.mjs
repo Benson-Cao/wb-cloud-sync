@@ -181,6 +181,8 @@ test('注册帧带上 deviceId / caps / hostToken，收到 host/registered 才�
     assert.equal(reg.protocol, PROTOCOL)
     assert.equal(reg.hostToken, 'tok-abc')
     assert.deepEqual(reg.caps, ['attachments'])
+    // 设备名与平台只给手机端显示（切换电脑时认得出是哪台），不参与判定
+    assert.equal(reg.deviceName, undefined, '没配置就别发空字段，免得 CP 里出现空名字')
 
     await waitFor(() => plugin.state.connected, 'host/registered 后置 connected')
 
@@ -949,6 +951,24 @@ test('P-BF1 session/backfill 下行分派：参数原样传给适配器，结果
     assert.equal(resp.body.data.events[0].seq, 79)
     assert.equal(resp.body.data.hasMoreEarlier, true)
     assert.deepEqual(seen, [{ sessionId: 's-bf', beforeSeq: 80, limit: 50 }])
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('配置了 deviceName / platform 时，注册帧把它们带给 Relay（手机端电脑切换用）', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  try {
+    apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-named', autoConnect: true,
+      deviceName: '工作台-PC', platform: 'win32',
+    })
+    await waitFor(() => relay.host.registers === 1, 'host/register 到达')
+    const reg = relay.host.registerFrame
+    assert.equal(reg.deviceName, '工作台-PC')
+    assert.equal(reg.platform, 'win32')
   } finally {
     ctx.dispose()
     await relay.stop()

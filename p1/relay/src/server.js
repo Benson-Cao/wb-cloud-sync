@@ -645,6 +645,10 @@ export function createRelay(options = {}) {
           state: 'online',
           lastSeenAt: now(),
           capabilities: body.caps ?? [],
+          ...(typeof body.deviceName === 'string' && body.deviceName.trim()
+            ? { deviceName: body.deviceName.trim().slice(0, 60) } : {}),
+          ...(typeof body.platform === 'string' && body.platform.trim()
+            ? { platform: body.platform.trim().slice(0, 20) } : {}),
         })
         return ok(res, { deviceId: body.deviceId, protocol: PROTOCOL })
       }
@@ -1003,6 +1007,11 @@ export function createRelay(options = {}) {
             state: 'online',
             lastSeenAt: now(),
             capabilities: msg.caps ?? [],
+            // 手机端切换电脑时要认得出来（r10 的 host.name 就取这个）
+            ...(typeof msg.deviceName === 'string' && msg.deviceName.trim()
+              ? { deviceName: msg.deviceName.trim().slice(0, 60) } : {}),
+            ...(typeof msg.platform === 'string' && msg.platform.trim()
+              ? { platform: msg.platform.trim().slice(0, 20) } : {}),
           })
           conn.sendJson({ t: 'host/registered', deviceId, protocol: PROTOCOL })
           // 时序窗口：配对 / 心跳先把 CP 标成在线，但 WS 还没注册时，bridge 会把

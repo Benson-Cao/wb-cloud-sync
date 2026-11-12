@@ -1237,6 +1237,8 @@ const DEFAULTS = {
   relayUrl: '',
   hostToken: '',
   deviceId: '',
+  deviceName: '',      // 电脑名（给手机端的电脑切换用）；空则由 bundle 用 hostname() 填
+  platform: '',        // 'win32' | 'darwin' | 'linux'
   autoConnect: true,
   reconnectBaseMs: 500,
   reconnectMaxMs: 15_000,
@@ -1573,6 +1575,9 @@ function __apply(ctx, config = {}) {
       state.attempts = 0
       send({
         t: 'host/register', deviceId: cfg.deviceId, protocol: PROTOCOL,
+        // 设备名只给手机端显示（切换电脑时要认得出来），不参与任何判定
+        ...(cfg.deviceName ? { deviceName: cfg.deviceName } : {}),
+        ...(cfg.platform ? { platform: cfg.platform } : {}),
         caps: cfg.caps, hostToken: cfg.hostToken,
       })
     })
@@ -1709,6 +1714,7 @@ const envConfig = () => Object.fromEntries(Object.entries({
   relayUrl: process.env.WBSYNC_RELAY_URL,
   deviceId: process.env.WBSYNC_DEVICE_ID,
   hostToken: process.env.WBSYNC_HOST_TOKEN,
+  deviceName: process.env.WBSYNC_DEVICE_NAME,
 }).filter(([, v]) => v !== undefined))
 
 export function apply(ctx, config = {}) {
@@ -1722,6 +1728,8 @@ export function apply(ctx, config = {}) {
   return __apply(ctx, {
     relayUrl: 'http://127.0.0.1:8787',
     hostToken: '',
+    deviceName: hostname(),   // 默认就用这台机器的名字，手机端下拉才认得出是哪台
+    platform: process.platform,
     ...fileCfg, ...env, ...config,
     deviceId,
   })

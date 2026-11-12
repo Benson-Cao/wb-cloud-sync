@@ -128,6 +128,7 @@ const envConfig = () => Object.fromEntries(Object.entries({
   relayUrl: process.env.WBSYNC_RELAY_URL,
   deviceId: process.env.WBSYNC_DEVICE_ID,
   hostToken: process.env.WBSYNC_HOST_TOKEN,
+  deviceName: process.env.WBSYNC_DEVICE_NAME,
 }).filter(([, v]) => v !== undefined))
 
 export function apply(ctx, config = {}) {
@@ -141,6 +142,8 @@ export function apply(ctx, config = {}) {
   return __apply(ctx, {
     relayUrl: 'http://127.0.0.1:8787',
     hostToken: '',
+    deviceName: hostname(),   // 默认就用这台机器的名字，手机端下拉才认得出是哪台
+    platform: process.platform,
     ...fileCfg, ...env, ...config,
     deviceId,
   })

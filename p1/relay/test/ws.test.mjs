@@ -274,3 +274,29 @@ test('W9 host/sessions diff 帧：只应用变化，不误删未提及行', asyn
     await waitClose(ws)
   }
 })
+
+test('W13 注册帧里的设备名/平台会存进 CP，并出现在手机端 sessions 的 host 里（电脑切换用）', async () => {
+  const deviceId = 'ws-named'
+  const token = await pair(deviceId)
+  const ws = await openWs()
+  const inbox = createInbox(ws)
+  try {
+    ws.send(JSON.stringify({
+      t: 'host/register', deviceId, hostToken: 'host-secret', caps: [],
+      deviceName: '  工作台-PC  ', platform: 'win32',
+    }))
+    const reg = await inbox.next()
+    assert.equal(reg.t, 'host/registered')
+    // 名字只做展示：去空白、限长，别让它在界面上撑破一行
+    assert.equal(relay.cp.getDevice(deviceId).deviceName, '工作台-PC')
+    assert.equal(relay.cp.getDevice(deviceId).platform, 'win32')
+
+    const list = await call(`/api/sessions?deviceId=${deviceId}`, { token })
+    assert.equal(list.status, 200)
+    assert.equal(list.json.data.host.name, '工作台-PC')
+    assert.equal(list.json.data.host.platform, 'win32')
+    assert.equal(list.json.data.host.online, true)
+  } finally {
+    ws.close()
+  }
+})
