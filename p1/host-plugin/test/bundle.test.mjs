@@ -181,3 +181,28 @@ test('B-client2 面板走真数据：真配对、真会话接口，不许再放�
   assert.equal(client.includes('季度报告整理'), false, '不许留样例会话名')
   assert.equal(client.includes('半导体调研'), false, '不许留样例会话名')
 })
+
+test('B-client3 事件流活在别人的页面里：必须可卸载、可续读、可补齐', () => {
+  const client = readFileSync(new URL('../bundle/client.js', import.meta.url), 'utf8')
+
+  // 订阅地址：/d/<host>/events/<session>?token&sinceSeq（与 PWA 同一条通道）
+  assert.match(client, /\/events\/\$\{encodeURIComponent\(sessionId\)\}/, '走 WS 事件通道')
+  assert.match(client, /sinceSeq=\$\{lastSeq\.current\}/, '重连必须带 sinceSeq，靠 Relay 补齐')
+
+  // 卸载要收连接：这是与 PWA 最大的差异（PWA 的 WS 属于页面，组件不会卸载）
+  assert.match(client, /return \(\) => \{[\s\S]{0,220}ws\?\.close\(\)/, 'cleanup 必须关掉 WS')
+  assert.match(client, /if \(closed\) return/, '卸载后要丢弃尾包')
+
+  // 跨挂载续读：lastSeq 存模块级缓存，不能只活在组件 state 里
+  assert.match(client, /new Map\(\)/, 'lastSeq 要有模块级缓存')
+  assert.match(client, /SESSION_LAST_SEQ\.set/, '读到的 seq 要写回缓存')
+
+  // 写路径与审批：仍走宿主唯一写者，不自造事件
+  assert.match(client, /\/session\/prompt/, '发消息走 session/prompt')
+  assert.match(client, /clientMsgId/, '发送要带幂等键')
+  assert.match(client, /\/\$events\/result/, '审批应答走 $events/result')
+  assert.match(client, /allowed-once/, '审批 outcome 用协议里的取值')
+
+  // 只读取不推断：插件内部流量不占屏
+  assert.match(client, /startsWith\('plugin:'\)/, '插件事件要识别并跳过')
+})

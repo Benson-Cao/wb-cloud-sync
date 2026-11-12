@@ -1,22 +1,24 @@
 /**
- * WBSync 前端半边 · 手机端「我的电脑」面板（0.1.22）
+ * WBSync 前端半边 · DSH 手机端「我的电脑」（0.1.23）
  * ---------------------------------------------------------------
- * 形态：DSH 手机端是 WebView 套壳，所以集成落点是它加载的 web 页面。
- * 本文件只做一件事：在同一套 UI 里开出「电脑上那些会话」的入口。
+ * 形态：DSH 手机端是 WebView 套壳，集成落点是它加载的 web 页面。
+ * 本文件在两处开入口：侧栏底部胶囊（连接状态）+ 面板（会话列表 / 会话内对话）。
  *
  * 三条硬约束（违反任一条都会让宿主起不来或插件不激活，已固化成单测）：
  *   1. 声明 dsh.client 必须在 exports 暴露 "./client"；
  *   2. 本文件的模块 id 必须等于包名；
  *   3. 插件必须同时是 bundle（有 cordis.patch.yml）并登记进 dsh.profile.bundles。
  *
- * 槽位选择（据宿主 slot 契约表）：
- *   - sidebar.brand.name  single + shadows-shipped-ui → 会顶掉品牌名，不用；
- *   - sidebar.workspaces  single 且被 ui-workspace 占用 → 真切换=重写整个浏览区；
- *   - 采用 sidebar.footer.action（list 追加）+ sidebar.panellist + main。
- *
- * 跨域：页面来自 WebView 的 127.0.0.1:<port>，Relay 在另一台机器 → Relay 必须发 CORS
- * （只回显本机源，见 p1/relay/src/server.js 的 isAllowedOrigin）。
+ * 与 PWA 半边的关键差异（**本轮的核心**）：
+ *   PWA 里 WS 属于「页面」，页面活着连接就活着；这里组件随时会被卸载
+ *   （用户切面板、切会话），所以：
+ *     - 连接必须绑定组件生命周期，cleanup 里显式 close；
+ *     - lastSeq 存在模块级缓存里，重挂载能续着往后读，而不是从头再来；
+ *     - 断线重连带 sinceSeq，靠 Relay 的补齐窗口补缺口，不自己攒状态。
  */
+
+const SESSION_LAST_SEQ = new Map()   // 模块级：key = host + '|' + sessionId
+
 window.__ModuleLoader__.load({
   // id 必须与包名一致：client-modules 按包解析模块，独立 id 会被重复注册并报
   // duplicate factory registration。nas-sync 同样用包名作 id。
@@ -24,11 +26,12 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react')
     const h = React.createElement
-    const { useState, useEffect, useCallback } = React
+    const { useState, useEffect, useRef, useCallback } = React
 
     const PANEL_ID = 'wbsync-remote'
     const LINK_KEY = 'wbsync.link'
     const EVENT = 'wbsync:link'
+    const CLIENT_ID = 'dsh-app'
 
     // ---------- 存储 ----------
 
@@ -51,21 +54,17 @@ window.__ModuleLoader__.load({
     // ---------- 网络 ----------
 
     const trim = (u) => String(u || '').trim().replace(/\/+$/, '')
+    const toWs = (u) => trim(u).replace(/^http/, 'ws')
 
     const asError = (payload, r) => Object.assign(
       new Error(payload?.error?.message ?? `HTTP ${r?.status ?? '?'}`),
       { code: payload?.error?.code ?? (r ? `HTTP_${r.status}` : 'NETWORK') },
     )
 
-    const post = async (base, path, body) => {
+    const request = async (url, init = {}) => {
       let r
-      try {
-        r = await fetch(`${base}${path}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        })
-      } catch (e) {
+      try { r = await fetch(url, init) }
+      catch (e) {
         throw Object.assign(new Error(`Relay 不可达：${e?.message ?? e}`), { code: 'RELAY_UNREACHABLE' })
       }
       const payload = await r.json().catch(() => null)
@@ -73,19 +72,21 @@ window.__ModuleLoader__.load({
       return payload.data
     }
 
-    const api = async (link, path) => {
-      let r
-      try {
-        r = await fetch(`${trim(link.relayUrl)}${path}`, {
-          headers: { Authorization: `Bearer ${link.token}` },
-        })
-      } catch (e) {
-        throw Object.assign(new Error(`Relay 不可达：${e?.message ?? e}`), { code: 'RELAY_UNREACHABLE' })
-      }
-      const payload = await r.json().catch(() => null)
-      if (payload?.ok !== true) throw asError(payload, r)
-      return payload.data
-    }
+    const post = (base, path, body) => request(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    const api = (link, path) => request(`${trim(link.relayUrl)}${path}`, {
+      headers: { Authorization: `Bearer ${link.token}` },
+    })
+
+    const authed = (link, path, body) => request(`${trim(link.relayUrl)}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${link.token}` },
+      body: JSON.stringify(body),
+    })
 
     const hexOf = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 
@@ -115,6 +116,66 @@ window.__ModuleLoader__.load({
         token: done.deviceToken,
         phoneId: done.deviceId ?? null,
       }
+    }
+
+    // ---------- 转录（判据照抄 p1/pwa/src/transcript.js） ----------
+
+    const contentOf = (ev) => ev?.data?.message?.content ?? ev?.data?.content ?? null
+
+    const textFromContent = (content) => {
+      if (!Array.isArray(content)) return null
+      const parts = []
+      for (const part of content) {
+        if (part && part.type === 'text' && typeof part.text === 'string') parts.push(part.text)
+      }
+      return parts.length ? parts.join('\n') : null
+    }
+
+    const messageText = (ev) => {
+      const fromContent = textFromContent(contentOf(ev))
+      if (fromContent !== null) return fromContent
+      if (typeof ev?.data?.text === 'string') return ev.data.text
+      if (typeof ev?.data?.message?.text === 'string') return ev.data.message.text
+      return null
+    }
+
+    const roleOf = (ev) => {
+      if (ev?.type === 'user/message') return 'user'
+      if (ev?.type === 'assistant/message') return 'assistant'
+      return null
+    }
+
+    const toolName = (ev) => {
+      const d = ev?.data
+      const name = d?.name ?? d?.toolName ?? d?.message?.name ?? null
+      return typeof name === 'string' && name.trim() ? name.trim() : null
+    }
+
+    const turnReason = (ev) => {
+      const reason = ev?.data?.reason
+      const kind = typeof reason === 'string' ? reason : reason?.kind
+      if (typeof kind !== 'string') return null
+      return ({
+        completed: '完成', 'max-tokens': '被截断', aborted: '已停止',
+        error: '失败', interrupted: '被中断', blockaded: '等待输入',
+      })[kind] ?? kind
+    }
+
+    const isPluginEvent = (ev) => typeof ev?.type === 'string' && ev.type.startsWith('plugin:')
+
+    /**
+     * 一条事件 → 一行可渲染内容。**只读取，不推断**：拿不到文本就退回原始类型名，
+     * 绝不拼一个「看起来像答案」的字符串。
+     */
+    const toRow = (ev) => {
+      const role = roleOf(ev)
+      const text = messageText(ev)
+      if (role && text !== null) return { kind: role, text, seq: ev.seq }
+      if (ev?.type === 'tool/call') return { kind: 'tool', text: toolName(ev) ?? '工具调用', seq: ev.seq }
+      if (ev?.type === 'tool/result') return { kind: 'tool-result', text: `${(messageText(ev) ?? '').length} 字符`, seq: ev.seq }
+      if (ev?.type === 'turn/end') return { kind: 'turn-end', text: turnReason(ev) ?? '结束', seq: ev.seq }
+      if (isPluginEvent(ev)) return null      // 插件内部流量：一条几十 KB，不占屏
+      return { kind: 'raw', text: String(ev?.type ?? 'event'), seq: ev.seq }
     }
 
     // ---------- 展示 ----------
@@ -170,6 +231,21 @@ window.__ModuleLoader__.load({
       h('div', { key: 'l', style: { fontSize: 11, color: 'var(--color-text-tertiary)', marginBottom: 4 } }, label),
       children,
     ])
+
+    /** 小按钮：链路里的动作都长得一样，避免每处重复写样式。 */
+    const chip = (label, onClick, opts = {}) => h('span', {
+      role: 'button',
+      'data-wbsync': opts.mark,
+      onClick: opts.disabled ? undefined : onClick,
+      style: {
+        display: 'inline-block', padding: '3px 9px', borderRadius: 6, fontSize: 11,
+        cursor: opts.disabled ? 'default' : 'pointer',
+        opacity: opts.disabled ? 0.5 : 1,
+        border: '0.5px solid ' + (opts.primary ? 'var(--color-border-info)' : 'var(--color-border-secondary)'),
+        background: opts.primary ? 'var(--color-background-info)' : 'transparent',
+        color: opts.primary ? 'var(--color-text-info)' : 'var(--color-text-primary)',
+      },
+    }, label)
 
     function ConnectForm({ onDone, busy, setBusy, error, setError }) {
       const [url, setUrl] = useState('')
@@ -253,6 +329,251 @@ window.__ModuleLoader__.load({
       ])
     }
 
+    const rowStyle = (kind) => {
+      if (kind === 'user') {
+        return {
+          alignSelf: 'flex-end', maxWidth: '85%', padding: '6px 9px', borderRadius: 10,
+          background: 'var(--color-background-info)', color: 'var(--color-text-primary)',
+          fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.55,
+        }
+      }
+      if (kind === 'assistant') {
+        return {
+          alignSelf: 'flex-start', maxWidth: '92%', padding: '6px 9px', borderRadius: 10,
+          background: 'var(--color-background-secondary)', color: 'var(--color-text-primary)',
+          fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.55,
+        }
+      }
+      return { fontSize: 11, color: 'var(--color-text-tertiary)', lineHeight: 1.6 }
+    }
+
+    const rowPrefix = (kind) => ({
+      tool: '· 调用 ', 'tool-result': '· 结果 ', 'turn-end': '· 本轮 ', raw: '· ',
+    })[kind] ?? ''
+
+    /**
+     * 会话内视图。
+     *
+     * 生命周期是重点：这个组件会被卸载（切面板/切会话/切设备），
+     * 所以 WS 必须在 cleanup 里关掉，`lastSeq` 存模块级缓存以便重挂载续读。
+     * 断线重连始终带 `sinceSeq`，让 Relay 的补齐窗口补缺口——不自己攒。
+     */
+    function Conversation({ link, sessionId, title, onBack }) {
+      const cacheKey = `${link.hostDeviceId}|${sessionId}`
+      const lastSeq = useRef(SESSION_LAST_SEQ.get(cacheKey) ?? -1)
+      const [rows, setRows] = useState([])
+      const [status, setStatus] = useState('connecting')
+      const [err, setErr] = useState(null)
+      const [text, setText] = useState('')
+      const [sending, setSending] = useState(false)
+      const [approvals, setApprovals] = useState([])
+      const scroller = useRef(null)
+
+      const push = useCallback((row) => {
+        setRows((prev) => {
+          const next = prev.concat(row)
+          return next.length > 400 ? next.slice(next.length - 400) : next
+        })
+      }, [])
+
+      useEffect(() => {
+        let closed = false
+        let ws = null
+        let attempts = 0
+        let timer = null
+
+        const schedule = () => {
+          if (closed) return
+          const delay = Math.min(15000, 1000 * 2 ** Math.min(attempts, 4))
+          attempts++
+          setStatus('reconnecting')
+          timer = window.setTimeout(connect, delay)
+        }
+
+        const connect = () => {
+          if (closed) return
+          const url = `${toWs(link.relayUrl)}/d/${encodeURIComponent(link.hostDeviceId)}`
+            + `/events/${encodeURIComponent(sessionId)}`
+            + `?token=${encodeURIComponent(link.token)}&sinceSeq=${lastSeq.current}`
+          try { ws = new WebSocket(url) } catch { schedule(); return }
+          setStatus('connecting')
+
+          ws.addEventListener('open', () => {
+            if (closed || ws?.readyState !== 1) return
+            attempts = 0
+            setStatus('following')
+          })
+
+          ws.addEventListener('message', (event) => {
+            if (closed) return          // 卸载后仍可能收到尾包：别再 setState
+            let msg
+            try { msg = JSON.parse(String(event.data)) } catch { return }
+
+            if (msg.t === 'session/event') {
+              const ev = msg.ev
+              if (!Number.isInteger(ev?.seq) || ev.seq <= lastSeq.current) return   // 幂等丢弃
+              // 实时流不该跳帧；真跳了就当作缺口，断开重连让 Relay 从 sinceSeq 补齐，
+              // 不在前端拼一个「差不多连续」的列表。
+              if (ev.seq > lastSeq.current + 1) {
+                // 带 sinceSeq 重连即可让 Relay 从断点补齐（补的就是这段缺口），
+                // 前端不自己「跳过」——跳过等于把缺口永久留在屏幕上
+                try { ws?.close() } catch { /* 忽略 */ }
+                return
+              }
+              lastSeq.current = ev.seq
+              SESSION_LAST_SEQ.set(cacheKey, ev.seq)
+              const row = toRow(ev)
+              if (row) push(row)
+              return
+            }
+
+            if (msg.t === 'approval/request' && msg.approvalId) {
+              setApprovals((prev) => prev.some((a) => a.approvalId === msg.approvalId)
+                ? prev
+                : prev.concat({ approvalId: msg.approvalId, summary: msg.summary ?? msg.title ?? '请求批准' }))
+              return
+            }
+
+            if (msg.t === 'approval/resolved') {
+              setApprovals((prev) => prev.filter((a) => a.approvalId !== msg.approvalId))
+            }
+          })
+
+          ws.addEventListener('close', () => { if (!closed) schedule() })
+          ws.addEventListener('error', () => { try { ws?.close() } catch { /* 忽略 */ } })
+        }
+
+        connect()
+
+        return () => {
+          // 组件卸载 = 页面不再看这个会话，连接必须立刻收掉
+          closed = true
+          if (timer) window.clearTimeout(timer)
+          try { ws?.close() } catch { /* 忽略 */ }
+        }
+      }, [link.relayUrl, link.hostDeviceId, link.token, sessionId, cacheKey, push])
+
+      useEffect(() => {
+        const el = scroller.current
+        if (el) el.scrollTop = el.scrollHeight
+      }, [rows.length])
+
+      const send = async () => {
+        const body = text.trim()
+        if (!body || sending) return
+        setSending(true)
+        setErr(null)
+        try {
+          await authed(link, `/d/${encodeURIComponent(link.hostDeviceId)}/session/prompt`, {
+            clientId: CLIENT_ID,
+            sessionId,
+            text: body,
+            attachments: [],
+            // 幂等键：网络抖动重发不会变成两条
+            clientMsgId: `${CLIENT_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          })
+          setText('')
+        } catch (e) {
+          setErr(`发送失败：${e.message}`)
+        } finally { setSending(false) }
+      }
+
+      const answer = async (approvalId, outcome) => {
+        try {
+          await authed(link, `/d/${encodeURIComponent(link.hostDeviceId)}/$events/result`, {
+            approvalId, outcome, clientId: CLIENT_ID,
+          })
+          setApprovals((prev) => prev.filter((a) => a.approvalId !== approvalId))
+        } catch (e) {
+          setErr(`应答失败：${e.message}`)
+        }
+      }
+
+      const statusText = ({
+        connecting: '连接中…', following: '实时', reconnecting: '重连中…',
+      })[status] ?? status
+
+      return h('div', {
+        'data-wbsync': 'conversation',
+        style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 320, fontFamily: 'var(--font-sans)' },
+      }, [
+        h('div', {
+          key: 'h',
+          style: { display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 8, borderBottom: '0.5px solid var(--color-border-tertiary)' },
+        }, [
+          h('span', {
+            key: 'b', role: 'button', 'data-wbsync': 'back',
+            onClick: onBack,
+            style: { fontSize: 12, color: 'var(--color-text-info)', cursor: 'pointer' },
+          }, '返回'),
+          h('div', { key: 't', style: { flex: 1, minWidth: 0 } }, [
+            h('div', {
+              key: 'n',
+              style: { fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+            }, title || String(sessionId).slice(0, 18)),
+            h('div', { key: 's', style: { fontSize: 10, color: 'var(--color-text-tertiary)' }, },
+              `${statusText} · 电脑端`),
+          ]),
+        ]),
+
+        h('div', {
+          key: 'flow',
+          ref: scroller,
+          'data-wbsync': 'flow',
+          style: {
+            flex: 1, overflowY: 'auto', padding: '10px 0',
+            display: 'flex', flexDirection: 'column', gap: 6,
+          },
+        }, rows.length
+          ? rows.map((r, i) => h('div', {
+            key: `${r.seq}-${i}`,
+            'data-wbsync': 'flow-row',
+            style: rowStyle(r.kind),
+          }, r.kind === 'tool' || r.kind === 'tool-result' || r.kind === 'turn-end' || r.kind === 'raw'
+            ? rowPrefix(r.kind) + r.text
+            : r.text))
+          : h('div', { style: { fontSize: 12, color: 'var(--color-text-tertiary)' } },
+            status === 'following' ? '这个会话还没有可显示的事件。' : '正在读取事件流…')),
+
+        approvals.length ? h('div', {
+          key: 'ap', 'data-wbsync': 'approvals',
+          style: { borderTop: '0.5px solid var(--color-border-tertiary)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6 },
+        }, approvals.map((a) => h('div', {
+          key: a.approvalId,
+          'data-wbsync': 'approval-card',
+          style: { border: '0.5px solid var(--color-border-warning)', borderRadius: 8, padding: 8 },
+        }, [
+          h('div', { key: 's', style: { fontSize: 11, color: 'var(--color-text-warning)', marginBottom: 6 } }, a.summary),
+          h('div', { key: 'b', style: { display: 'flex', gap: 6 } }, [
+            chip('允许一次', () => void answer(a.approvalId, 'allowed-once'), { primary: true, mark: 'allow' }),
+            chip('拒绝', () => void answer(a.approvalId, 'rejected'), { mark: 'deny' }),
+          ]),
+        ]))) : null,
+
+        err ? h('div', {
+          key: 'e', 'data-wbsync': 'conv-error',
+          style: { fontSize: 11, color: 'var(--color-text-danger)', paddingTop: 6 },
+        }, err) : null,
+
+        h('div', {
+          key: 'c',
+          style: { display: 'flex', gap: 8, alignItems: 'flex-end', paddingTop: 8, borderTop: '0.5px solid var(--color-border-tertiary)' },
+        }, [
+          h('textarea', {
+            key: 'i', 'data-wbsync': 'composer',
+            value: text, rows: 1,
+            onChange: (e) => setText(e.target.value),
+            onKeyDown: (e) => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
+            },
+            placeholder: '发消息到这台电脑…',
+            style: { ...inputStyle, flex: 1, resize: 'none', maxHeight: 96 },
+          }),
+          chip(sending ? '发送中' : '发送', () => void send(), { primary: true, mark: 'send', disabled: sending || !text.trim() }),
+        ]),
+      ])
+    }
+
     function RemotePanel() {
       const [link, setLink] = useState(readLink)
       const [rows, setRows] = useState([])
@@ -273,7 +594,6 @@ window.__ModuleLoader__.load({
           setRows(Array.isArray(data?.rows) ? data.rows : [])
           setAt(Date.now())
         } catch (e) {
-          // 令牌失效要能自己说清楚，而不是一直转圈
           if (e.code === 'UNAUTHORIZED' || e.code === 'HTTP_401') {
             writeLink(null)
             setLink(null)
@@ -285,15 +605,28 @@ window.__ModuleLoader__.load({
 
       useEffect(() => { void load(link) }, [link, load])
 
-      // 面板停留时每 20s 刷一次：手机上没人会去点「刷新」
+      // 列表页才轮询；进了会话就有 WS，不必再轮
       useEffect(() => {
-        if (!link) return undefined
+        if (!link || picked) return undefined
         const t = window.setInterval(() => { void load(link) }, 20000)
         return () => window.clearInterval(t)
-      }, [link, load])
+      }, [link, load, picked])
 
       const online = hostInfo?.online !== false
       const hostName = hostInfo?.name || '这台电脑'
+
+      if (link && picked) {
+        const row = rows.find((r) => r.sessionId === picked)
+        return h('div', {
+          'data-wbsync': 'remote-panel',
+          style: { padding: 16, fontFamily: 'var(--font-sans)', color: 'var(--color-text-primary)', height: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' },
+        }, h(Conversation, {
+          key: picked,
+          link, sessionId: picked,
+          title: row?.title || null,
+          onBack: () => setPicked(null),
+        }))
+      }
 
       const head = h('div', {
         key: 'h',
@@ -344,10 +677,6 @@ window.__ModuleLoader__.load({
             })))
           : h('div', { key: 'empty', style: { fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.7 } },
             busy ? '正在读取电脑上的会话…' : '电脑上还没有会话。'),
-        picked ? h('div', {
-          key: 'note', 'data-wbsync': 'picked-note',
-          style: { marginTop: 14, fontSize: 11, color: 'var(--color-text-tertiary)', lineHeight: 1.7 },
-        }, '已选中。下一步接对话视图（事件流 + 审批 + 产物）；本轮只做到「看得到电脑上有什么」。') : null,
       ])
     }
 

@@ -112,7 +112,24 @@ relay 的 `GET /api/sessions` 把 `host`（`{deviceId,name,platform,online,lastS
    `adb forward tcp:9222 localabstract:<套接字>`，用 CDP 读 DOM / 截图；
 4. 面板里填 Relay 地址（电脑局域网 IP:8787）与配对码，确认列表出现真实会话。
 
-### 7.5 仍未实现的（下一刀）
+### 7.5 会话内视图（0.1.23 已实现，未做运行时验证）
 
-- 会话内视图：事件流、发消息、审批作答、产物下载 —— 需要 `session/follow` + `session/prompt` 的客户端实现。
-- 跨设备「直读」时的写权限边界：手机发消息仍必须走 `session/prompt` 交给电脑唯一写者。
+点进会话即进入对话视图，能力与边界：
+
+| 能力 | 走哪条通道 | 说明 |
+|---|---|---|
+| 读事件流 | `WS /d/<host>/events/<session>?token&sinceSeq` | 与 PWA 同一条通道；重连带 sinceSeq 交给 Relay 补齐 |
+| 发消息 | `POST /d/<host>/session/prompt` | 带 `clientMsgId` 幂等键；**手机不造 user/message** |
+| 答审批 | `POST /d/<host>/$events/result` | `allowed-once` / `rejected` |
+
+**生命周期是本轮的关键差异**：组件会被卸载，所以 WS 在 cleanup 里关闭、丢弃尾包，
+`lastSeq` 存模块级缓存以便重挂载续读。PWA 里这些都不需要，因为 WS 属于页面。
+
+**尚未实现**：产物卡片与下载（协议已有一次性票据，前端未接）、定时任务、改名/置顶/归档。
+
+### 7.6 运行时验证清单（待执行）
+
+1. 起 Relay（`node p1/relay/run.mjs`）与 DSH；
+2. 手机连上电脑（Relay 地址 + 配对码）；
+3. 进会话确认：历史事件渲染、新消息实时到达、断网 10s 后恢复不丢不重、审批卡可作答；
+4. 切到别的面板再回来，确认连接被收掉且不重复堆叠（模块级 lastSeq 生效）。
