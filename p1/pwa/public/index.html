@@ -235,7 +235,10 @@
       if (activeProfile) sel.value = activeProfile.hostDeviceId
     }
 
-    $('relayBase').value = activeProfile?.base ?? localStorage.getItem('wbsync.base') ?? ''
+    // 没有档案时，地址栏就是最好的默认值：用户是**从那个地址打开的页面**，它显然可达。
+    // 这一行兜掉的是真机踩过的坑：从 100.x（Tailscale）打开，输入框却还写着 192.168 的旧地址。
+    const originBase = (typeof location !== 'undefined' && location.origin && location.origin !== 'null') ? location.origin : ''
+    $('relayBase').value = activeProfile?.base ?? (originBase || localStorage.getItem('wbsync.base') || '')
     // 已配对过（有档案）就不再展示配对码输入，避免误触重新配对
     if (activeProfile) $('pairCode').placeholder = '已配对（留空直接连接）'
 
