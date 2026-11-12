@@ -844,7 +844,7 @@
       box.hidden = false
       const head = document.createElement('div')
       head.className = 'head'
-      head.textContent = `本会话产物 · ${artifactRows.length} 个（文件仍留在电脑工作区，点卡片复制路径）`
+      head.textContent = `本会话产物 · ${artifactRows.length} 个（文件仍在电脑工作区；下载是显式动作，一次性票据）`
       box.appendChild(head)
 
       for (const a of artifactRows) {
@@ -871,6 +871,30 @@
           }
         }
         row.appendChild(copy)
+        // 下载（ADR-011）：显式动作 → 一次性票据 → Blob。转换格式宿主不支持，
+        // 这里只做原样下载，不伪造 PDF/DOCX。
+        const dl = document.createElement('button')
+        dl.textContent = '下载'
+        dl.onclick = async () => {
+          if (!client || !activeSession || !a.path) return
+          dl.disabled = true
+          try {
+            const t = await client.createArtifactTicket({ sessionId: activeSession, path: a.path })
+            const blob = await client.fetchArtifactBlob({ ticketId: t.ticketId })
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = t.name || a.name || 'artifact'
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            setTimeout(() => URL.revokeObjectURL(url), 5000)
+            say(`已下载 ${link.download}（${t.size} B）`)
+          } catch (e) {
+            say(`下载失败：${e.message}`, true)
+          } finally { dl.disabled = false }
+        }
+        row.appendChild(dl)
         box.appendChild(row)
       }
     }

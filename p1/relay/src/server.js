@@ -23,7 +23,7 @@
  * （套接字、待转发帧、事件缓冲、配对短时码）。多个 Relay 实例共享同一个 CP 实例时，
  * 看到的是同一份设备与会话视图。
  */
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -338,6 +338,9 @@ export function createRelay(options = {}) {
     // 的审批不会丢——重连后 `GET /api/approvals` 就能补回来。
     approvals: new Map(),    // approvalId -> { deviceId, payload, expiresAt, createdAt }
     phoneConns: new Map(),   // deviceId -> Set<conn>（手机上任何会话订阅都算，审批是设备级的）
+    // 产物下载票（ADR-011）：只在内存里，60s TTL、单次使用、绑定手机令牌摘要。
+    // 绝不用它承载会话正文，也绝不落盘。
+    downloads: new Map(),    // ticketId -> { bytes, name, mime, expiresAt, tokenDigest }
   }
 
   /** 手机侧已建立的事件订阅连接，按设备归组（审批通知要发给该设备的每一台手机）。 */
@@ -449,7 +452,7 @@ export function createRelay(options = {}) {
   }
 
   /** 手机侧 /d/<id>/<endpoint> 请求 → 帧 → 等待 Host 响应。afterResponse 在响应落地后拿到原始应答（可选）。 */
-  const bridge = (req, res, deviceId, endpoint, body, afterResponse = null) => {
+  const bridge = (req, res, deviceId, endpoint, body, afterResponse = null, transform = null) => {
     const reqId = hex(16)
     const frame = { t: 'http/request', reqId, method: req.method, endpoint, body, sinceSeq: body?.sinceSeq ?? null }
     const conn = state.sockets.get(deviceId)
@@ -471,10 +474,18 @@ export function createRelay(options = {}) {
     state.pending.set(reqId, {
       res,                                 // 连接猝死时用它快速回错误
       conn: conn?.isOpen() ? conn : null,  // 记住这帧发在哪条连接上
-      resolve: (response) => {
+      resolve: (raw) => {
         clearTimeout(timer)
-        reply(res, response.status ?? 200, response.body ?? { ok: true, data: {}, protocol: PROTOCOL })
-        if (afterResponse) { try { afterResponse(response) } catch { /* 记录失败不影响响应 */ } }
+        // transform 可把「带字节的 Host 响应」换成「只含票据元数据的手机响应」，
+        // 字节留在 Relay 内存里（ADR-011）。没有 transform 时行为与以前完全一致。
+        let out = raw
+        if (transform) {
+          try { out = transform(raw) ?? raw } catch (error) {
+            out = { status: 502, body: { ok: false, error: { code: 'BRIDGE_TRANSFORM', message: error?.message ?? 'transform failed', retryable: false }, protocol: PROTOCOL } }
+          }
+        }
+        reply(res, out.status ?? 200, out.body ?? { ok: true, data: {}, protocol: PROTOCOL })
+        if (afterResponse) { try { afterResponse(out) } catch { /* 记录失败不影响响应 */ } }
       },
       timer,
     })
@@ -813,6 +824,79 @@ export function createRelay(options = {}) {
             cp.patchSession(sessionId, { pinned: body.pinned })
           }
         })
+      }
+
+      // 产物导出（ADR-011）：显式点「下载」才走，字节只在 Relay 内存中转一次。
+      // Host 校验「已呈现 + 工作区内 + 体积」，Relay 把字节换成一次性票据。
+      const TICKET_MAX_BYTES = 512 * 1024
+      const TICKET_TTL_MS = 60_000
+      if (method === 'POST' && path === '/api/artifacts/ticket') {
+        const auth = String(req.headers.authorization ?? '')
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        const body = await readBody(req, cfg.maxBodyBytes)
+        const deviceId = body.deviceId ?? url.searchParams.get('deviceId') ?? ''
+        if (!cp.verifyClientToken(deviceId, token).ok) {
+          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+        }
+        if (!body.sessionId || typeof body.path !== 'string' || !body.path.trim()) {
+          return fail(res, 400, 'INVALID_ARGUMENT', '需要 { sessionId, path }')
+        }
+        if (!isOnline(deviceId)) {
+          cp.markDeviceOffline(deviceId)
+          return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
+        }
+        const ticketId = hex(16)
+        const tokenDigest = createHash('sha256').update(token).digest('hex')
+        return bridge(req, res, deviceId, 'session/artifact-ticket', {
+          sessionId: body.sessionId, path: body.path,
+        }, null, (response) => {
+          if (response?.status !== 200) return response
+          const d = response.body?.data
+          if (!d || typeof d.bytes !== 'string') {
+            return { status: 502, body: { ok: false, error: { code: 'TICKET_FAILED', message: 'Host 未返回文件字节', retryable: false }, protocol: PROTOCOL } }
+          }
+          const bytes = Buffer.from(d.bytes, 'base64')
+          if (!bytes.length || bytes.length > TICKET_MAX_BYTES) {
+            return { status: 413, body: { ok: false, error: { code: 'ARTIFACT_TOO_LARGE', message: '文件超出下载上限，请在电脑上打开', retryable: false }, protocol: PROTOCOL } }
+          }
+          const name = String(d.name ?? 'artifact').slice(0, 120)
+          const mime = String(d.mime ?? 'application/octet-stream')
+          state.downloads.set(ticketId, {
+            bytes, name, mime, deviceId, tokenDigest,
+            expiresAt: now() + TICKET_TTL_MS,
+          })
+          return {
+            status: 200,
+            body: {
+              ok: true,
+              data: { ticketId, name, mime, size: bytes.length, expiresIn: Math.floor(TICKET_TTL_MS / 1000) },
+              protocol: PROTOCOL,
+            },
+          }
+        })
+      }
+
+      // 换票：**单次使用**、TTL、绑定手机令牌；字节不写盘、不缓存、不进事件流。
+      if (method === 'GET' && path.startsWith('/api/artifacts/download/')) {
+        const ticketId = decodeURIComponent(path.slice('/api/artifacts/download/'.length))
+        for (const [k, v] of state.downloads) if (v.expiresAt <= now()) state.downloads.delete(k)
+        const t = state.downloads.get(ticketId)
+        if (!t) return fail(res, 410, 'TICKET_GONE', '票据不存在或已过期')
+        state.downloads.delete(ticketId)
+        const auth = String(req.headers.authorization ?? '')
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        if (createHash('sha256').update(token).digest('hex') !== t.tokenDigest
+          || !cp.verifyClientToken(t.deviceId, token).ok) {
+          return fail(res, 401, 'UNAUTHORIZED', '票据不属于这台手机')
+        }
+        res.writeHead(200, {
+          'Content-Type': t.mime,
+          'Content-Length': t.bytes.length,
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(t.name)}`,
+          'Cache-Control': 'no-store',
+          'X-Protocol-Version': PROTOCOL,
+        })
+        return res.end(t.bytes)
       }
 
       // 降级通道：轮询取帧 / 回响应

@@ -220,5 +220,10 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   assert.match(page, /const syncProfileLive = /, '瞬时态从 follows 状态机推导')
   assert.match(page, /activeProfile\.online === false\) \{\n?\s*live = 'offline'/, '宿主 offline 优先于瞬时态')
   assert.match(page, /meta0\?\.title/, '事件流标题用会话名，不用裸 UUID')
+
+  // 产物下载（ADR-011）：显式动作、两步换票，不给任意路径入口
+  assert.match(page, /client\.createArtifactTicket/, '产物卡片要有换票动作')
+  assert.match(page, /client\.fetchArtifactBlob/, '换票后才取字节')
+  assert.match(page, /一次性票据/, '界面要说明这是一次性票据，不是自动同步')
   assert.match(page, /\$\('save'\)\.disabled = true/, '配对期间按钮要置灰，否则用户会以为没反应再点一次')
 })

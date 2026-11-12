@@ -984,6 +984,7 @@ test('下行端点用到的适配器方法都在包装层转发了（漏一个�
     for (const name of [
       'submitPrompt', 'setPinned', 'setArchived', 'cancelTurn', 'createSession',
       'uploadAttachment', 'backfill', 'listArtifacts', 'replay',
+      'createArtifactTicket', 'convertArtifact',
     ]) {
       assert.equal(typeof plugin.adapters[name], 'function', `${name} 忘了在 adapters 包装层转发`)
     }
@@ -1037,6 +1038,31 @@ test('session/archive 下行：软移除调到 setArchived 并原样回响应（
     assert.equal(resp.status, 200)
     assert.deepEqual(resp.body.data, { archived: true, archivedSessionIds: ['session-9'] })
     assert.deepEqual(seen, [{ sessionId: 'session-9', archived: true }])
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('session/artifact-ticket 下行：调到导出器并原样回响应（ADR-011）', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  const seen = []
+  try {
+    const plugin = apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-1', autoConnect: true,
+      createArtifactTicket: async (args) => {
+        seen.push(args)
+        return { ok: true, value: { name: 'a.md', mime: 'text/markdown', size: 3, bytes: 'YWJj' } }
+      },
+    })
+    await waitFor(() => plugin.state.connected, '已连接')
+    relay.send({ t: 'http/request', reqId: 'r-art', method: 'POST', endpoint: 'session/artifact-ticket', body: { sessionId: 'session-9', path: 'out/a.md' } })
+    await waitFor(() => framesOf(relay, 'http/response').length === 1, '回响应')
+    const resp = framesOf(relay, 'http/response')[0]
+    assert.equal(resp.status, 200)
+    assert.equal(resp.body.data.bytes, 'YWJj')
+    assert.deepEqual(seen, [{ sessionId: 'session-9', relPath: 'out/a.md' }])
   } finally {
     ctx.dispose()
     await relay.stop()

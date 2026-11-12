@@ -580,6 +580,42 @@ export function createPwaClient({
     return Array.isArray(payload.data?.rows) ? payload.data.rows : []
   }
 
+  /**
+   * 产物下载（ADR-011）：分两步——先换一次性票据（只回元数据），再用票据取字节。
+   * Host 只放行「该会话已显式交付、且在工作区内」的文件；Relay 内存票据 60s/单次。
+   */
+  const createArtifactTicket = async ({ sessionId, path } = {}) => {
+    if (!sessionId || typeof path !== 'string' || !path.trim()) {
+      throw Object.assign(new Error('下载缺 sessionId / path'), { code: 'INVALID_ARGUMENT' })
+    }
+    const r = await fetchImpl(`${base}/api/artifacts/ticket`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ deviceId, sessionId, path }),
+    })
+    const payload = await r.json().catch(() => null)
+    if (!r.ok || payload?.ok !== true) {
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      const detail = typeof payload?.error?.message === 'string' ? payload.error.message : ''
+      throw Object.assign(new Error(detail || `换票失败：${code}`), { code })
+    }
+    return payload.data
+  }
+
+  /** 换票取字节：返回 Blob 交给页面落盘，客户端不碰 DOM。 */
+  const fetchArtifactBlob = async ({ ticketId } = {}) => {
+    if (!ticketId) throw Object.assign(new Error('缺 ticketId'), { code: 'INVALID_ARGUMENT' })
+    const r = await fetchImpl(`${base}/api/artifacts/download/${encodeURIComponent(ticketId)}`, {
+      headers: authHeaders(),
+    })
+    if (!r.ok) {
+      const payload = await r.json().catch(() => null)
+      const code = payload?.error?.code ?? `HTTP_${r.status}`
+      throw Object.assign(new Error(`下载失败：${code}`), { code })
+    }
+    return r.blob()
+  }
+
   /** 拉取待审批清单：推送只是「更快」，拉取才是「不漏」（断线期间错过的靠这条补）。 */
   const listApprovals = async () => {
     const r = await fetchImpl(`${base}/api/approvals?deviceId=${encodeURIComponent(deviceId)}`, {
@@ -657,7 +693,7 @@ export function createPwaClient({
   return {
     refreshSessions, createSession, cancelTurn, setPinned, setArchived, getArchivedSessions, submitPrompt, uploadAttachment,
     getHostStatus: () => ({ ...hostStatus }),
-    listApprovals, answerApproval, getArtifacts, backfill, openWindow,
+    listApprovals, answerApproval, getArtifacts, createArtifactTicket, fetchArtifactBlob, backfill, openWindow,
     follow, unfollow, stop, snapshot, getSession: (id) => sessions.get(id) ?? null,
   }
 }

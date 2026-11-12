@@ -418,3 +418,66 @@ test('T14 归档（r12）：DELETE 是软移除别名，列表默认看不到、
   assert.equal(both.status, 400)
   assert.equal(both.json.error.code, 'INVALID_JSON')
 })
+
+test('T15 产物下载票（ADR-011）：手机只见元数据，票据单次/绑手机/TTL', async () => {
+  const p = await pair('art-dev')
+  const p2 = await pair('art-dev')
+  await call('/host/register', { method: 'POST', body: { deviceId: 'art-dev' } })
+  const bytes = Buffer.from('hello 产物', 'utf8').toString('base64')
+
+  const issue = async (token) => {
+    const inflight = call('/api/artifacts/ticket', {
+      method: 'POST', token,
+      body: { deviceId: 'art-dev', sessionId: 's-1', path: 'out/a.md' },
+    })
+    await waitForQueue('art-dev')
+    const polled = await call('/host/poll?deviceId=art-dev')
+    const frame = polled.json.data.frames[0]
+    assert.equal(frame.endpoint, 'session/artifact-ticket')
+    await call('/host/respond', {
+      method: 'POST', body: {
+        reqId: frame.reqId, status: 200,
+        body: { ok: true, data: { name: 'a.md', mime: 'text/markdown; charset=utf-8', size: bytes.length, bytes }, protocol: PROTOCOL },
+      },
+    })
+    return inflight
+  }
+
+  const r = await issue(p.token)
+  assert.equal(r.status, 200)
+  assert.equal(r.json.data.bytes, undefined, '手机响应里不许带文件字节')
+  assert.equal(r.json.data.name, 'a.md')
+  assert.equal(r.json.data.expiresIn, 60)
+  const url = `http://127.0.0.1:${port}/api/artifacts/download/${r.json.data.ticketId}`
+
+  const d1 = await fetch(url, { headers: { Authorization: `Bearer ${p.token}` } })
+  assert.equal(d1.status, 200)
+  assert.equal(await d1.text(), 'hello 产物')
+  assert.match(d1.headers.get('content-disposition') ?? '', /a\.md/)
+
+  const again = await fetch(url, { headers: { Authorization: `Bearer ${p.token}` } })
+  assert.equal(again.status, 410, '票据只能用一次')
+
+  // 另一台手机的令牌不能换票
+  const r2 = await issue(p.token)
+  const denied = await fetch(`http://127.0.0.1:${port}/api/artifacts/download/${r2.json.data.ticketId}`, {
+    headers: { Authorization: `Bearer ${p2.token}` },
+  })
+  assert.equal(denied.status, 401)
+
+  // Host 明确拒绝时原样透传，不伪造票据
+  const bad = call('/api/artifacts/ticket', {
+    method: 'POST', token: p.token,
+    body: { deviceId: 'art-dev', sessionId: 's-1', path: '../../etc/passwd' },
+  })
+  await waitForQueue('art-dev')
+  const polled2 = await call('/host/poll?deviceId=art-dev')
+  const f2 = polled2.json.data.frames[0]
+  await call('/host/respond', {
+    method: 'POST', body: {
+      reqId: f2.reqId, status: 403,
+      body: { ok: false, error: { code: 'ARTIFACT_NOT_PRESENTED', message: '不是交付产物' }, protocol: PROTOCOL },
+    },
+  })
+  assert.equal((await bad).status, 403)
+})

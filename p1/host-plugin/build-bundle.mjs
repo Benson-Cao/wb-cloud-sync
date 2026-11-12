@@ -72,7 +72,7 @@ const EXPECTED_IMPORTS = [
   /^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'$/m,
   /^import \{ createHostAdapters \} from '\.\/host-adapters\.js'$/m,
   /^import \{ createApprovalBridge \} from '\.\/approvals\.js'$/m,
-  /^import \{ createArtifactIndex \} from '\.\/artifacts\.js'$/m,
+  /^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts\.js'$/m,
 ]
 for (const pattern of EXPECTED_IMPORTS) {
   if (!pattern.test(mainSrc)) throw new Error('src/index.js 的相对导入与打包器预期不一致——请同步更新本脚本')
@@ -82,7 +82,7 @@ const main = mainSrc
   .replace(/^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'\n/m, '')
   .replace(/^import \{ createHostAdapters \} from '\.\/host-adapters\.js'\n/m, '')
   .replace(/^import \{ createApprovalBridge \} from '\.\/approvals\.js'\n/m, '')
-  .replace(/^import \{ createArtifactIndex \} from '\.\/artifacts\.js'\n/m, '')
+  .replace(/^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts\.js'\n/m, '')
   .replace(/^export function apply\(/m, 'function __apply(')
 if (!main.includes('function __apply(')) throw new Error('apply 改名失败')
 

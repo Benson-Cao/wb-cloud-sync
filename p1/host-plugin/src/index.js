@@ -25,7 +25,7 @@ import { createBackfillReader, createReplayAdapter } from './replay.js'
 import { createSessionIndexReporter } from './sessions.js'
 import { createHostAdapters } from './host-adapters.js'
 import { createApprovalBridge } from './approvals.js'
-import { createArtifactIndex } from './artifacts.js'
+import { createArtifactIndex, createArtifactExporter } from './artifacts.js'
 
 export const name = 'wbsync-host-dev'
 export const inject = ['webServer', 'sessionPersistence']
@@ -43,6 +43,7 @@ const DEFAULTS = {
   heartbeatMs: 15_000,
   indexRefreshMs: 60_000,
   caps: ['attachments', 'artifacts', 'schedule', 'approval'],
+  artifactMaxBytes: 512 * 1024,   // ADR-011：WS 帧 1 MiB - base64 膨胀后的安全上限
 }
 
 const json = (res, status, payload) => {
@@ -172,6 +173,25 @@ export function apply(ctx, config = {}) {
       })),
   }
 
+  // 产物导出（ADR-011）：只校验「已呈现 + 工作区内 + 体积上限」再读字节；
+  // 票据由 Relay 持有，Host 不建表、不开新端口。
+  const artifactExporter = createArtifactExporter({
+    listArtifacts: (args) => adapters.listArtifacts(args),
+    resolveWorkspace: async (sessionId) => {
+      if (typeof listSessions !== 'function') return null
+      const snaps = await listSessions({})
+      const hit = (Array.isArray(snaps) ? snaps : []).find((s) => s?.header?.id === sessionId)
+      return typeof hit?.header?.cwd === 'string' ? hit.header.cwd : null
+    },
+    maxBytes: cfg.artifactMaxBytes,
+  })
+  adapters.createArtifactTicket = cfg.createArtifactTicket ?? ((args) => artifactExporter.readBytes(args))
+  // 宿主没有 PDF/DOCX 转换器（asar 取证 0 命中）：明确拒绝，不伪造格式
+  adapters.convertArtifact = cfg.convertArtifact ?? (async () => ({
+    ok: false, code: 'CAPABILITY_UNAVAILABLE',
+    message: '宿主未提供 PDF/DOCX 导出能力；请原样下载或在桌面端导出',
+  }))
+
   /**
    * 会话索引：`sessionPersistence.list()` 是唯一来源。拿不到就不上报（status 里
    * `indexReady:false`），而不是发一份空表骗手机「你没有会话」。
@@ -279,6 +299,17 @@ export function apply(ctx, config = {}) {
         // 置顶/取消置顶（r11）：转发给宿主 workspaces，成功后由索引刷新把新集合带下去
         const r = await adapters.setPinned({ sessionId: body?.sessionId, pinned: body?.pinned !== false })
         const { status, body: payload } = unwrap(r, { pinned: body?.pinned !== false })
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/artifact-ticket') {
+        // ADR-011：显式产物导出。校验在 Host，票据在 Relay；这里只回元数据 + 内存中转的字节
+        const r = await adapters.createArtifactTicket({ sessionId: body?.sessionId, relPath: body?.path })
+        const { status, body: payload } = unwrap(r, {})
+        return send({ t: 'http/response', reqId, status, body: payload })
+      }
+      if (endpoint === 'session/artifact-convert') {
+        const r = await adapters.convertArtifact({ sessionId: body?.sessionId, path: body?.path, format: body?.format })
+        const { status, body: payload } = unwrap(r, {})
         return send({ t: 'http/response', reqId, status, body: payload })
       }
       if (endpoint === 'session/archive') {

@@ -10,7 +10,7 @@
 # 04 接口协议与数据模型（PROTOCOL.md）
 
 > 协议版本：`wbsync/1`
-> Owner：架构师 ｜ 状态：**修订 r12（发起人裁定采纳；四方会签已于 2026-11-10 取消）** ｜ 协议版本：`wbsync/1`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）；r12 §4 归档软移除。均不升主版本）
+> Owner：架构师 ｜ 状态：**修订 r13（发起人裁定采纳；四方会签已于 2026-11-10 取消）** ｜ 协议版本：`wbsync/1`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）；r12 §4 归档软移除；r13 §5.6 显式产物导出（ADR-011）。均不升主版本）
 > **本文是跨组件唯一契约源**。任何字段变更必须同时更新本文件、版本号与 CHANGELOG。
 > 字段名以锁定的 DSH commit 实际类型为准；W1 Spike 已完成实测回填（见 §3）。上游升级前须重跑全量契约测试（见 `07`）。
 
@@ -199,7 +199,9 @@ POST /api/sessions                   → 在指定在线 Host 新建会话/工�
 PATCH /api/sessions/:id              → 置顶（r11 `{ pinned }`）/ 归档（r12 `{ archived }`），二选一
 DELETE /api/sessions/:id             → **归档**（r12 起为软移除别名，强制 archived=true）
 POST /api/devices/:id/revoke         → 吊销令牌 + 断开在线手机（:id = Host 或其名下某台手机，r9）
-GET  /api/artifacts?sessionId=       → 产物元数据 + 临时下载票
+GET  /api/artifacts?sessionId=       → 产物元数据（只读日志扫描，r6）
+POST /api/artifacts/ticket           → 换一次性下载票（r13，只回元数据）
+GET  /api/artifacts/download/:id     → 用票据取字节（单次/60s/绑手机，r13）
 ```
 
 **约束**：
@@ -280,6 +282,8 @@ ANY  /d/<deviceId>/$events/*      审批 / 提问通道（r5：$events/result �
 { "t": "session/cancel",  "sessionId": "..." }
 { "t": "session/pin",     "sessionId": "...", "pinned": true }        // r11
 { "t": "session/archive", "sessionId": "...", "archived": true }     // r12
+{ "t": "session/artifact-ticket", "sessionId": "...", "path": "out/a.md" }  // r13
+{ "t": "session/artifact-convert", "format": "pdf" }                // r13：宿主无能力，恒 409
 { "t": "session/follow",  "sessionId": "...", "sinceSeq": 123 }
 { "t": "$events/result",  "eventId": "...", "answer": {...} }
 { "t": "ack", "ref": "clientMsgId", "status": "accepted|duplicate|rejected" }
@@ -377,7 +381,12 @@ ctx.on('approval/request', (request, next) => Promise<ApprovalOutcome>)   // 瀑
 
 为什么不让手机直接从事件流里攒卡片：Relay 的事件缓冲在内存里（capacity 1000），长会话会把早期交付事件裁掉；手机晚连、Relay 重启、缓冲被裁时卡片就空了。会话日志是 append-only 真源，问 Host 才能补齐——**和 `session/follow` 走的是同一条补齐逻辑**。
 
-**边界（ADR-010 / §5.4）**：只过元数据，**文件字节一个都不许进 Relay / CP**。卡片能做的只有「看到有什么」和「复制路径」，打开文件归桌面端自己的文件动作。导出 PDF/DOCX、临时下载票尚未实现；要做必须先立 ADR 处理「工作区文件是否允许经过 Relay」这个信任边界变化，不能顺手把字节塞进 `rows[]`。
+**边界（r6 → r13 按 ADR-011 收窄）**：`rows[]` 永远只有元数据，**文件字节绝不出现在索引里**。r13 起允许用户**显式点「下载」**时，把单个已呈现文件经 Relay **内存中转**给手机：
+- `POST /api/artifacts/ticket { sessionId, path }` → `session/artifact-ticket` 下行帧。Host 校验「路径在该会话 `deliverables/presented` 清单里 + 解析后仍在工作区内 + 体积 ≤512 KiB」，通过后只在帧里回 `bytes(base64)`；Relay 把字节留在内存，生成 128bit `ticketId`（60s TTL、单次使用、绑定手机令牌摘要），**手机响应只含 `{ticketId,name,mime,size,expiresIn}`**。
+- `GET /api/artifacts/download/:ticketId` → 校验票据与手机令牌，删票后流式回字节（`Content-Disposition: attachment`）。字节不落盘、不缓存、不进事件流、不进 CP。
+- **自动同步仍是 0 字节**：出网审计的「0 字节工作区文件」判据收窄为**自动路径**，显式导出单独记审计行（ticketId / 路径哈希 / 字节数 / 时间，**不含正文**）。
+- **不伪造格式**：MD/文本/已有 PDF 原样下载；PDF/DOCX 转换宿主未提供（asar 取证 `exportPdf/exportDocx` 0 命中），请求明确 409 `CAPABILITY_UNAVAILABLE`。
+- 完整决策与后果见 `03` ADR-011。
 
 畸形事件（缺 `turn` / `callId` / `files`、路径空白、描述非字符串）一律跳过，**不猜路径、不编文件名**；同名文件在两个 `seq` 各留一行，不按路径合并。
 
@@ -515,6 +524,7 @@ allowedEndpoints:
 - **r1（2026-11-07）**：按 W1 Spike 实测澄清事件契约、幂等映射与 Idempotency 归属；仅新增可选字段与说明，无删除/改名，兼容 `wbsync/1` 现有客户端；依据 ADR-007~009（待会签）。
 - **r2（2026-11-10）**：`SessionIndex.state` 扩充 `stopped` / `failed` 两个枚举值并给出 `turn/end.reason` 映射；新增 §5.4 正文可见性边界；修正「新增事件依赖 `ignorable`」的过时表述。无删除、无改名，兼容 `wbsync/1` 现有客户端；依据 WorkBuddy 对标复核与 ADR-010（待会签）。
 - **r3（2026-11-10）**：新增 `fileUploads/*` 附件上行端点（`POST /d/<deviceId>/fileUploads/upload`）与 §7 的白名单项、安全边界（Relay 内存中转、receipt 限 Agent 作用域）；`session/prompt` 的 `content` 允许 `{type:'file',receiptId}`（宿主 schema 原本已支持，本次仅明确手机侧用法）。无删除、无改名，兼容 `wbsync/1` 现有客户端；发起人裁定采纳（四方会签已取消）。
+- **r13（2026-11-12）**：显式产物导出（ADR-011）。新增 `POST /api/artifacts/ticket` / `GET /api/artifacts/download/:id` 与 `session/artifact-ticket` / `session/artifact-convert` 下行帧（§4/§5.3/§5.6）。`rows[]` 仍只含元数据；字节只在 Relay 内存中转，由一次性票据换流。ADR-010 的「工作区文件 0 字节经过 Relay」收窄为「**自动路径 0 字节**」，显式导出单独审计；`02` NFR-4、`07` TC-6/TC-7、`08` 出网审计口径同步。不新增端口、不落盘、不伪造 PDF/DOCX。
 - **r12（2026-11-12）**：手机端「移除工作空间」定为**归档（软移除）**——`SessionIndex` 加可选 `archived`（§2），`PATCH /api/sessions/:id { archived }` 与下行 `session/archive`（§5.3）负责归档/恢复，`DELETE /api/sessions/:id` 改为归档别名（强制 `archived=true`）。`GET /api/sessions?archived=true` 只回已归档行，缺省只回未归档。宿主集合 `archivedSessionIds` 权威；**落盘日志一行不动**，手机不开放真删。为何选归档：手机误点的代价应只是「从列表消失、能一键恢复」，而不是不可逆地删数据。旧客户端不认识 `archived` 字段时照常显示，不破坏兼容。
 - **r11（2026-11-12）**：手机可**置顶 / 取消置顶**（`PATCH /api/sessions/:id { pinned }`，§4；下行新增 `session/pin`，§5.3）。旧约束「置顶仅 PC、手机 403」解除，但**排序**（`pinnedOrder`）仍由 Host 权威（宿主 `workspaces.pinSession` 的全局集合，最近置顶在前），手机不改序、调序仍仅 PC。索引行的 `pinned/pinnedOrder` 改为**如实上报**（此前恒为 false/0）。纯新增/语义放宽，旧客户端不受影响。
 - **r10（2026-11-11）**：`GET /api/sessions` 响应回带 `host = { deviceId, name, platform, online, lastSeenAt }`（§4），供手机端画「这台电脑在不在线」的状态点，不必再单独打一次 `/health`（那是全局面板，答不了「这一台」）。配套：§5.2 `host/register` 加可选 `deviceName` / `platform`（仅展示，不参与判定；缺省为 `null`），`name` 就取自它。纯新增字段，不改变 `rows` 语义，旧客户端忽略即可。

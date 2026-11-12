@@ -4,6 +4,21 @@
 
 ---
 
+## [P1 W8 · 起步] · 2026-11-12 16:4x · 显式产物导出 + 临时下载票（ADR-011 / r13）
+
+W8 唯一缺口。协议 §5.6 明确写着「要做必须先立 ADR 处理信任边界变化」，所以**先立 ADR-011 再写代码**：
+
+- **决策**：只允许用户**显式点下载**时把单个已呈现文件经 Relay **内存中转**；自动同步仍 0 字节。六条硬约束（已呈现白名单 / 工作区内 / 一次性票据 60s+绑手机 / 512 KiB 上限 / 单独审计行 / 不伪造格式），见 `03` ADR-011。
+- **Host**：`createArtifactExporter` 只做「校验 + 读字节」——路径必须在 `deliverables/presented` 清单里、解析后仍在工作区内、体积不超上限；票据由 Relay 持有，Host 不建表、不开新端口。
+- **Relay**：`bridge()` 新增可选 `transform`，把「带字节的 Host 响应」换成「只含元数据的手机响应」；`POST /api/artifacts/ticket` 发票、`GET /api/artifacts/download/:id` 单次换流（Content-Disposition、no-store）。
+- **手机**：产物卡片加「下载」按钮，两步换票 → Blob；`client.createArtifactTicket` / `fetchArtifactBlob`。
+- **口径同步**：`02` NFR-4、`07` TC-7.6、`08` 出网审计、「0 字节工作区文件」统一收窄为「**自动路径** 0 字节」；显式导出单独审计。ADR-010 的「CP/Relay 零正文落盘」不变。
+- **没做 PDF/DOCX 转换**：宿主 asar 里 `exportPdf/exportDocx` **0 命中**，没有转换器。原样下载；转换请求明确 409 `CAPABILITY_UNAVAILABLE`，不拼一个「看起来像」的文件。要做得引入宿主侧转换器或分块通道，另立 ADR。
+- 测试 307 → **316**（Host 边界 7 条 + 下行 + Relay 票据端到端 + 静态断言）；SW **v26**；bundle **0.1.18**。
+- **真机取证（诚实记录）**：整条链通了——越界路径换票返回 `ARTIFACT_NOT_PRESENTED`；但抽查会话 `deliverables/presented` **0 条**，所以真机上没有可下载的正例（与 §5.6 里的真机观察一致）。正例由单测用真实临时文件覆盖。**下一步**该接宿主的 `changeSummary` 路由（asar 里 17 处命中）拿真实产物清单，而不是从工具调用里猜路径。
+
+---
+
 ## [P1 W7 · 续] · 2026-11-12 15:5x · 状态点六态 + 事件流标题可读化
 
 真机截图确认置顶/归档都在跑之后，把 W7 清单里最后一项自有工作收掉：
