@@ -155,11 +155,11 @@ test('C9 客户端 uploadAttachment + submitPrompt：附件 receiptId 进 prompt
   await registerHost('pc-c9', null, {
     'fileUploads/upload': async (body) => {
       seen.upload = body
-      return { status: 200, body: { ok: true, data: { receiptId: 'rc-c9', file: { bytes: 3, name: 'a.txt' } }, protocol: 'wbsync/1' } }
+      return { status: 200, body: { ok: true, data: { receiptId: 'rc-c9', file: { bytes: 3, name: 'a.txt' } }, protocol: 'wbsync/2.3' } }
     },
     'session/prompt': async (body) => {
       seen.prompt = body
-      return { status: 200, body: { ok: true, data: { accepted: true }, protocol: 'wbsync/1' } }
+      return { status: 200, body: { ok: true, data: { accepted: true }, protocol: 'wbsync/2.3' } }
     },
   })
   const client = createPwaClient({ baseUrl: base, deviceId: 'pc-c9', token })
@@ -184,7 +184,7 @@ test('C8 客户端 cancelTurn()：走白名单 session/cancel，缺参数如实�
   await registerHost('pc-c8', null, {
     'session/cancel': async (body) => {
       seen.push(body)
-      return { status: 200, body: { ok: true, data: { cancelled: true }, protocol: 'wbsync/1' } }
+      return { status: 200, body: { ok: true, data: { cancelled: true }, protocol: 'wbsync/2.3' } }
     },
   })
   const client = createPwaClient({ baseUrl: base, deviceId: 'pc-c8', token })

@@ -284,12 +284,15 @@ test('W13 注册帧里的设备名/平台会存进 CP，并出现在手机端 se
     ws.send(JSON.stringify({
       t: 'host/register', deviceId, hostToken: 'host-secret', caps: [],
       deviceName: '  工作台-PC  ', platform: 'win32',
+      hostId: '  ws-named-host  ',
     }))
     const reg = await inbox.next()
     assert.equal(reg.t, 'host/registered')
     // 名字只做展示：去空白、限长，别让它在界面上撑破一行
     assert.equal(relay.cp.getDevice(deviceId).deviceName, '工作台-PC')
     assert.equal(relay.cp.getDevice(deviceId).platform, 'win32')
+    // v2.3（r15）：hostId 去空白限长后落 CP，缺省回落 null（值兼容 deviceId）
+    assert.equal(relay.cp.getDevice(deviceId).hostId, 'ws-named-host')
 
     const list = await call(`/api/sessions?deviceId=${deviceId}`, { token })
     assert.equal(list.status, 200)

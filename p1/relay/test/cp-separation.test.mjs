@@ -13,7 +13,7 @@ import assert from 'node:assert/strict'
 import { createControlPlane } from '../../cp/src/index.js'
 import { createRelay } from '../src/server.js'
 
-const PROTOCOL = 'wbsync/1'
+const PROTOCOL = 'wbsync/2.3'
 
 const startRelay = async (controlPlane, opts = {}) => {
   const relay = createRelay({ controlPlane, ...opts })

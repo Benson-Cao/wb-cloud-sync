@@ -2188,7 +2188,7 @@ async function clearProjectionStubs({ projRoot, sids, cwd }) {
 export const name = 'wb-cloud-sync'
 export const inject = ['webServer', 'sessionPersistence']
 
-const PROTOCOL = 'wbsync/1'
+const PROTOCOL = 'wbsync/2.3'
 const DEFAULTS = {
   relayUrl: '',
   hostToken: '',
@@ -2196,7 +2196,7 @@ const DEFAULTS = {
   deviceName: '',      // 电脑名（给手机端的电脑切换用）；空则由 bundle 用 hostname() 填
   platform: '',        // 'win32' | 'darwin' | 'linux'
   // v2.3（04 §8 / 13 C1）：状态路由需上报 hostId / dshCommit / engineState。
-  // 这三项都是**展示与自检用**，不参与帧语义，也不改 wbsync/1 的 deviceId 链路：
+  // 这三项都是**展示与自检用**，不参与帧语义，也不改链路命名（hostId 值回落 deviceId）：
   //   hostId 空则回落 deviceId（同一台 PC），不假装已实现 (hostId, sessionId) 命名空间隔离；
   //   dshCommit 空则如实回 null，绝不从 package.json 猜一个版本号冒充锁定基线；
   //   engineState 描述**本 PC 插件自身**，不代表 Termux 本机引擎（那属于 App/引擎层）。
@@ -2661,6 +2661,9 @@ function __apply(ctx, config = {}) {
       state.attempts = 0
       send({
         t: 'host/register', deviceId: cfg.deviceId, protocol: PROTOCOL,
+        // v2.3（04 §5.2）：主机标识以 hostId 为正式名称；本轮值仍与 deviceId 相同
+        // （命名迁移第一步，语义映射见 PROTOCOL 变更记录），供 Relay/CP 落字段。
+        hostId: cfg.hostId || cfg.deviceId,
         // 设备名只给手机端显示（切换电脑时要认得出来），不参与任何判定
         ...(cfg.deviceName ? { deviceName: cfg.deviceName } : {}),
         ...(cfg.platform ? { platform: cfg.platform } : {}),

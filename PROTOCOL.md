@@ -10,7 +10,7 @@
 # 04 接口协议与数据模型（PROTOCOL.md）
 
 > 协议版本：`wbsync/1`
-> Owner：架构师 ｜ 状态：**修订 r14（发起人裁定采纳；四方会签已于 2026-11-10 取消）** ｜ 协议版本：`wbsync/1`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）；r12 §4 归档软移除；r13 §5.6 显式产物导出（ADR-011）；r14 §5.6 Office→PDF 转换（同一票据，ADR-011 修订）。均不升主版本）
+> Owner：架构师 ｜ 状态：**修订 r15（发起人裁定采纳；四方会签已取消）** ｜ 协议版本：`wbsync/2.3`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）；r12 §4 归档软移除；r13 §5.6 显式产物导出（ADR-011）；r14 §5.6 Office→PDF 转换（同一票据，ADR-011 修订）；r15 §5.2 注册帧与 §8 状态路由引入 `hostId`（命名迁移第一步，值回落 `deviceId`）。升主版本至 2.3）
 > **本文是跨组件唯一契约源**。任何字段变更必须同时更新本文件、版本号与 CHANGELOG。
 > 字段名以锁定的 DSH commit 实际类型为准；W1 Spike 已完成实测回填（见 §3）。上游升级前须重跑全量契约测试（见 `07`）。
 
@@ -258,7 +258,8 @@ ANY  /d/<deviceId>/$events/*      审批 / 提问通道（r5：$events/result �
 
 ```jsonc
 // Host → Relay (WS /ws/host)
-{ "t": "host/register", "deviceId": "...", "protocol": "wbsync/1",
+{ "t": "host/register", "deviceId": "...", "hostId": "...", // v2.3：主机标识正式名（本轮值 = deviceId，命名迁移第一步）
+  "protocol": "wbsync/2.3",
   "deviceName": "工作台-PC", "platform": "win32",          // r10：可选，仅供手机端显示
   "caps": ["attachments","artifacts","schedule","approval"],
   "hostToken": "<HOST_TOKEN>" }
@@ -267,6 +268,8 @@ ANY  /d/<deviceId>/$events/*      审批 / 提问通道（r5：$events/result �
 { "t": "host/heartbeat", "ts": 1730000000000 }        // 15s
 ```
 
+> `hostId` 是 **v2.3（r15）新增的主机标识正式名称**：本轮为命名迁移第一步，Host 发的值等于 `deviceId`，Relay 原样存进 `Device`（限长 64、去空白）并回 `host/registered`；缺省（旧 Host）回落 `deviceId`。`hostId` 参与设备归属判定，与 `deviceId` 等值。
+>
 > `deviceName` / `platform` 是**可选展示字段**：Relay 去空白、限长（60 / 20）后存进 `Device`，经 `GET /api/sessions` 的 `host` 回给手机（r10）。它们**不参与任何判定**——鉴权、在线、归属都不看这两个字段。缺省（r9 及更早的 Host）照常注册，`host.name` 为 `null`。
 
 ### 5.3 帧透传规则
@@ -426,10 +429,9 @@ ctx.on('approval/request', (request, next) => Promise<ApprovalOutcome>)   // 瀑
 | kind | path | 用途 |
 |---|---|---|
 | exact | `/__wbsync/pair` | 生成/展示配对码 |
-| exact | `/__wbsync/status` | 连接状态、设备信息、版本号 |
-| exact | `/__wbsync/config` | 读写 relayUrl / hostToken / autoConnect |
-| prefix | `/__wbsync/static/` | client 半边静态资源 |
-| exact | `/__wbsync/artifacts/:id` | 产物临时下载票换流 |
+| exact | `/__wbsync/status` | 连接状态、设备信息、版本号、`hostId` / `dshCommit` / `engineState`（r15） |
+| exact | `/__wbsync/config` | **只读**：relayUrl / autoConnect / allowedEndpoints / `hostTokenConfigured`（布尔，不回明文）/ hostId / dshCommit / engineState（r15 收紧） |
+| — | `/__wbsync/static/`、`/__wbsync/artifacts/:id` | **r15 删除**：插件不托管 UI 静态资源（13 §2）；产物票在 Relay `/api/artifacts/*`（§5.6），Host 本地无此路由 |
 
 - `register()` 返回 disposer，**必须**交 `ctx.effect()`；插件卸载时路由自动撤回。
 - exact/prefix 匹配顺序固定：先全表 exact → 最长前缀 → 回退处理器。**重复注册同 kind+path 会抛异常**，视为配置错误。
@@ -543,6 +545,7 @@ allowedEndpoints:
 
 | 版本 | 日期 | 变更 | 作者 |
 |---|---|---|---|
+| **wbsync/2.3** | 2026-11-13 | **r15（D-005 对齐）**：§5.2 `host/register` 引入与 §6 `/status` `/config` 对齐——`hostId`（主机标识正式名，本轮值回落 `deviceId`，命名迁移第一步）；§6 表与实现对齐（config 改只读脱敏、删 static / artifacts 假路由）。升主版本至 2.3 | 架构师 |
 | wbsync/1 | 2026-11-07 | 首版冻结 | 架构师 |
 | wbsync/1 r1 | 2026-11-07 | 按 Spike 实测修订 §1/§2/§3，新增 ADR-007~009 引用（待会签） | 架构师 |
 | wbsync/1 r2 | 2026-11-10 | WorkBuddy 对标复核：state 扩六态、新增 §5.4 正文可见性边界、ADR-010 引用（待会签） | 架构师 |

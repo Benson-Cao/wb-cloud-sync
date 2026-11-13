@@ -1,8 +1,8 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-12T18:50:29.809Z",
+  "capturedAt": "2026-11-13T05:10:33.289Z",
   "git": {
-    "head": "1d983b16381c05c22ed6803ec249a92cbcb60e20",
+    "head": "8da3761cecf2709dedd68aa8ab2cedabb459e01e",
     "branch": "main",
     "worktreeClean": false
   },
@@ -12,20 +12,25 @@
     "dataChanged": [],
     "signoffChanged": [],
     "artifactChanged": [],
-    "narrativeChanged": [],
+    "narrativeChanged": [
+      "PROTOCOL.md"
+    ],
     "notes": [],
-    "previousCapturedAt": "2026-11-12T18:30:33.998Z",
-    "previousGitHead": "7fcf4edb473ff4d781dd830e62869b7ff0186df1",
+    "previousCapturedAt": "2026-11-12T18:50:29.809Z",
+    "previousGitHead": "1d983b16381c05c22ed6803ec249a92cbcb60e20",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-12T18:30:33.998Z",
-      "gitHead": "7fcf4edb473ff4d781dd830e62869b7ff0186df1",
+      "previousStatus": "DRIFTED",
+      "previousReason": "描述文字变化（不阻断）：PROTOCOL.md",
+      "capturedAt": "2026-11-12T18:50:29.809Z",
+      "gitHead": "1d983b16381c05c22ed6803ec249a92cbcb60e20",
       "dataChanged": [],
       "signoffChanged": [],
       "artifactChanged": [],
-      "narrativeChanged": []
+      "narrativeChanged": [
+        "PROTOCOL.md"
+      ]
     }
   },
   "fingerprints": {
@@ -54,11 +59,11 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "54c559bf3573ddc713f19e1b0d4b703da13c892763194d1333c9f7d28bfaee9d"
+      "PROTOCOL.md": "3d3b17074bf9d0766237497022f2d20e564fb4e0e1f71d1e1be982b6ddb32258"
     }
   },
   "secretScan": {
-    "filesScanned": 132,
+    "filesScanned": 148,
     "patterns": [
       "github-classic",
       "github-fine-grained",
@@ -99,7 +104,7 @@
     "chaosFail": 0,
     "chaosError": null,
     "perfVerdict": "PASS",
-    "perfAgeDays": 2.2,
+    "perfAgeDays": 2.6,
     "perfReason": null
   },
   "automated": [

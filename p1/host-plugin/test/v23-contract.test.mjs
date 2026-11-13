@@ -2,7 +2,7 @@
  * v2.3 契约补齐（04 §8 / 12 S-3.3 / 13 C1）· Host 插件本地路由
  * ---------------------------------------------------------------
  * 这些测试锁的不是「新功能好不好用」，而是三条边界：
- *   1. 只增不删：status 原有字段一个不少，wbsync/1 帧语义不变；
+ *   1. 只增不删：status 原有字段一个不少，wbsync/2.3 链路命名不漂移；
  *   2. 不泄密：/__wbsync/config 绝不回 hostToken 明文；
  *   3. 不伪造：dshCommit / hostId 未配置时如实回落或为 null，绝不猜一个值。
  *
@@ -13,7 +13,7 @@ import { test } from 'node:test'
 
 import { apply } from '../src/index.js'
 
-const PROTOCOL = 'wbsync/1'
+const PROTOCOL = 'wbsync/2.3'
 
 function createMockCtx() {
   const routes = new Map()

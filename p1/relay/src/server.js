@@ -31,7 +31,7 @@ import { createControlPlane } from '../../cp/src/index.js'
 import { createEventHub } from './events.js'
 import { upgradeToWebSocket } from './ws.js'
 
-export const PROTOCOL = 'wbsync/1'
+export const PROTOCOL = 'wbsync/2.3'
 // `fileUploads/*` 于 wbsync/1 r3 加入：附件上行经 Relay 内存中转，不落盘、不缓存、不进事件流
 export const ALLOWED_ENDPOINTS = ['session/*', 'fileUploads/*', '$events/*']
 
@@ -694,6 +694,9 @@ export function createRelay(options = {}) {
             ? { deviceName: body.deviceName.trim().slice(0, 60) } : {}),
           ...(typeof body.platform === 'string' && body.platform.trim()
             ? { platform: body.platform.trim().slice(0, 20) } : {}),
+          // v2.3：主机标识正式名称；缺省回落 deviceId（命名迁移第一步，值兼容）
+          ...(typeof body.hostId === 'string' && body.hostId.trim()
+            ? { hostId: body.hostId.trim().slice(0, 64) } : {}),
         })
         return ok(res, { deviceId: body.deviceId, protocol: PROTOCOL })
       }
@@ -1246,6 +1249,9 @@ export function createRelay(options = {}) {
               ? { deviceName: msg.deviceName.trim().slice(0, 60) } : {}),
             ...(typeof msg.platform === 'string' && msg.platform.trim()
               ? { platform: msg.platform.trim().slice(0, 20) } : {}),
+            // v2.3：hostId 缺省回落 deviceId；值兼容，命名语义见 PROTOCOL 变更记录
+            ...(typeof msg.hostId === 'string' && msg.hostId.trim()
+              ? { hostId: msg.hostId.trim().slice(0, 64) } : {}),
           })
           conn.sendJson({ t: 'host/registered', deviceId, protocol: PROTOCOL })
           // 时序窗口：配对 / 心跳先把 CP 标成在线，但 WS 还没注册时，bridge 会把

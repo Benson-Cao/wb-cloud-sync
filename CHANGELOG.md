@@ -4,6 +4,47 @@
 
 ---
 
+## [v2.3 收口 · A 第一步] · 2026-11-13 13:1x · 协议 wbsync/2.3 r15 + hostId 贯通（0.2.1）
+
+用户裁定取消会签后继续。本轮完成清单 §3 A 项第一步（命名迁移：字段贯通、值兼容）。
+
+### 协议（docs/04 r15 → PROTOCOL.md）
+
+- 版本升 **`wbsync/2.3`**（首次主版本升级）。
+- §5.2 `host/register` 帧加 `hostId`：主机标识正式名称，**本轮值回落 `deviceId`**
+  （命名迁移第一步，不做改名）；Relay 限长 64、去空白后存进 `Device` 行。
+- §6 路由表对齐实现：`config` 改**只读脱敏**（r15 收紧）、删除从未实现的
+  `/__wbsync/static/` 与 `/__wbsync/artifacts/:id`（产物票实际在 Relay `/api/artifacts/*`）。
+- `PROTOCOL.md` 由脚本重新生成，G4 PASS。
+
+### 代码
+
+- Host：`PROTOCOL` 升 2.3，注册帧带 `hostId`。
+- Relay：`PROTOCOL` 升 2.3；两处 `upsertDevice` 接受 `hostId`。
+- **CP（真机抓到的缺口）**：`upsertDevice` 是固定字段白名单，`hydrate` 逐字段恢复——
+  不改这两处，relay 传的 `hostId` 会被**静默丢弃**（单测用假 CP 测不出白名单行为，
+  只有真机查 `cp.json` 才暴露）。已补 `hostId` 字段 + `hydrate` 恢复 + `ws.test`
+  落盘断言（含去空白限长）。
+- 测试 / `beta-check.mjs`：6 文件的 `'wbsync/1'` → `'wbsync/2.3'`；历史修订引用
+  （`wbsync/1 r2 / r3`）保留不改。plugin.test 注册帧断言补 `hostId`。
+
+### 真机验证（13:1x）
+
+DSH 重启（web 端口 58761）+ Relay 重启后：插件 `config` / `status` 均
+`protocol: "wbsync/2.3"`、`connected: true`、索引 24 条；Relay `/health`
+`wbsync/2.3 / online:1`；`cp.json` 设备行 `hostId` 与 `deviceId` 等值落盘。
+
+### 已知边界（r16 待办）
+
+协议号当前是**声明性字段**：WS 注册不校验 `msg.protocol`，2.3 插件连 1.0 Relay
+不会报 `HOST_MISMATCH`。完整版本协商与版本不符拦截未实现。
+`/d/<hostId>/` 路径参数改名与 `COMMIT_DRIFT` / `ENGINE_SAFE_MODE` 也在后续批次。
+
+- 测试 364 / 364 PASS（新增 hostId 断言）；门禁 10/10 PASS / CURRENT；
+  产物 `dist/dsh-wb-cloud-sync-0.2.1.tgz`（53.5 kB）已部署。
+
+---
+
 ## [v2.3 收口 · B+C] · 2026-11-13 11:1x · 改名 0.2.0 + 客户端半边收为设置页
 
 用户裁定四方会签取消，继续执行 `docs/v2.3/收口差异清单.md` 的剩余项。本轮完成 B（改名）与 C（删手机端 UI），A（协议 2.3）与 E 的 Host 侧镜像清理列为下一批。

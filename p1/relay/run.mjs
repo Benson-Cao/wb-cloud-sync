@@ -23,7 +23,7 @@
  *   - 手机浏览器打开  http://<局域网IP>:<PORT>/app          （PWA 壳页面）
  *   - PC 宿主插件配置 relayUrl = http://<局域网IP>:<PORT>，hostToken 同上
  */
-import { createRelay } from './src/server.js'
+import { createRelay, PROTOCOL } from './src/server.js'
 import { createControlPlane } from '../cp/src/index.js'
 import { createFileStore, defaultCpFile } from '../cp/src/persist.js'
 import { readFileSync } from 'node:fs'
@@ -69,7 +69,7 @@ for (const nets of Object.values(networkInterfaces())) {
   }
 }
 
-console.log(`[wbsync] Relay 已启动：${HOST}:${port}（协议 wbsync/1）`)
+console.log(`[wbsync] Relay 已启动：${HOST}:${port}（协议 ${PROTOCOL}）`)
 console.log('[wbsync] Relay 地址（手机 / PC 插件都用这些）：')
 for (const url of lanUrls) {
   console.log(`  ${url}`)

@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const PROTOCOL = 'wbsync/1'
+const PROTOCOL = 'wbsync/2.3'
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
 

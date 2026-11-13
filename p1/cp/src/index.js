@@ -111,6 +111,7 @@ export function createControlPlane({
         deviceName: raw.deviceName ?? null,
         platform: raw.platform ?? null,
         capabilities: Array.isArray(raw.capabilities) ? [...raw.capabilities] : [],
+        hostId: typeof raw.hostId === 'string' ? raw.hostId : null,
         tokenDigest: typeof raw.tokenDigest === 'string' ? raw.tokenDigest : null,
         allowMobile: raw.allowMobile !== false,
         state: 'offline',
@@ -171,6 +172,9 @@ export function createControlPlane({
       deviceName: input.deviceName ?? prev?.deviceName ?? null,
       platform: input.platform ?? prev?.platform ?? null,
       capabilities: input.capabilities ?? prev?.capabilities ?? [],
+      // v2.3（r15）：主机标识正式名称；缺省回落 null，值兼容 deviceId（命名迁移第一步）
+      hostId: typeof input.hostId === 'string' && input.hostId.trim()
+        ? input.hostId.trim().slice(0, 64) : prev?.hostId ?? null,
       // 令牌摘要只由 pair/verify 写入；注册时不许改，否则任何 Host 都能顶掉别人的令牌
       tokenDigest: prev?.tokenDigest ?? null,
       allowMobile: input.allowMobile ?? prev?.allowMobile ?? true,

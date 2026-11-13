@@ -19,7 +19,7 @@ import { createRelay } from '../../relay/src/server.js'
 import { upgradeToWebSocket } from '../../relay/src/ws.js'
 import { apply, name as pluginName, inject } from '../src/index.js'
 
-const PROTOCOL = 'wbsync/1'
+const PROTOCOL = 'wbsync/2.3'
 
 /* ------------------------------------------------------------------ 替身 */
 
@@ -139,7 +139,7 @@ test('插件声明：名字、inject 与协议版本', () => {
   assert.equal(pluginName, 'wb-cloud-sync')
   // 只 inject 宿主已有的两个服务；未注入也不应让整个插件 pending
   assert.deepEqual(inject, ['webServer', 'sessionPersistence'])
-  assert.equal(PROTOCOL, 'wbsync/1')
+  assert.equal(PROTOCOL, 'wbsync/2.3')
 })
 
 /* ---------------------------------------------------------- 未配置 Relay */
@@ -179,6 +179,7 @@ test('注册帧带上 deviceId / caps / hostToken，收到 host/registered 才�
     const reg = relay.host.registerFrame
     assert.equal(reg.t, 'host/register')
     assert.equal(reg.deviceId, 'pc-1')
+    assert.equal(reg.hostId, 'pc-1', 'v2.3 注册帧带 hostId（值回落 deviceId）')
     assert.equal(reg.protocol, PROTOCOL)
     assert.equal(reg.hostToken, 'tok-abc')
     assert.deepEqual(reg.caps, ['attachments'])

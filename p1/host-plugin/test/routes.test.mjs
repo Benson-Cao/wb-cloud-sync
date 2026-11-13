@@ -42,7 +42,7 @@ const makeAdapters = () => {
 const makeApprovals = (result) => ({ answer: () => result })
 
 const build = (adapters, approvals) => createRoutes({
-  adapters, approvals, unwrap, errBody, protocol: 'wbsync/1',
+  adapters, approvals, unwrap, errBody, protocol: 'wbsync/2.3',
 })
 
 test('R1 每个会话端点都转发到对应适配器，并统一返回 {status,body}', async () => {
