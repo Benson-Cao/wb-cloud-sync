@@ -27,7 +27,7 @@ function createMockCtx() {
   const routes = new Map()
   const listeners = new Map()
   const effects = []
-  const calls = { registered: [], unregistered: [], effectLabels: [] }
+  const calls = { registered: [], registeredKinds: [], unregistered: [], effectLabels: [] }
 
   const ctx = {
     routes,
@@ -37,6 +37,7 @@ function createMockCtx() {
       register(spec) {
         routes.set(spec.path, spec.handler)
         calls.registered.push(spec.path)
+        calls.registeredKinds.push({ path: spec.path, kind: spec.kind })
         return () => {
           routes.delete(spec.path)
           calls.unregistered.push(spec.path)
@@ -467,11 +468,15 @@ test('卸载即撤回：路由注销、监听移除、不再上行也不再重�
       reconnectBaseMs: 40, reconnectMaxMs: 80,
     })
     await waitFor(() => plugin.state.connected, '已连接')
-    // 四条本地路由：状态 / 配对码 / 镜像同步 / 镜像清理（ADR-012）
-    assert.deepEqual(ctx.calls.registered.sort(), ['/__wbsync/mirror-clear', '/__wbsync/mirror-sync', '/__wbsync/pair', '/__wbsync/status'])
+    // 五条 exact 功能路由：状态 / 配置 / 配对码 / 镜像同步 / 镜像清理（ADR-012）。
+    // v2.3 要求「不注册任何 UI 路由」，因此这里应该永远没有 prefix 静态托管。
+    const EXPECTED_ROUTES = ['/__wbsync/config', '/__wbsync/mirror-clear', '/__wbsync/mirror-sync', '/__wbsync/pair', '/__wbsync/status']
+    assert.deepEqual(ctx.calls.registered.sort(), EXPECTED_ROUTES)
+    assert.deepEqual(ctx.calls.registeredKinds.map((r) => r.kind), Array(EXPECTED_ROUTES.length).fill('exact'))
+    assert.ok(ctx.calls.registered.every((p) => p.startsWith('/__wbsync/') && !p.includes('/ui/') && !p.includes('/static/')))
 
     ctx.dispose()
-    assert.deepEqual(ctx.calls.unregistered.sort(), ['/__wbsync/mirror-clear', '/__wbsync/mirror-sync', '/__wbsync/pair', '/__wbsync/status'])
+    assert.deepEqual(ctx.calls.unregistered.sort(), EXPECTED_ROUTES)
     assert.equal(ctx.listenerCount('session/event'), 0)
     assert.equal(ctx.routes.size, 0)
     assert.equal(plugin.state.connected, false)

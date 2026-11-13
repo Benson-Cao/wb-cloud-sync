@@ -6,7 +6,8 @@
  *   2. 订阅宿主 `session/event`，把事件原样（含 `seq`）上行；
  *   3. 处理 Relay 下行 `http/request`：`session/prompt` / `session/cancel` /
  *      `session/follow` 分派给适配器，结果回 `http/response`；
- *   4. 注册本地具名路由 `/__wbsync/status`、`/__wbsync/pair`；
+ *   4. 注册本地具名路由 `/__wbsync/status`、`/__wbsync/config`、`/__wbsync/pair`
+ *      （全部为 exact 功能路由；v2.3 要求不托管任何 UI 静态资源，故不注册 prefix 路由）；
  *   5. 所有注册与定时器交 `ctx.effect`，卸载即撤回。
  *
  * 铁律（ADR-008 / 03 §3.1）：**绝不 `open(id,'write')`**。手机投递必须走宿主
@@ -40,6 +41,17 @@ const DEFAULTS = {
   deviceId: '',
   deviceName: '',      // 电脑名（给手机端的电脑切换用）；空则由 bundle 用 hostname() 填
   platform: '',        // 'win32' | 'darwin' | 'linux'
+  // v2.3（04 §8 / 13 C1）：状态路由需上报 hostId / dshCommit / engineState。
+  // 这三项都是**展示与自检用**，不参与帧语义，也不改 wbsync/1 的 deviceId 链路：
+  //   hostId 空则回落 deviceId（同一台 PC），不假装已实现 (hostId, sessionId) 命名空间隔离；
+  //   dshCommit 空则如实回 null，绝不从 package.json 猜一个版本号冒充锁定基线；
+  //   engineState 描述**本 PC 插件自身**，不代表 Termux 本机引擎（那属于 App/引擎层）。
+  hostId: '',
+  dshCommit: '',
+  engineState: 'running',
+  // v2.3（04 §9）：下行端点白名单，默认拒绝其余；仅供 /__wbsync/config 自检展示，
+  // 真正的下行分派仍由 routes.js 的端点表裁决，不在这里另开一条判定路径。
+  allowedEndpoints: ['session/*', '$events/*'],
   autoConnect: true,
   reconnectBaseMs: 500,
   reconnectMaxMs: 15_000,
@@ -550,6 +562,42 @@ export function apply(ctx, config = {}) {
           indexStats: state.indexStats ?? null,
           lastSeq: Object.fromEntries(state.lastSeq),
           writer: hostAdapters.capabilities?.() ?? { injected: true },
+          protocol: PROTOCOL,
+          // —— v2.3 契约补齐（04 §8）——
+          // 只增不删：原有字段一个不动，PWA / client 半边 / Relay 的解析逻辑无需改。
+          hostId: cfg.hostId || cfg.deviceId || null,
+          hostIdSource: cfg.hostId ? 'config' : 'deviceId',
+          dshCommit: cfg.dshCommit || null,
+          engineState: cfg.engineState || 'running',
+          engineScope: 'pc-host',
+        }))
+      },
+    }))
+    /**
+     * v2.3（04 §8 / 12 S-3.3）：`/__wbsync/config` 只读自检路由。
+     *
+     * 两个刻意的设计取舍：
+     *   1. **绝不回 hostToken 明文**——只回 `hostTokenConfigured` 布尔。路由挂在
+     *      本机 webServer 上，页面里任何脚本都能读；回明文等于把 Host 注册凭据交出去。
+     *   2. **只读，不提供写入**——写配置入口会扩大攻击面，且 DSH 的配置正主是
+     *      `apply(ctx, config)` / `~/.dsh/wbsync-host.json`，不该在这条路由上开旁路。
+     */
+    disposers.push(ctx.webServer.register({
+      kind: 'exact',
+      path: '/__wbsync/config',
+      handler: (req, res) => {
+        if ((req.method ?? 'GET') !== 'GET') {
+          return json(res, 405, errBody('ENDPOINT_NOT_ALLOWED', '仅支持 GET'))
+        }
+        return json(res, 200, okBody({
+          relayUrl: cfg.relayUrl || '',
+          autoConnect: Boolean(cfg.autoConnect),
+          allowedEndpoints: cfg.allowedEndpoints ?? ['session/*', '$events/*'],
+          hostTokenConfigured: Boolean(cfg.hostToken),
+          hostId: cfg.hostId || cfg.deviceId || null,
+          dshCommit: cfg.dshCommit || null,
+          engineState: cfg.engineState || 'running',
+          engineScope: 'pc-host',
           protocol: PROTOCOL,
         }))
       },

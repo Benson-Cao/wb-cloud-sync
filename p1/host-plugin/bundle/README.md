@@ -4,7 +4,25 @@
 
 ## 安装
 
-DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.11.tgz`（由本目录 `npm pack` 产出）。
+DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.29.tgz`（由本目录 `npm pack` 产出）。
+
+## v2.3 契约对齐（0.1.29，2026-11-13）
+
+按文档包 `docs/v2.3/` 的 04 §8 / 12 S-3.3 / 13 C1 补齐**本地只读契约**，纯增量：
+
+| 端点 | 变化 |
+|---|---|
+| `GET /__wbsync/status` | 新增 `hostId` / `hostIdSource` / `dshCommit` / `engineState` / `engineScope`；原有字段一个不动 |
+| `GET /__wbsync/config` | 新增；返回 `relayUrl` / `autoConnect` / `allowedEndpoints` / `hostTokenConfigured` / `hostId` / `dshCommit` / `engineState` |
+
+三条硬约束：
+
+1. **不回 `hostToken` 明文**——路由挂在本机 `webServer`，页面里任何脚本都能读；只回 `hostTokenConfigured` 布尔。这是对 04 §8「hostToken」字面表述的有意收紧，理由见 `docs/v2.3/08_安全与隐私设计.md`。
+2. **只读**，非 GET 一律 405 `ENDPOINT_NOT_ALLOWED`；写配置的正主是 `apply(ctx, config)` 与 `~/.dsh/wbsync-host.json`，不开旁路。
+3. **不伪造基线**——`dshCommit` 未由部署方注入时回 `null`，不从 `package.json` 猜版本号；`engineScope: 'pc-host'` 明确这只是 PC 插件自身状态，不代表 Termux 本机引擎。
+
+**仍未变更**（避免破坏现网，详见 `docs/v2.3/收口差异清单.md`）：协议常量仍为 `wbsync/1`、包名/插件 id 仍为 `dsh-wb-cloud-sync-host`、下行端点与帧语义不变。
+`cordis.patch.yml` 也**故意不加** 04 §10 示例里的 `config: {relayUrl: ""}`：wrapper 中 `apply` 的 `config` 优先级高于配置文件，加空值会覆盖 `~/.dsh/wbsync-host.json` 里的 relayUrl，导致装包后连不上 Relay。
 
 ## 配置（缺省即可本机试跑）
 

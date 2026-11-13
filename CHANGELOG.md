@@ -4,6 +4,49 @@
 
 ---
 
+## [v2.3 契约对齐] · 2026-11-13 10:3x · 基线落地 + 本地只读契约补齐（0.1.29）
+
+用户发来 15 份 **v2.3 文档包**（D-005「官方原生 UI、零皮肤」为最高优先级），要求修改
+`dsh-wb-cloud-sync-host`。文档包与仓库现状在**同一处位置上互斥**：13 号要求手机侧零插件零 UI，
+而 0.1.21–0.1.28 刚做完 820 行手机端面板 + ADR-012 镜像模式。
+
+判定依据：文档包状态是「设计重冻结，待 Re-Kickoff」、13 §8 四方会签全「待签」、
+收口动作排在 12 号 S-1.3（W1）/ S-3.3（W3）、S-0.1 要求先会签。
+所以本轮**落地基线 + 补齐可执行契约**，不推翻刚真机验证过的成果。
+
+### 做了什么
+
+- 15 份文档纳入 `docs/v2.3/`，原 `docs/`（含 ADR-011~013、Spike 报告）**不覆盖**。
+- `GET /__wbsync/status` 增 `hostId` / `hostIdSource` / `dshCommit` / `engineState` /
+  `engineScope`，**只增不删**，原有字段与 `wbsync/1` 帧语义不动。
+- 新增 `GET /__wbsync/config` 只读路由：非 GET 一律 405；**只回 `hostTokenConfigured`
+  布尔，不回 `hostToken` 明文**（路由挂本机 webServer，页面内任意脚本可读）；
+  `dshCommit` 未注入回 `null`，不从 package.json 猜版本号；`engineScope:'pc-host'`
+  明示不代表 Termux 本机引擎。
+- 新增 `test/v23-contract.test.mjs` 8 条：脱敏、只读、回落、allowedEndpoints 覆盖、
+  所有注册均为 `exact` 且无 `/ui/` `/static/` 路由、`ctx.effect` 可逆。
+- 顺手清掉 3 处过时注释（patch 层「不声明 dsh.client」、打包器「4 个 src 模块」）。
+
+### 一个照抄文档会踩的坑
+
+04 §10 的 `cordis.patch.yml` 示例带 `config: { relayUrl: "" }`。本仓库 wrapper 的优先级是
+`...fileCfg, ...env, ...config`，`apply` 的 `config` **最高**——写进 patch 会覆盖
+`~/.dsh/wbsync-host.json` 里的 relayUrl，装包后连不上 Relay。故 patch 层不动。
+
+### 没做什么（结论，不是待办）
+
+协议仍 `wbsync/1`（04 §11 写明 1→2 不兼容，需 Host/Relay/CP/PWA 同时改）；
+包名/id 仍 `-host`（前端半边模块 id 必须等于包名，改名属 S-11.1 发版动作）；
+手机端 UI 与镜像模式保留（13 §8 未会签、S-3.6 排 W3，删除会毁真机成果）。
+逐条理由与触发条件见 `docs/v2.3/收口差异清单.md` §3；文档包自身 5 处残留矛盾见 §4。
+
+- 测试全仓 356 → **364**（host-plugin 183/183）；`build-bundle --check` 一致；
+  门禁 **PASS / 10/10 / CURRENT**；产物 `dist/dsh-wb-cloud-sync-host-0.1.29.tgz`。
+- **未部署**：0.1.29 尚未覆盖进 `~/.dsh/profiles/desktop/node_modules/dsh-wb-cloud-sync-host/`，
+  也未在真机打开 `/__wbsync/config`。
+
+---
+
 ## [镜像真机验证] · 2026-11-13 03:3x · 注册表登记接通 + 修一个会毁侧栏的 bug（0.1.27）
 
 在真机上把镜像跑通：**配对 → 24 个会话 → 拉 20 个文件（5.41 MB）→ 侧栏出现「Benson」工作区**。

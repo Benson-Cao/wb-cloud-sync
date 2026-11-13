@@ -2,9 +2,10 @@
 /**
  * host-plugin 可安装 bundle 打包器
  * ---------------------------------------------------------------
- * 把 src/{index,replay,sessions,host-adapters}.js 合成**单文件自包含** `bundle/index.js`
- * （对齐 P0 探针已验证可安装的形态：单入口 + cordis.patch.yml 的 - insert: 层，
- * 不声明 dsh.client），并在外面包一层**默认配置解析**：
+ * 把 src/ 下全部 9 个模块合成**单文件自包含** `bundle/index.js`
+ * （对齐 P0 探针已验证可安装的形态：单入口 + cordis.patch.yml 的 - insert: 层），
+ * 原样拷贝 client.js 作为前端半边（由 package.json 的 dsh.client 声明加载），
+ * 并在外面包一层**默认配置解析**：
  *
  *   apply(ctx, config) 的 config = 代码默认 ← ~/.dsh/wbsync-host.json ← 环境变量 ← 调用方 config
  *
@@ -111,7 +112,7 @@ if (!main.includes('function __apply(')) throw new Error('apply 改名失败')
 const BANNER = `/**
  * dsh-wb-cloud-sync-host · P1 W3 Host 插件可安装 bundle（**自动生成，勿手改**）
  * ---------------------------------------------------------------
- * 由 p1/host-plugin/build-bundle.mjs 从 src/{index,replay,sessions,host-adapters}.js 合成：
+ * 由 p1/host-plugin/build-bundle.mjs 从 src/ 下 9 个模块合成：
  * 改源码后运行 \`node p1/host-plugin/build-bundle.mjs\` 重新生成（CI 有 --check 同步校验）。
  * 外层 wrapper 负责默认配置：代码默认 ← ~/.dsh/wbsync-host.json ← WBSYNC_* 环境变量 ← apply 的 config。
  */

@@ -81,8 +81,11 @@ Relay → Host：
 
 | 路由 | 方法 | 说明 |
 |---|---|---|
-| `/__wbsync/status` | GET | `connected` / `relayConfigured` / `forwarded` / `dropped` / `downlinks` / `reconnects` / `lastSeq` / `protocol` |
+| `/__wbsync/status` | GET | `connected` / `relayConfigured` / `forwarded` / `dropped` / `downlinks` / `reconnects` / `lastSeq` / `protocol`，以及 v2.3 增补的 `hostId` / `hostIdSource` / `dshCommit` / `engineState` / `engineScope` |
+| `/__wbsync/config` | GET | **只读**连接配置自检：relayUrl / autoConnect / allowedEndpoints / `hostTokenConfigured`（布尔，**不回明文**）/ hostId / dshCommit / engineState；其余方法 405 |
 | `/__wbsync/pair` | GET / POST | 代理一次 `POST <relayUrl>/pair/generate`，把 6 位配对码回给本机 UI（GET 供浏览器地址栏直开，POST 供脚本调用；其余方法 405） |
+
+> v2.3 收口对这两条路由的要求见 `bundle/README.md` 与 `docs/v2.3/收口差异清单.md`。所有本地路由都是 `exact` 功能路由，**不注册 `prefix` 静态资源 / UI 托管**（13 §2）。
 
 `relayUrl` 配成 **http(s) base**（配对代理要用 `fetch`），WS 地址由 `toWsUrl()` 派生（`http→ws`、`https→wss`）。这样只配一处，不会出现 HTTP 用域名、WS 用 IP 的错配。
 
@@ -134,7 +137,7 @@ Relay 的事件缓冲在内存里，进程一重启就空；手机断线重连�
 4. **丢弃窗口靠 follow 兜底，但没人自动触发**：`dropped` 只计数，重连后主动补拉要等手机侧（PWA）发起。
 5. **索引里没有 `title`**：宿主会话头里确实没有标题字段（实测只有 `version/id/createdAt/cwd/isSeeded/delegationDepth/agentPreset`），标题要由 PC 侧会话管理器补，此处给 `null` 而不是从 `cwd` 编一个。
 
-## 九、测试（80 个用例，`node --test`）
+## 九、测试（183 个用例，`node --test`）
 
 ```bash
 node --test p1/host-plugin/test/*.test.mjs
@@ -153,6 +156,7 @@ node --test p1/host-plugin/test/*.test.mjs
 | 索引接线 | 注册后自动推 `host/sessions`、无 `list()` 不发也不谎报空表、按周期刷新、重连后重推、真 Relay 落库可查（`/host/indexes`） |
 | 断线与卸载 | 退避重连并重新注册；卸载后路由注销、监听移除、不再上行、**不在背后重连** |
 | 端到端（真 Relay） | 配对 → Host WS 注册 → 手机 HTTP 投递 → 适配器 → 响应回程 → 卸载后 Relay 判离线 |
+| **v2.3 契约（8 个）** | status 新字段回落与显式配置、config 脱敏（响应体不含 hostToken 明文）、只读 405、allowedEndpoints 可覆盖、**所有注册均为 `exact` 无 prefix/UI 路由**、config 随 `ctx.effect` 注销 |
 | **可安装 bundle（3 个）** | 单文件 `bundle/index.js` 独立外连真 Relay、`/__wbsync/status` 如实上报（无 `sessionPersistence` 时 `indexReady:false`）、pair 路由代理真 Relay 出码、wrapper 配置链（默认 ← 文件 ← 环境变量） |
 | **宿主入口适配器（26 个）** | `create` / `prompt` 参数映射、幂等 `requestId`、部分成功语义、服务软探测与缺失 409、**Proxy 抛错回归**、**官方入口优先级 / 服务晚到 / 内部同义入口 / 底层兜底 / 错误原文**、**`cancel` 官方入口 / 同义入口 / 兜底 / 缺参与抛错**、**`uploadAttachment` 的 upload / uploadStream / 未挂载 / 缺参**、真 Relay 端到端新建会话（src + **bundle 产物**各一例） |
 
@@ -197,7 +201,7 @@ node --test p1/host-plugin/test/*.test.mjs
 ## 十一、可安装 bundle（`bundle/`）
 
 - `bundle/index.js` 由 `node p1/host-plugin/build-bundle.mjs` 从 `src/` **自动生成**（单文件自包含，顶层重名构建期即失败）；CI 用 `--check` 防「改了 src 忘了生成」。
-- `npm pack` 产出 `dist/dsh-wb-cloud-sync-host-0.1.7.tgz` → DSH「添加插件」安装；`dsh` 块只声明 `bundle.patch`（host-only，写法对齐已验证的探针 / dsh-nas-sync）。
+- `npm pack` 产出 `dist/dsh-wb-cloud-sync-host-0.1.29.tgz` → DSH「添加插件」安装；`dsh` 块声明 `bundle.patch` 与 `client`（前端半边，写法对齐已验证的探针 / dsh-nas-sync）。
 - **真机取证（2026-11-10）**：装包后插件在 PC 端 DSH 正常加载——`/__wbsync/status` 报 `connected:true`、索引 11 条已上送；DSH web 端口是**动态**的（`netstat -ano | findstr <DSH进程PID>` 查 LISTENING），浏览器地址栏 `http://127.0.0.1:<端口>/__wbsync/pair` 即可出码。
 - wrapper 配置链（低→高）：代码默认（本机 Relay + 主机名 deviceId）← `~/.dsh/wbsync-host.json` ← `WBSYNC_*` 环境变量 ← `apply` 的 `config`。
 - 安装 / 配置详见 `bundle/README.md`。
