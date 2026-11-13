@@ -4,6 +4,50 @@
 
 ---
 
+## [v2.3 P2 · r17] · 2026-11-13 · (hostId, sessionId) 命名空间隔离 + /api/hosts（CP 地基）
+
+P2（本机引擎与三档案直连官方 UI，W7–W10）的 PC 侧开工件：S-2.2「CP 数据模型落地」的
+单机实现 + S-6.8 / S-6.9 需要的主机档案数据源。**Host 插件零改动**（bundle 保持 0.2.3，
+无需重装）；Relay/CP 改动，随 Relay 重启生效。
+
+### CP（`p1/cp/src/index.js`）
+
+- **(hostId, sessionId) 命名空间隔离（S-2.2 验收）**：会话索引、写句柄租约、消费位点
+  三张表的键全部改为 `hostId|sessionId`（位点为 `clientId|hostId|sessionId`）——同名
+  sessionId 在两台主机下可共存、互不覆盖，patch/归档/全量替换只落到目标主机。
+  这是 R-22「串会话」的数据层防线。
+- 落盘行内字段 `ownerDeviceId` **保持不变**：cp.json 格式零迁移，手机端响应体不动。
+- `putSession` / `applySessionDiff` / `upsertSessions` / `getSession` / `patchSession` /
+  `getLease` / `acquireLease` / `renewLease` / `releaseLease` / `putCursor` / `getCursor`
+  签名加 `hostId`（现阶段取值 = 主机设备行 id，值兼容；字段改名随 CP Postgres 迁移）。
+- 新增 `findPhoneByToken(deviceToken)`：由令牌反查绑定主机（`/api/hosts` 的
+  「我是谁」查询），只比 SHA-256 摘要。
+
+### Relay（`p1/relay/src/server.js`）
+
+- **新增 `GET /api/hosts`**：HostProfile 视图（hostId / deviceId / kind:'relay' / name /
+  platform / dshCommit / engineState / online / state / lastSeenAt / sessionCount /
+  phones[]）。手机（设备令牌）只看到自己绑定的主机；adminToken 看到全部非墓碑主机。
+  这是 S-6.8 原生离线页（设备列表 + 状态点）与 S-6.9 三档案切换器的数据源。
+- **`/api/*` 参数命名迁移第三步**：`/api/sessions`（GET/POST/PATCH/DELETE）、
+  `/api/approvals`、`/api/schedules`、`/api/artifacts/ticket` 的查询/正文参数以
+  `hostId=` 为正式名，`deviceId=` 继续接受（同一台主机同一枚值，旧客户端零改动）；
+  `/api/sessions` 响应补 `hostId`（顶层 + `host` 对象，只增不删）。
+- 越权边界不变：hostId 参数只寻址，鉴权仍按「该 Host 名下是否有这枚令牌」。
+
+### 测试与文档
+
+- CP：S-2.2 验收用例（同名 sessionId 双主机共存：列表 / 位点 / 租约 / patch / 全量
+  替换五路互不干扰）；cp.test 签名迁移；persist.test 补复合键恢复断言。
+- Relay：H-1（/api/hosts 三种鉴权视角）+ H-2（hostId= 与 deviceId= 同值兼容、
+  响应补 hostId、越权仍 401）。测试 **352 → 355 / 355 PASS**。
+- `docs/04` r17：§2 键定义（SessionIndex 复合主键 / Cursor / Idempotency）、§4 端点表
+  + 隔离约束、版本行、§9/§10 变更记录；`PROTOCOL.md` 重生成（G4 一致）。
+- `PATCH /api/sessions/:hostId/:id` 路径形态随 P2 client-core 落地时一并切换，
+  本轮保留 `:id?hostId=` 形态（PWA 零改动）。
+
+---
+
 ## [v2.3 收口 · A-r16] · 2026-11-13 · 注册协商拦截 + 三个错误码 + /d/<hostId>/ 语义改名（0.2.3）
 
 v2.3 收口清单 A 项的剩余部分（r15 之后的第二步）。协议号从「声明性字段」变成

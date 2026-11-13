@@ -57,6 +57,17 @@ const cloneSession = (row) => (row
   ? { ...row, headerRef: row.headerRef ? { ...row.headerRef } : null }
   : null)
 
+/**
+ * v2.3（S-2.2）：会话 / 租约 / 位点的键全部带 host 维度——(hostId, sessionId)
+ * 命名空间隔离（04 §2），同名 sessionId 在两台主机下可共存。
+ * 这是 R-22「串会话」的数据层防线：没有 host 维度的键，两台主机的同名会话
+ * 会在第一台写入时被另一台覆盖。hostId 现阶段取值 = 主机设备行 id
+ * （值兼容，字段改名随 CP Postgres 迁移）；行内 ownerDeviceId 字段保留不变
+ * （落盘格式与手机端响应体不动）。
+ */
+const sessionKey = (hostId, sessionId) => `${hostId}|${sessionId}`
+const cursorKey = (clientId, hostId, sessionId) => `${clientId}|${hostId}|${sessionId}`
+
 export function createControlPlane({
   now = () => Date.now(),
   leaseTtlMs = LEASE_TTL_MS,
@@ -137,7 +148,8 @@ export function createControlPlane({
       if (!id || !owner) continue
       const host = devices.get(owner)
       if (!host || host.tombstone) { result.droppedSessions++; continue }
-      sessions.set(id, {
+      // S-2.2：按 (hostId, sessionId) 复合键重建；落盘行仍用 ownerDeviceId 字段，格式不变
+      sessions.set(sessionKey(owner, id), {
         sessionId: id,
         accountId: raw.accountId ?? null,
         ownerDeviceId: owner,
@@ -209,6 +221,22 @@ export function createControlPlane({
     const row = devices.get(deviceId)
     if (!row || row.tombstone || !row.tokenDigest || !deviceToken) return false
     return safeEqualHex(sha256Hex(deviceToken), row.tokenDigest)
+  }
+
+  /**
+   * 由令牌反查手机行（v2.3 P2：/api/hosts 的「我是谁 / 我绑了哪台主机」查询）。
+   * 只比 SHA-256 摘要（定长比较）；找不到返回 null，不区分「没配对」与「已吊销」。
+   */
+  const findPhoneByToken = (deviceToken) => {
+    if (!deviceToken) return null
+    const digest = sha256Hex(deviceToken)
+    for (const row of devices.values()) {
+      if (row.role === 'phone' && !row.tombstone && row.tokenDigest
+        && safeEqualHex(row.tokenDigest, digest)) {
+        return { deviceId: row.deviceId, clientId: row.deviceId, boundHostId: row.boundHostId }
+      }
+    }
+    return null
   }
 
   /* ------------------------------------------------- Phone（r9 新增） */
@@ -370,14 +398,15 @@ export function createControlPlane({
    * `upsertSessions` 会把该设备其余会话全移除，直到 Host 下一次 60s 全量
    * 上报才恢复——手机列表会「闪一下只剩新会话」。
    */
-  const putSession = (ownerDeviceId, raw) => {
-    if (!ownerDeviceId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 ownerDeviceId')
+  const putSession = (hostId, raw) => {
+    if (!hostId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 hostId')
     if (!raw?.sessionId) return { upserted: 0, removed: 0 }
-    const prev = sessions.get(raw.sessionId)
-    sessions.set(raw.sessionId, {
+    const key = sessionKey(hostId, raw.sessionId)
+    const prev = sessions.get(key)
+    sessions.set(key, {
       sessionId: raw.sessionId,
       accountId: raw.accountId ?? prev?.accountId ?? null,
-      ownerDeviceId,
+      ownerDeviceId: hostId,
       workspace: raw.workspace ?? null,
       title: raw.title ?? prev?.title ?? null,
       // PC 侧状态优先：Host 报文里的 false/0 不能覆盖用户置顶
@@ -397,18 +426,19 @@ export function createControlPlane({
    * 应用增量索引：只 upsert 给定行、只删给定 id，**绝不做全量替换**。
    * Host 侧每 60s 只发变化的行；CP 里未提及的会话必须保留。
    */
-  const applySessionDiff = (ownerDeviceId, rows = [], removedIds = []) => {
-    if (!ownerDeviceId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 ownerDeviceId')
+  const applySessionDiff = (hostId, rows = [], removedIds = []) => {
+    if (!hostId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 hostId')
     let upserted = 0
     for (const raw of Array.isArray(rows) ? rows : []) {
       if (!raw?.sessionId) continue
-      putSession(ownerDeviceId, raw)
+      putSession(hostId, raw)
       upserted++
     }
     let removed = 0
     for (const id of Array.isArray(removedIds) ? removedIds : []) {
-      const row = sessions.get(id)
-      if (row && row.ownerDeviceId === ownerDeviceId) { sessions.delete(id); removed++ }
+      const key = sessionKey(hostId, id)
+      const row = sessions.get(key)
+      if (row && row.ownerDeviceId === hostId) { sessions.delete(key); removed++ }
     }
     if (removed) touch()          // 只删不改时 putSession 没被调到，这里补一次
     return { upserted, removed }
@@ -418,19 +448,19 @@ export function createControlPlane({
    * 写入某台 Host 的会话索引快照（全量；本轮未出现的会话会被移除）。
    * @returns { upserted, removed }
    */
-  const upsertSessions = (ownerDeviceId, rows = []) => {
-    if (!ownerDeviceId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 ownerDeviceId')
+  const upsertSessions = (hostId, rows = []) => {
+    if (!hostId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 hostId')
     const seen = new Set()
     let upserted = 0
     for (const raw of Array.isArray(rows) ? rows : []) {
       if (!raw?.sessionId) continue
       seen.add(raw.sessionId)
-      upserted += putSession(ownerDeviceId, raw).upserted
+      upserted += putSession(hostId, raw).upserted
     }
     let removed = 0
-    for (const [id, row] of sessions) {
-      if (row.ownerDeviceId === ownerDeviceId && !seen.has(id)) {
-        sessions.delete(id)
+    for (const [key, row] of sessions) {
+      if (row.ownerDeviceId === hostId && !seen.has(row.sessionId)) {
+        sessions.delete(key)
         removed++
       }
     }
@@ -438,15 +468,15 @@ export function createControlPlane({
     return { upserted, removed }
   }
 
-  const getSession = (sessionId) => cloneSession(sessions.get(sessionId))
+  const getSession = (hostId, sessionId) => cloneSession(sessions.get(sessionKey(hostId, sessionId)))
 
   /**
    * `archived`：false（默认）只回未归档，true 只回已归档，null 全回（r12）。
    * 归档是**软移除**——行还在 CP 里，只是不进手机默认列表，随时能恢复。
    */
-  const listSessions = ({ ownerDeviceId = null, pinned = null, accountId = null, archived = false } = {}) =>
+  const listSessions = ({ hostId = null, pinned = null, accountId = null, archived = false } = {}) =>
     [...sessions.values()]
-      .filter((s) => (ownerDeviceId === null || s.ownerDeviceId === ownerDeviceId))
+      .filter((s) => (hostId === null || s.ownerDeviceId === hostId))
       .filter((s) => (accountId === null || s.accountId === accountId))
       .filter((s) => (pinned === null || s.pinned === Boolean(pinned)))
       .filter((s) => archived === null || (s.archived === true) === (archived === true))
@@ -456,8 +486,8 @@ export function createControlPlane({
       .map(cloneSession)
 
   /** 置顶 / 归档 / 调序 / 状态修正：Relay 在收到 Host 响应后调用，手机端不直接改 CP。 */
-  const patchSession = (sessionId, patch = {}) => {
-    const row = sessions.get(sessionId)
+  const patchSession = (hostId, sessionId, patch = {}) => {
+    const row = sessions.get(sessionKey(hostId, sessionId))
     if (!row) return null
     if (patch.pinned !== undefined) row.pinned = Boolean(patch.pinned)
     if (patch.pinnedOrder !== undefined) row.pinnedOrder = num(patch.pinnedOrder, row.pinnedOrder)
@@ -479,52 +509,57 @@ export function createControlPlane({
     return released
   }
 
-  const getLease = (sessionId, ts = now()) => {
-    const lease = leases.get(sessionId)
+  const getLease = (hostId, sessionId, ts = now()) => {
+    const key = sessionKey(hostId, sessionId)
+    const lease = leases.get(key)
     if (!lease) return null
-    if (lease.expiresAt <= ts) { leases.delete(sessionId); return null }
+    if (lease.expiresAt <= ts) { leases.delete(key); return null }
     return { ...lease }
   }
 
   /**
    * 申请写句柄。同设备重复申请是幂等的（续租），别家持有则 `ROUTE_CONFLICT`。
+   * 键带 hostId（S-2.2）：两台主机各自的写句柄互不干扰。
    * 注意：这里管的是**跨 Host 路由归属**，会话内的单写者仍由宿主
-   * `SessionAlreadyOwnedError` 兜底（ADR-008）。
+   * `SessionAlreadyOwnedError` 兄底（ADR-008）。
    */
-  const acquireLease = ({ sessionId, deviceId, clientId = null }, ts = now()) => {
-    if (!sessionId || !deviceId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 sessionId / deviceId')
-    const current = getLease(sessionId, ts)
+  const acquireLease = ({ hostId, sessionId, deviceId, clientId = null }, ts = now()) => {
+    if (!hostId || !sessionId || !deviceId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 hostId / sessionId / deviceId')
+    const key = sessionKey(hostId, sessionId)
+    const current = getLease(hostId, sessionId, ts)
     if (current && current.deviceId !== deviceId) {
       throw new ControlPlaneError('ROUTE_CONFLICT', `会话写句柄由 ${current.deviceId} 持有`)
     }
     if (current) {
       current.expiresAt = ts + leaseTtlMs
       if (clientId) current.clientId = clientId
-      leases.set(sessionId, current)
+      leases.set(key, current)
       return { ...current, renewed: true }
     }
     const lease = {
-      sessionId, deviceId, leaseId: newId(), clientId, acquiredAt: ts, expiresAt: ts + leaseTtlMs,
+      hostId, sessionId, deviceId, leaseId: newId(), clientId, acquiredAt: ts, expiresAt: ts + leaseTtlMs,
     }
-    leases.set(sessionId, lease)
+    leases.set(key, lease)
     return { ...lease, renewed: false }
   }
 
-  const renewLease = ({ sessionId, leaseId }, ts = now()) => {
-    const lease = getLease(sessionId, ts)
+  const renewLease = ({ hostId, sessionId, leaseId }, ts = now()) => {
+    const key = sessionKey(hostId, sessionId)
+    const lease = getLease(hostId, sessionId, ts)
     if (!lease) throw new ControlPlaneError('SESSION_BUSY', '租约不存在或已过期', { retryable: true })
     if (lease.leaseId !== leaseId) throw new ControlPlaneError('SESSION_BUSY', '租约 ID 不匹配', { retryable: true })
     lease.expiresAt = ts + leaseTtlMs
-    leases.set(sessionId, lease)
+    leases.set(key, lease)
     return { ...lease }
   }
 
-  const releaseLease = ({ sessionId, leaseId = null, deviceId = null }, ts = now()) => {
-    const lease = getLease(sessionId, ts)
+  const releaseLease = ({ hostId, sessionId, leaseId = null, deviceId = null }, ts = now()) => {
+    const key = sessionKey(hostId, sessionId)
+    const lease = getLease(hostId, sessionId, ts)
     if (!lease) return { released: false, reason: 'NOT_FOUND' }
     if (leaseId && lease.leaseId !== leaseId) return { released: false, reason: 'LEASE_MISMATCH' }
     if (!leaseId && deviceId && lease.deviceId !== deviceId) return { released: false, reason: 'OWNER_MISMATCH' }
-    leases.delete(sessionId)
+    leases.delete(key)
     return { released: true }
   }
 
@@ -535,16 +570,16 @@ export function createControlPlane({
 
   /* ------------------------------------------------------------ Cursor */
 
-  const putCursor = ({ clientId, sessionId, sinceSeq }) => {
-    if (!clientId || !sessionId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 clientId / sessionId')
-    const key = `${clientId}|${sessionId}`
-    const row = { clientId, sessionId, sinceSeq: num(sinceSeq, 0), updatedAt: now() }
+  const putCursor = ({ clientId, hostId, sessionId, sinceSeq }) => {
+    if (!clientId || !hostId || !sessionId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 clientId / hostId / sessionId')
+    const key = cursorKey(clientId, hostId, sessionId)
+    const row = { clientId, hostId, sessionId, sinceSeq: num(sinceSeq, 0), updatedAt: now() }
     cursors.set(key, row)
     return { ...row }
   }
 
-  const getCursor = ({ clientId, sessionId }) => {
-    const row = cursors.get(`${clientId}|${sessionId}`)
+  const getCursor = ({ clientId, hostId, sessionId }) => {
+    const row = cursors.get(cursorKey(clientId, hostId, sessionId))
     return row ? { ...row } : null
   }
 
@@ -571,6 +606,8 @@ export function createControlPlane({
     markDeviceOffline, revokeDevice, isDeviceAlive, listDevices,
     // phone（r9）
     upsertPhone, setPhoneToken, verifyClientToken, revokePhone, listPhones,
+    // 令牌反查（P2：/api/hosts 数据源）
+    findPhoneByToken,
     // session index
     putSession, applySessionDiff, upsertSessions, getSession, listSessions, patchSession,
     // lease

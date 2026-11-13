@@ -129,15 +129,16 @@ test('写句柄租约跨实例互斥：A 申请后 B 拿不到', async () => {
   const b = await startRelay(cp)
   try {
     // 租约是 CP 的能力，不由 Relay 暴露 HTTP（P2 接真库后由 CP 服务对外）
-    const lease = a.relay.cp.acquireLease({ sessionId: 'session-1', deviceId: 'pc-1' })
+    // S-2.2：租约键带 hostId，两台主机各持自己 (hostId, sessionId) 的写句柄
+    const lease = a.relay.cp.acquireLease({ hostId: 'pc-1', sessionId: 'session-1', deviceId: 'pc-1' })
     assert.equal(lease.renewed, false)
 
     assert.throws(
-      () => b.relay.cp.acquireLease({ sessionId: 'session-1', deviceId: 'pc-2' }),
+      () => b.relay.cp.acquireLease({ hostId: 'pc-1', sessionId: 'session-1', deviceId: 'pc-2' }),
       (e) => e.code === 'ROUTE_CONFLICT',
     )
     // 同设备续租是幂等续期，不是冲突
-    assert.equal(a.relay.cp.acquireLease({ sessionId: 'session-1', deviceId: 'pc-1' }).leaseId, lease.leaseId)
+    assert.equal(a.relay.cp.acquireLease({ hostId: 'pc-1', sessionId: 'session-1', deviceId: 'pc-1' }).leaseId, lease.leaseId)
     assert.equal(a.relay.protocol, PROTOCOL)
   } finally {
     await a.stop()

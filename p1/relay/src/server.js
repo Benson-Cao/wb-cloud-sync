@@ -770,14 +770,57 @@ export function createRelay(options = {}) {
         if (cfg.adminToken && req.headers.authorization !== `Bearer ${cfg.adminToken}`) {
           return fail(res, 401, 'UNAUTHORIZED', 'admin token 缺失')
         }
-        const deviceId = url.searchParams.get('deviceId') ?? ''
-        return ok(res, { deviceId, rows: cp.listSessions({ ownerDeviceId: deviceId }) })
+        const deviceId = url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
+        return ok(res, { deviceId, rows: cp.listSessions({ hostId: deviceId }) })
       }
 
       // 手机侧待审批清单（审批是设备级的，与当前看哪个会话无关）。
       // 手机断线期间错过的审批靠这条补回来——推送只是「更快」，拉取才是「不漏」。
+      // v2.3（P2 · S-6.8/S-6.9 数据源）：主机档案列表。
+      // 手机（设备令牌）只看到自己绑定的那台主机；adminToken 看到全部非墓碑主机。
+      // kind 恒为 'relay'——CP 视角里所有注册主机都经 Relay 接入；on-device / ssh
+      // 档案直连各自的 dsh web，不经 CP，此处如实不列（S-2.2 模型的单机实现）。
+      if (method === 'GET' && path === '/api/hosts') {
+        const auth = String(req.headers.authorization ?? '')
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        const isAdmin = Boolean(cfg.adminToken) && Boolean(token) && sameSecret(token, cfg.adminToken)
+        let scope = null
+        if (!isAdmin) {
+          const owner = cp.findPhoneByToken(token)
+          if (!owner?.boundHostId) {
+            return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+          }
+          scope = owner.boundHostId
+        }
+        const rows = cp.listDevices()
+          .filter((d) => d.role === 'host' && !d.tombstone)
+          .filter((d) => scope === null || d.deviceId === scope)
+          .map((d) => ({
+            hostId: d.hostId ?? d.deviceId,
+            deviceId: d.deviceId,          // 旧客户端兼容字段；值 = hostId（命名迁移期并存）
+            kind: 'relay',
+            name: d.deviceName ?? null,
+            platform: d.platform ?? null,
+            dshCommit: d.dshCommit ?? null,
+            engineState: d.engineState ?? null,
+            online: isOnline(d.deviceId),
+            state: d.state ?? null,
+            lastSeenAt: d.lastSeenAt ?? null,
+            sessionCount: cp.listSessions({ hostId: d.deviceId, archived: null }).length,
+            phones: cp.listPhones(d.deviceId)
+              .filter((p) => !p.tombstone)
+              .map((p) => ({
+                deviceId: p.deviceId,
+                name: p.deviceName ?? null,
+                online: isOnline(p.deviceId),
+                lastSeenAt: p.lastSeenAt ?? null,
+              })),
+          }))
+        return ok(res, { rows })
+      }
+
       if (method === 'GET' && path === '/api/approvals') {
-        const deviceId = url.searchParams.get('deviceId') ?? ''
+        const deviceId = url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
         if (!cp.verifyClientToken(deviceId, token).ok) {
@@ -794,7 +837,9 @@ export function createRelay(options = {}) {
       // CP 目前是 Relay 进程内的库对象，所以由 Relay 代挂 /api/*；P2 CP 独立成
       // 服务时这条路由整体迁走，客户端 URL 不变。
       if (method === 'GET' && path === '/api/sessions') {
-        const deviceId = url.searchParams.get('deviceId') ?? ''
+        // v2.3（P2 命名迁移第三步）：查询参数以 hostId 为正式名，deviceId= 继续接受
+        // （同一台主机的同一枚值，旧客户端零改动）。
+        const deviceId = url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
         if (!cp.verifyClientToken(deviceId, token).ok) {
@@ -807,16 +852,18 @@ export function createRelay(options = {}) {
         const host = cp.getDevice(deviceId)
         return ok(res, {
           deviceId,
+          hostId: host?.hostId ?? deviceId,   // v2.3：主机标识正式名（值兼容 deviceId）
           // 状态点（W7）：手机切到这台电脑时就能知道它连没连上，不必再单独打一次 /health，
           // 也避免了「先显示在线、再弹 HOST_OFFLINE」这种自相矛盾的界面。
           host: {
             deviceId,
+            hostId: host?.hostId ?? deviceId,
             name: host?.deviceName ?? null,
             platform: host?.platform ?? null,
             online: isOnline(deviceId),
             lastSeenAt: host?.lastSeenAt ?? null,
           },
-          rows: cp.listSessions({ ownerDeviceId: deviceId, pinned, archived }),
+          rows: cp.listSessions({ hostId: deviceId, pinned, archived }),
         })
       }
 
@@ -826,9 +873,9 @@ export function createRelay(options = {}) {
       if (method === 'POST' && path === '/api/sessions') {
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-        const probe = url.searchParams.get('deviceId') ?? ''
         const body = await readBody(req, cfg.maxBodyBytes)
-        const deviceId = body.deviceId ?? probe
+        const deviceId = body.hostId ?? body.deviceId
+          ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
         if (!cp.verifyClientToken(deviceId, token).ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
@@ -861,7 +908,8 @@ export function createRelay(options = {}) {
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
         const body = method === 'POST' ? await readBody(req, cfg.maxBodyBytes) : {}
-        const deviceId = body.deviceId ?? url.searchParams.get('deviceId') ?? ''
+        const deviceId = body.hostId ?? body.deviceId
+          ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
         if (!cp.verifyClientToken(deviceId, token).ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
@@ -886,7 +934,8 @@ export function createRelay(options = {}) {
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
         const body = await readBody(req, cfg.maxBodyBytes)
-        const deviceId = body.deviceId ?? url.searchParams.get('deviceId') ?? ''
+        const deviceId = body.hostId ?? body.deviceId
+          ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
         if (!cp.verifyClientToken(deviceId, token).ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
@@ -906,7 +955,8 @@ export function createRelay(options = {}) {
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
         const body = await readBody(req, cfg.maxBodyBytes)
-        const deviceId = body.deviceId ?? url.searchParams.get('deviceId') ?? ''
+        const deviceId = body.hostId ?? body.deviceId
+          ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
         if (!cp.verifyClientToken(deviceId, token).ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
@@ -936,12 +986,12 @@ export function createRelay(options = {}) {
           if (wantRename) {
             // 标题由宿主权威（它写了标题事件），这里只同步 CP 索引供手机显示
             const title = response?.body?.data?.title
-            if (typeof title === 'string') cp.patchSession(sessionId, { title })
+            if (typeof title === 'string') cp.patchSession(deviceId, sessionId, { title })
             return
           }
           if (wantArchive) {
             const ids = response?.body?.data?.archivedSessionIds
-            cp.patchSession(sessionId, {
+            cp.patchSession(deviceId, sessionId, {
               archived: Array.isArray(ids) ? ids.includes(sessionId) : Boolean(archived),
             })
             return
@@ -951,9 +1001,9 @@ export function createRelay(options = {}) {
           const ids = response?.body?.data?.pinnedSessionIds
           if (Array.isArray(ids)) {
             const idx = ids.indexOf(sessionId)
-            cp.patchSession(sessionId, { pinned: idx !== -1, pinnedOrder: idx === -1 ? 0 : idx })
+            cp.patchSession(deviceId, sessionId, { pinned: idx !== -1, pinnedOrder: idx === -1 ? 0 : idx })
           } else {
-            cp.patchSession(sessionId, { pinned: body.pinned })
+            cp.patchSession(deviceId, sessionId, { pinned: body.pinned })
           }
         })
       }
@@ -966,7 +1016,8 @@ export function createRelay(options = {}) {
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
         const body = await readBody(req, cfg.maxBodyBytes)
-        const deviceId = body.deviceId ?? url.searchParams.get('deviceId') ?? ''
+        const deviceId = body.hostId ?? body.deviceId
+          ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
         if (!cp.verifyClientToken(deviceId, token).ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
@@ -1196,6 +1247,7 @@ export function createRelay(options = {}) {
         if (typeof body.sinceSeq === 'number' && body.sessionId) {
           cp.putCursor({
             clientId: caller.clientId ?? body.clientId ?? 'anonymous',
+            hostId,
             sessionId: body.sessionId,
             sinceSeq: body.sinceSeq,
           })

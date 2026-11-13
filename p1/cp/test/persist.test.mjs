@@ -66,8 +66,8 @@ test('D1 重启后手机不必重新配对：令牌、设备、会话都还在',
   const b = boot(file)
   assert.deepEqual(b.cp.verifyClientToken('pc-1', 'tok-a'), { ok: true, clientId: 'phone-aaa111', legacy: false })
   assert.equal(b.cp.listPhones('pc-1').length, 1)
-  assert.equal(b.cp.listSessions({ ownerDeviceId: 'pc-1' }).length, 2)
-  assert.equal(b.cp.listSessions({ ownerDeviceId: 'pc-1' })[0].title, '标题', '标题等索引字段要原样回来')
+assert.equal(b.cp.listSessions({ hostId: 'pc-1' }).length, 2)
+assert.equal(b.cp.listSessions({ hostId: 'pc-1' })[0].title, '标题', '标题等索引字段要原样回来')
   // v2.3（r16）：基线与引擎状态落盘后要原样恢复，否则 safe-mode 判定重启即失效
   assert.equal(b.cp.getDevice('pc-1').dshCommit, '66491b05e3f05ad3')
   assert.equal(b.cp.getDevice('pc-1').engineState, 'running')
@@ -124,8 +124,8 @@ test('D4 归属设备没了的会话与手机一起丢弃（不留幽灵行）',
   }), 'utf8')
 
   const b = boot(file)
-  assert.deepEqual(b.cp.listSessions({ ownerDeviceId: 'pc-1' }).map((s) => s.sessionId), ['s1'])
-  assert.equal(b.cp.getSession('s-ghost'), null, '归属设备不存在的会话不许回到列表里')
+assert.deepEqual(b.cp.listSessions({ hostId: 'pc-1' }).map((s) => s.sessionId), ['s1'])
+assert.equal(b.cp.getSession('pc-1', 's-ghost'), null, '归属设备不存在的会话不许回到列表里')
   assert.equal(b.cp.getDevice('phone-orphan'), null, '宿主没了，手机行也不该留')
   assert.equal(b.cp.restoredSnapshot.droppedSessions, 1)
   assert.equal(b.cp.restoredSnapshot.droppedDevices, 1)
@@ -156,15 +156,15 @@ test('D7 只存事实：租约与消费位点不进快照，重启后租约自�
   const a = boot(file)
   a.cp.upsertDevice({ deviceId: 'pc-1' })
   a.cp.upsertSessions('pc-1', [sessionRow('s1')])
-  a.cp.acquireLease({ sessionId: 's1', deviceId: 'pc-1' })
-  a.cp.putCursor({ clientId: 'phone-1', sessionId: 's1', sinceSeq: 5 })
+a.cp.acquireLease({ hostId: 'pc-1', sessionId: 's1', deviceId: 'pc-1' })
+a.cp.putCursor({ clientId: 'phone-1', hostId: 'pc-1', sessionId: 's1', sinceSeq: 5 })
   const snap = a.cp.snapshot()
   assert.deepEqual(Object.keys(snap).sort(), ['devices', 'sessions'], '快照里只能有设备与会话')
   a.cp.flush()
 
   const b = boot(file)
   assert.deepEqual(b.cp.listLeases(), [], '租约 30s 就过期，重启后本来就不该还在')
-  assert.equal(b.cp.getCursor({ clientId: 'phone-1', sessionId: 's1' }), null, '位点由客户端 sinceSeq 权威')
+  assert.equal(b.cp.getCursor({ clientId: 'phone-1', hostId: 'pc-1', sessionId: 's1' }), null, '位点由客户端 sinceSeq 权威')
 })
 
 test('D8 令牌只存摘要：文件里搜不到明文', () => {

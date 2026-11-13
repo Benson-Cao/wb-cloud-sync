@@ -209,9 +209,9 @@ test('T8 #5b 客户端 sinceSeq 只作观测记录，不参与补齐决策', asy
     method: 'POST', token: p.token, body: { sinceSeq: 42, clientId: 'i-am-someone-else', sessionId: 'session-1' },
   })
   await waitForQueue('cursor-dev')
-  // CP 的 Cursor 主键是 (clientId, sessionId)，不是 deviceId
-  assert.equal(relay.cp.getCursor({ clientId: 'phone-0009', sessionId: 'session-1' }).sinceSeq, 42)
-  assert.equal(relay.cp.getCursor({ clientId: 'i-am-someone-else', sessionId: 'session-1' }), null,
+  // CP 的 Cursor 主键是 (clientId, hostId, sessionId)，不是 body 里自报的 clientId
+  assert.equal(relay.cp.getCursor({ clientId: 'phone-0009', hostId: 'cursor-dev', sessionId: 'session-1' }).sinceSeq, 42)
+  assert.equal(relay.cp.getCursor({ clientId: 'i-am-someone-else', hostId: 'cursor-dev', sessionId: 'session-1' }), null,
     'body.clientId 不能用来改写别人的位点')
   const polled = await call('/host/poll?deviceId=cursor-dev')
   const frame = polled.json.data.frames[0]
@@ -363,8 +363,8 @@ test('T13 PATCH 置顶：转发 session/pin，CP 按宿主回的全局集合刷�
   })
   const r = await inflight
   assert.equal(r.status, 200)
-  assert.equal(relay.cp.getSession('session-pin').pinned, true)
-  assert.equal(relay.cp.getSession('session-pin').pinnedOrder, 0, '照宿主的集合定序，不自己猜')
+  assert.equal(relay.cp.getSession('pin-dev', 'session-pin').pinned, true)
+  assert.equal(relay.cp.getSession('pin-dev', 'session-pin').pinnedOrder, 0, '照宿主的集合定序，不自己猜')
 
   // 缺 pinned 字段：400，不白跑一趟宿主
   const bad = await call('/api/sessions/session-pin?deviceId=pin-dev', {
@@ -404,7 +404,7 @@ test('T14 归档（r12）：DELETE 是软移除别名，列表默认看不到、
   assert.equal(normal.json.data.rows.some((r) => r.sessionId === 'session-arc'), false)
   const hidden = await call('/api/sessions?deviceId=arc-dev&archived=true', { token: p.token })
   assert.equal(hidden.json.data.rows.some((r) => r.sessionId === 'session-arc'), true)
-  assert.equal(relay.cp.getSession('session-arc').archived, true)
+  assert.equal(relay.cp.getSession('arc-dev', 'session-arc').archived, true)
 
   // DELETE = 归档别名（强制 archived=true，body 里写什么都盖掉）
   const viaDelete = await archiveOnce('DELETE', { deviceId: 'arc-dev', archived: false })
@@ -521,7 +521,7 @@ test('T16 W9 定时任务 + 改名：Relay 只转发，Host 响应回手机（�
   const ren = await round('PATCH', '/api/sessions/s-ren?deviceId=w9-dev',
     { deviceId: 'w9-dev', title: '新名' }, { title: '新名', seq: 9 })
   assert.equal(ren.frame.endpoint, 'session/rename')
-  assert.equal(relay.cp.getSession('s-ren').title, '新名')
+  assert.equal(relay.cp.getSession('w9-dev', 's-ren').title, '新名')
 
   // 一次只做一件事
   const both = await call('/api/sessions/s-ren?deviceId=w9-dev', {
@@ -611,4 +611,57 @@ test('T18 跨域：只回显本机源（WebView 场景），不对任意站点�
   })
   assert.equal(evilPre.status, 204)
   assert.equal(evilPre.headers.get('access-control-allow-origin'), null)
+})
+
+test('H-1 /api/hosts：手机令牌只看到绑定主机；adminToken 看到全部；坏令牌 401', async () => {
+  const reg = await call('/host/register', {
+    method: 'POST',
+    body: {
+      deviceId: 'hosts-dev', hostId: 'hosts-host',
+      deviceName: '档案A', platform: 'win32',
+      dshCommit: 'abc123def456', engineState: 'running',
+    },
+  })
+  assert.equal(reg.status, 200)
+
+  const phone = await pair('hosts-dev', { phoneId: 'phone-hosts1' })
+  const r1 = await call('/api/hosts', { token: phone.token })
+  assert.equal(r1.status, 200)
+  assert.equal(r1.json.data.rows.length, 1, '手机只看到自己绑定的主机')
+  const row = r1.json.data.rows[0]
+  assert.equal(row.hostId, 'hosts-host')
+  assert.equal(row.deviceId, 'hosts-dev', '旧客户端兼容字段与 hostId 同值并存')
+  assert.equal(row.kind, 'relay')
+  assert.equal(row.name, '档案A')
+  assert.equal(row.platform, 'win32')
+  assert.equal(row.dshCommit, 'abc123def456')
+  assert.equal(row.engineState, 'running')
+  assert.equal(row.online, true)
+  assert.ok(Array.isArray(row.phones))
+
+  const admin = await call('/api/hosts', { token: 'admin-secret' })
+  assert.equal(admin.status, 200)
+  assert.ok(admin.json.data.rows.some((h) => h.hostId === 'hosts-host'), 'admin 看到注册过的主机')
+
+  const bad = await call('/api/hosts', { token: 'wrong-token' })
+  assert.equal(bad.status, 401)
+})
+
+test('H-2 hostId= 查询参数：与 deviceId= 同值兼容；响应补 hostId 字段', async () => {
+  const p = await pair('hosts-dev', { phoneId: 'phone-hosts2' })
+  relay.cp.putSession('hosts-dev', { sessionId: 'session-h1', state: 'stopped', lastSeq: 1 })
+
+  const a = await call('/api/sessions?hostId=hosts-dev', { token: p.token })
+  assert.equal(a.status, 200)
+  assert.deepEqual(a.json.data.rows.map((r) => r.sessionId), ['session-h1'])
+  assert.equal(a.json.data.hostId, 'hosts-host', '响应顶层带 hostId（注册声明值；只增不删）')
+  assert.equal(a.json.data.host.hostId, 'hosts-host')
+
+  const b = await call('/api/sessions?deviceId=hosts-dev', { token: p.token })
+  assert.equal(b.status, 200, '旧参数 deviceId= 继续接受')
+  assert.equal(b.json.data.rows.length, 1)
+
+  // 越权：用 A 主机的令牌读 B 主机 → 401（hostId 参数不改变鉴权边界）
+  const c = await call('/api/sessions?hostId=pin-dev', { token: p.token })
+  assert.equal(c.status, 401)
 })

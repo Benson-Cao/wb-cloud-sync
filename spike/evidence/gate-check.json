@@ -1,35 +1,31 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-13T06:10:15.273Z",
+  "capturedAt": "2026-11-13T07:03:13.795Z",
   "git": {
-    "head": "3592ac7cf7b46c29b82b35484644d38e265d4c4a",
+    "head": "9c46580d136b99697ebd109f7c601ab3d7da8704",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [
-      "gate-check.mjs"
-    ],
+    "dataChanged": [],
     "signoffChanged": [],
     "artifactChanged": [],
     "narrativeChanged": [
       "PROTOCOL.md"
     ],
     "notes": [],
-    "previousCapturedAt": "2026-11-13T05:25:09.090Z",
-    "previousGitHead": "d74f03fbe34c3b82f798c041af8a28fe7f39f142",
+    "previousCapturedAt": "2026-11-13T06:10:15.273Z",
+    "previousGitHead": "3592ac7cf7b46c29b82b35484644d38e265d4c4a",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：运行代码/证据：gate-check.mjs",
-      "capturedAt": "2026-11-13T05:25:09.090Z",
-      "gitHead": "d74f03fbe34c3b82f798c041af8a28fe7f39f142",
-      "dataChanged": [
-        "gate-check.mjs"
-      ],
+      "previousStatus": "DRIFTED",
+      "previousReason": "描述文字变化（不阻断）：PROTOCOL.md",
+      "capturedAt": "2026-11-13T06:10:15.273Z",
+      "gitHead": "3592ac7cf7b46c29b82b35484644d38e265d4c4a",
+      "dataChanged": [],
       "signoffChanged": [],
       "artifactChanged": [],
       "narrativeChanged": [
@@ -63,7 +59,7 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "00953e6f8ea5eee5ff655d03db6fe554674f53ffefb09f8011e6455590c63ad7"
+      "PROTOCOL.md": "6f12876ac651006468ce612d3777d89ddc4c3360b98a8e5616dfb0106cc8f850"
     }
   },
   "secretScan": {
