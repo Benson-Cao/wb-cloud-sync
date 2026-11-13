@@ -1868,6 +1868,31 @@ const STATUS_BY_CODE = {
  * 再大就让手机只收元数据 + 正文前缀，绝不把连接撑爆（1009 断连会伪装成 504）。
  */
 export const EVENT_FRAME_SOFT_LIMIT = 1024 * 1024
+
+/**
+ * r18（S-6.7 方案 A）：从宿主服务派生官方 dsh web 的带令牌回环 URL。
+ *
+ * 与官方 desktop-host / web-runtime 同款公式（asar 源码先例）：
+ *   `${webServer.protocol}//127.0.0.1:${webServer.port}/` + connection.authenticatedUrl(...)
+ * —— connection.authenticatedUrl(base) 把本进程 launch token 附加到干净 URL。
+ * 任一环节缺失（旧版宿主 / 服务未就绪 / 非回环结果 / 缺 token）→ null；
+ * 插件全程不触碰原始令牌变量，也不把它写到任何磁盘位置。
+ * `getAdvertisedUrl` 在 webApp 服务上（插件 ctx 不可达），故不走那条路。
+ */
+const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '::1', '[::1]']
+const deriveUiUrlFrom = (connection, webServer) => {
+  try {
+    const port = Number(webServer?.port)
+    const protocol = String(webServer?.protocol ?? '')
+    if (!Number.isInteger(port) || port <= 0 || (protocol !== 'http:' && protocol !== 'https:')) return null
+    const authed = connection?.authenticatedUrl?.(`${protocol}//127.0.0.1:${port}/`)
+    if (typeof authed !== 'string' || !authed) return null
+    const u = new URL(authed)
+    if (!LOOPBACK_HOSTS.includes(u.hostname.toLowerCase())) return null
+    if (!(u.searchParams.get('token') ?? '')) return null
+    return authed
+  } catch { return null }
+}
 // 名字别叫 encoder：replay.js 里也有一个，bundle 内联到同一作用域会撞名（打包器会拦）
 const frameEncoder = new TextEncoder()
 const byteLen = (text) => frameEncoder.encode(text).length
@@ -1916,7 +1941,27 @@ function __apply(ctx, config = {}) {
     // v2.3（r16）：Relay 拒绝注册时记录关闭原因（HOST_MISMATCH / COMMIT_DRIFT…），
     // 非空时停止自动重连——部署错误重连无意义，修配置后重启插件才恢复。
     hostMismatch: null,
+    // v2.3（r18，S-6.7 方案 A）：派生出的官方 dsh web 带令牌回环 URL。
+    // **只在内存与注册帧里出现**：绝不落盘、绝不进 /__wbsync/status（它免鉴权公开）。
+    // DSH 重启轮换令牌 → 重连注册时重新派生覆盖。
+    uiUrl: null,
   }
+
+  /**
+   * r18：uiUrl 刷新。服务未就绪时 ctx.get 可能抛（cordis Proxy 语义），故全路径 try。
+   * `ctx.inject(["connection","webServer"])` 是宿主官方先例（web-runtime / plugin-manager
+   * 同款）——服务就绪回调；晚于首次注册到达时**弹一次连接**（500ms 重连），
+   * 让 Relay 经新注册帧收到 uiUrl。值不变时不弹，避免空转。
+   */
+  const refreshUiUrl = (connection, webServer) => {
+    const next = deriveUiUrlFrom(connection, webServer)
+    if (next && next !== state.uiUrl) {
+      state.uiUrl = next
+      if (state.connected) { try { state.ws?.close() } catch { /* 已断开 */ } }
+    }
+  }
+  try { refreshUiUrl(ctx.get?.('connection'), ctx.get?.('webServer')) } catch { /* 服务未就绪，交由 inject */ }
+  try { ctx.inject?.(['connection', 'webServer'], (svc) => refreshUiUrl(svc?.connection, svc?.webServer)) } catch { /* 旧版宿主无 inject 语义时静默降级 */ }
 
   /**
    * 回放句柄来源：优先用调用方注入的 `openSession`（便于测试与接管），否则绑宿主的
@@ -2260,6 +2305,10 @@ function __apply(ctx, config = {}) {
         // 与 deviceName 同规则——没配置就不发，不在帧里留空字段。
         ...(cfg.dshCommit ? { dshCommit: cfg.dshCommit } : {}),
         ...(cfg.engineState ? { engineState: cfg.engineState } : {}),
+        // v2.3（r18）：官方 UI 反代入口（S-6.7 方案 A）。只进注册帧（hostToken 鉴权
+        // 通道），绝不进免鉴权的 /__wbsync/status；Relay 只存内存不落盘。
+        // uiUrl 由 refreshUiUrl 在 apply / 服务就绪回调里派生；未派生成功就不发。
+        ...(state.uiUrl ? { uiUrl: state.uiUrl } : {}),
         // 设备名只给手机端显示（切换电脑时要认得出来），不参与任何判定
         ...(cfg.deviceName ? { deviceName: cfg.deviceName } : {}),
         ...(cfg.platform ? { platform: cfg.platform } : {}),
@@ -2331,6 +2380,9 @@ function __apply(ctx, config = {}) {
           engineState: cfg.engineState || 'running',
           // v2.3（r16）：注册被拒的原因与状态（null = 未发生或已正常注册）
           hostMismatch: state.hostMismatch,
+          // v2.3（r18）：官方 UI 反代入口是否可用（布尔；URL 本体绝不进 status——
+          // 这条路由免鉴权公开，见 /__wbsync/config 的脱敏注释）。
+          uiAvailable: Boolean(state.uiUrl),
           engineScope: 'pc-host',
         }))
       },

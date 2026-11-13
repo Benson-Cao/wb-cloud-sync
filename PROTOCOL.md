@@ -10,7 +10,7 @@
 # 04 接口协议与数据模型（PROTOCOL.md）
 
 > 协议版本：`wbsync/2.3`
-> Owner：架构师 ｜ 状态：**修订 r17（发起人裁定采纳；四方会签已取消）** ｜ 协议版本：`wbsync/2.3`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）；r12 §4 归档软移除；r13 §5.6 显式产物导出（ADR-011）；r14 §5.6 Office→PDF 转换（同一票据，ADR-011 修订）；r15 §5.2 注册帧与 §8 状态路由引入 `hostId`（命名迁移第一步，值回落 `deviceId`）；r16 注册协商拦截 + `/d/<hostId>/` 语义改名 + 三个错误码（命名迁移第二步）；r17 §2 会话/租约/位点键带 host 维度 + §4 `/api/hosts` 与 `hostId=` 参数（命名迁移第三步））
+> Owner：架构师 ｜ 状态：**修订 r18（发起人裁定采纳；四方会签已取消）** ｜ 协议版本：`wbsync/2.3`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）；r12 §4 归档软移除；r13 §5.6 显式产物导出（ADR-011）；r14 §5.6 Office→PDF 转换（同一票据，ADR-011 修订）；r15 §5.2 注册帧与 §8 状态路由引入 `hostId`（命名迁移第一步，值回落 `deviceId`）；r16 注册协商拦截 + `/d/<hostId>/` 语义改名 + 三个错误码（命名迁移第二步）；r17 §2 会话/租约/位点键带 host 维度 + §4 `/api/hosts` 与 `hostId=` 参数（命名迁移第三步）；r18 官方 dsh web 反代入口 uiUrl + `/d/<hostId>/ui(/**)` HTTP·WS 反代（S-6.7 方案 A））
 > **本文是跨组件唯一契约源**。任何字段变更必须同时更新本文件、版本号与 CHANGELOG。
 > 字段名以锁定的 DSH commit 实际类型为准；W1 Spike 已完成实测回填（见 §3）。上游升级前须重跑全量契约测试（见 `07`）。
 
@@ -242,6 +242,8 @@ WS   /d/<hostId>/events/*         事件流（WS 帧透传）
 ANY  /d/<hostId>/session/*        HTTP 反向代理到 Host
 ANY  /d/<hostId>/fileUploads/*    附件上行（r3 新增；HTTP 反向代理到 Host）
 ANY  /d/<hostId>/$events/*        审批 / 提问通道（r5：$events/result 应答审批，先答先得）
+ANY  /d/<hostId>/ui(/**)          ★ 官方 dsh web HTTP 反代（r18，S-6.7 方案 A；?pt= 换会话票）
+WS   /d/<hostId>/ui/**            ★ 官方 dsh web WS mux socket 级透传（r18；/api/remote.mux 等）
 ```
 
 > 上表路径段一律指**目标 Host 的 `hostId`**（r16 语义改名，值兼容 `deviceId`）；手机自己的身份不出现于路径（r9）。
@@ -296,6 +298,8 @@ ANY  /d/<hostId>/$events/*        审批 / 提问通道（r5：$events/result �
 > `deviceName` / `platform` 是**可选展示字段**：Relay 去空白、限长（60 / 20）后存进 `Device`，经 `GET /api/sessions` 的 `host` 回给手机（r10）。它们**不参与任何判定**——鉴权、在线、归属都不看这两个字段。缺省（r9 及更早的 Host）照常注册，`host.name` 为 `null`。
 >
 > `dshCommit` / `engineState` 是 **v2.3（r16）新增的声明字段**：都参与判定，但都遵循「**声明且不符才拒绝**」——`dshCommit` 只在 Relay 配置了 `pinnedDshCommit` 时启用强制校验（未配置时只落库展示）；`engineState` 缺省（旧 Host）按 `running` 对待。声明值去空白限长（64 / 32）后存进 `Device`，未声明保留上次声明值（sticky）；重注册声明新值即覆盖（修配置后无需人工干预即可走出 safe-mode）。
+>
+> `uiUrl` 是 **v2.3（r18）新增的可选字段（S-6.7 方案 A）**：官方 dsh web 的带令牌回环 URL，由插件按宿主官方先例（desktop-host / web-runtime 同款公式）派生：`ctx.inject(["connection","webServer"])` 就绪回调里取 `connection.authenticatedUrl(\`${webServer.protocol}//127.0.0.1:${webServer.port}/\`)`；派生失败（旧版宿主 / 服务未就绪 / 非回环 / 缺 token）就不发字段，服务晚于首次注册就绪时插件弹一次连接重注册。Relay 三关校验（http(s) / 回环主机 / 带 token）后**只存内存**——不进 CP、不落盘、不进日志、不进任何响应体；重新注册缺席即清旧值（令牌已随重启轮换）。`/__wbsync/status` 只回 `uiAvailable` 布尔（该路由免鉴权公开，绝不回 URL 本体）；`GET /api/hosts` 行同理只报 `uiAvailable`。
 
 ### 5.3 帧透传规则
 
@@ -549,7 +553,8 @@ allowedEndpoints:
 - 新增事件类型一律由客户端按白名单默认跳过；**不得依赖服务端 `ignorable` 标记**（实测宿主不下发，见 §3）。
 - 新增字段必须可选 + 有默认值；删除字段走 90 天弃用期。
 - 字段类型以锁定 DSH commit 为准；升级 DSH 前跑全量契约测试（见 `07`）。
-- **r17（2026-11-13）**：P2 开工——(hostId, sessionId) 命名空间隔离 + `/api/hosts`。① §2 单机 CP 的会话索引、写句柄租约、消费位点**键全部带 host 维度**（同名 sessionId 两台主机可共存，S-2.2 验收；R-22 串会话的数据层防线；落盘行内字段 `ownerDeviceId` 不变，落盘格式零迁移）；② §4 新增 `GET /api/hosts`（HostProfile 视图：hostId/kind/name/platform/dshCommit/engineState/online/sessionCount/phones[]；手机令牌只看绑定主机，adminToken 看全部；S-6.8 离线页与 S-6.9 切换器的数据源）；③ `/api/*` 查询/正文参数以 `hostId=` 为正式名（`deviceId=` 继续接受，值兼容），`/api/sessions` 响应补 `hostId`（只增不删）。`PATCH /api/sessions/:hostId/:id` 路径形态随手机壳（P2 client-core）落地时一并切换，本轮保留 `:id?hostId=` 形态。Host 插件零改动（bundle 保持 0.2.3）。
+- **r18（2026-11-13）**：官方 dsh web 反代入口（S-6.7 方案 A，发起人确认后实施）。① §5.2 注册帧加可选 `uiUrl`（插件按宿主官方先例经 `ctx.inject(["connection","webServer"])` 派生的带令牌回环 URL；Relay 校验后只存内存，不进 CP 不落盘）；② §5 新增 `ANY /d/<hostId>/ui(/**)` HTTP 反代与 `WS /d/<hostId>/ui/**` socket 级透传：手机凭 `?pt=<deviceToken>` 入场换发短时 HttpOnly 会话票 cookie，反代请求前由 Relay 服务端用 uiUrl 的 launch token 向上游**根路径 `?token=`**（官方浏览器入口）换 `dsh-auth-*` v1 浏览器 cookie 并内存持有，401 自动重换；**`/connect` 铸的是 v2 API 票，`authorizeIndex` 不认——真机取证后改走根路径**；`dsh-auth-*` Set-Cookie 永不透传手机，`content-encoding` 必须剥离（undici 已透明解压）；③ 刻意不做 isOnline / ENGINE_SAFE_MODE 拦截——官方 web 服务与插件连接是两条独立生命线；④ 官方 UI 挂载点自适应（资源/RPC/WS mux 均相对 `document.baseURI` 解析），前缀透传不改写正文、不塞自定义资源（S-6.7 约束）；⑤ `/__wbsync/status` 与 `GET /api/hosts` 均只报 `uiAvailable` 布尔。插件 0.2.4；上游重启轮换由插件重连注册自动覆盖。
+- **r17（2026-11-13）**：P2 开工——(hostId, sessionId) 命名空间隔离 + `/api/hosts`。① §2 单机 CP 的会话索引、写句柄租约、消费位点**键全部带 host 维度**（同名 sessionId 两台主机可共存，S-2.2 验收；R-22 串会话的数据层防线；落盘行内字段 `ownerDeviceId` 不变，落盘格式零迁移）；② §4 新增 `GET /api/hosts`（HostProfile 视图：hostId/kind/name/platform/dshCommit/engineState/online/uiAvailable（r18）/sessionCount/phones[]；手机令牌只看绑定主机，adminToken 看全部；S-6.8 离线页与 S-6.9 切换器的数据源）；③ `/api/*` 查询/正文参数以 `hostId=` 为正式名（`deviceId=` 继续接受，值兼容），`/api/sessions` 响应补 `hostId`（只增不删）。`PATCH /api/sessions/:hostId/:id` 路径形态随手机壳（P2 client-core）落地时一并切换，本轮保留 `:id?hostId=` 形态。Host 插件零改动（bundle 保持 0.2.3）。
 - **r16（2026-11-13）**：注册协商拦截 + 三个 v2.3 错误码落地。① §5.2 注册帧加可选 `dshCommit` / `engineState`（声明且不符才拒绝：`dshCommit` 只在 Relay 配置 `pinnedDshCommit` 时启用 COMMIT_DRIFT 强制校验；`engineState: 'safe-mode'` 时 `/d/*` 全量 503 `ENGINE_SAFE_MODE`，重声明即恢复）；② 协议号不再是纯声明性字段——声明 `protocol` ≠ Relay 即拒（WS close `1008 HOST_MISMATCH`，HTTP 409），未声明的旧客户端照常注册；③ `/d/` 路径段语义改名 `hostId`（值兼容 `deviceId`，URL 不变；`/api/*?deviceId=` 查询参数随 P2 CP 迁移再改）。被拒注册发生在落库之前，不留下设备行。插件侧：被拒即记录 `hostMismatch` 并停住重连（`/__wbsync/status` 可见），不再空转打点。兼容性：wbsync/1 老客户端未声明字段 → 全部照常；声明了 1.x 协议的客户端才会被拒（wbsync/1→2 本就是不兼容升级）。
 - **r1（2026-11-07）**：按 W1 Spike 实测澄清事件契约、幂等映射与 Idempotency 归属；仅新增可选字段与说明，无删除/改名，兼容 `wbsync/1` 现有客户端；依据 ADR-007~009（待会签）。
 - **r2（2026-11-10）**：`SessionIndex.state` 扩充 `stopped` / `failed` 两个枚举值并给出 `turn/end.reason` 映射；新增 §5.4 正文可见性边界；修正「新增事件依赖 `ignorable`」的过时表述。无删除、无改名，兼容 `wbsync/1` 现有客户端；依据 WorkBuddy 对标复核与 ADR-010（待会签）。
@@ -572,6 +577,7 @@ allowedEndpoints:
 
 | 版本 | 日期 | 变更 | 作者 |
 |---|---|---|---|
+ | **wbsync/2.3 r18** | 2026-11-13 | **官方 dsh web 反代（S-6.7 方案 A）**：§5.2 注册帧加可选 `uiUrl`（带令牌回环 URL，插件派生、Relay 内存持有）；§5 新增 `/d/<hostId>/ui(/**)` HTTP·WS 反代（?pt= 换会话票、服务端换持 dsh-auth-* cookie、401 自愈、dsh-auth-* 不透传）；status 与 /api/hosts 只报 `uiAvailable` 布尔。插件 0.2.4 | 架构师 |
  | **wbsync/2.3 r17** | 2026-11-13 | **P2 开工：命名空间隔离 + /api/hosts**：§2 会话/租约/位点键带 host 维度（同名 sessionId 两主机共存）；§4 新增 `GET /api/hosts`；`/api/*` 参数 `hostId=`（兼容 `deviceId=`）；响应补 `hostId`。落盘格式零迁移；Host 插件零改动 | 架构师 |
 | **wbsync/2.3 r16** | 2026-11-13 | **注册协商拦截 + 错误码落地**：§5.2 注册帧加可选 `dshCommit` / `engineState`；声明 `protocol` 不符即 `HOST_MISMATCH`（WS close 1008 / HTTP 409）、`dshCommit` 与 pinned 不符即 `COMMIT_DRIFT`（拒绝注册即索引不合并）、`engineState: 'safe-mode'` 时 `/d/*` 全量 503 `ENGINE_SAFE_MODE`；`/d/` 路径段语义改名 `hostId`（值兼容，URL 不变）。只拒「声明且不符」，未声明字段的老客户端不受影响 | 架构师 |
 | **wbsync/2.3** | 2026-11-13 | **r15（D-005 对齐）**：§5.2 `host/register` 引入与 §6 `/status` `/config` 对齐——`hostId`（主机标识正式名，本轮值回落 `deviceId`，命名迁移第一步）；§6 表与实现对齐（config 改只读脱敏、删 static / artifacts 假路由）。升主版本至 2.3 | 架构师 |

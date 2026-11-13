@@ -199,10 +199,121 @@ test('注册帧带上 deviceId / caps / hostToken，收到 host/registered 才�
     assert.equal(res.json.data.connected, true)
     assert.equal(res.json.data.relayConfigured, true)
     assert.equal(res.json.data.hostMismatch, null, '正常注册不应出现拒绝原因')
+    // r18：mock ctx 没有 connection/webServer 派生能力 → 不发 uiUrl，status 如实 false
+    assert.equal(reg.uiUrl, undefined, '派生不出 uiUrl 就不发字段（feature-detect）')
+    assert.equal(res.json.data.uiAvailable, false)
   } finally {
     ctx.dispose()
     await relay.stop()
   }
+})
+
+test('v2.3（r18）：ctx 提供 connection/webServer 派生能力 → 注册帧带 uiUrl，status 只报布尔', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  // 与官方 desktop-host 同款公式：authenticatedUrl(`${protocol}//127.0.0.1:${port}/`)
+  const authed = 'http://127.0.0.1:50465/?token=mock-launch-token-value-0123456789abcdef'
+  ctx.get = (name) => {
+    if (name === 'webServer') return { port: 50465, protocol: 'http:' }
+    if (name === 'connection') return { authenticatedUrl: (base) => {
+      assert.equal(base, 'http://127.0.0.1:50465/', 'authenticatedUrl 收到的应是官方公式 URL')
+      return authed
+    } }
+    return undefined
+  }
+  try {
+    const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-ui', autoConnect: true })
+    await waitFor(() => relay.host.registers === 1, 'host/register 到达')
+    const reg = relay.host.registerFrame
+    assert.equal(reg.uiUrl, authed, '注册帧带派生出的带令牌回环 URL')
+
+    await waitFor(() => plugin.state.connected, 'host/registered 后置 connected')
+    const res = await callRoute(ctx, '/__wbsync/status')
+    assert.equal(res.json.data.uiAvailable, true, 'status 只报布尔')
+    assert.equal(JSON.stringify(res.json).includes('mock-launch-token'), false,
+      'status 免鉴权公开，绝不能出现 uiUrl/token 本体')
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('v2.3（r18）：apply 时服务未就绪（ctx.get 抛）→ inject 就绪回调补派生并弹连接重注册', async () => {
+  const relay = await startFakeRelay()
+  const ctx = createMockCtx()
+  const authed = 'http://127.0.0.1:50466/?token=mock-launch-token-value-fedcba9876543210'
+  ctx.get = () => { throw new Error('cordis Proxy: service not ready') }
+  ctx.inject = (names, cb) => {
+    assert.deepEqual(names, ['connection', 'webServer'])
+    // 模拟服务晚于首次注册就绪：apply 同步路径失败后，异步补派生（120ms 留足首轮注册余量）
+    setTimeout(() => cb({ connection: { authenticatedUrl: (base) => base + '?token=mock-launch-token-value-fedcba9876543210' },
+      webServer: { port: 50466, protocol: 'http:' } }), 120)
+  }
+  try {
+    const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-ui-inject', autoConnect: true })
+    await waitFor(() => relay.host.registers === 1, '首轮 host/register（无 uiUrl）')
+    assert.equal(relay.host.registerFrame.uiUrl, undefined, '服务未就绪时首轮不发 uiUrl')
+    // inject 就绪 → 派生成功 → 弹连接 → 重注册带 uiUrl
+    await waitFor(() => relay.host.registers >= 2, '弹连接后的重注册')
+    const reg2 = relay.frames.filter((f) => f.t === 'host/register').at(-1)
+    assert.equal(reg2.uiUrl, authed, '重注册帧带 uiUrl')
+    await waitFor(() => plugin.state.connected, '重注册后 connected')
+    const res = await callRoute(ctx, '/__wbsync/status')
+    assert.equal(res.json.data.uiAvailable, true)
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('v2.3（r18）：派生结果非回环或缺 token → 如实不发 uiUrl', async () => {
+  const relay = await startFakeRelay()
+  for (const [label, authed] of [
+    ['非回环', 'http://192.168.1.5:50465/?token=abc1234567890123'],
+    ['缺 token', 'http://127.0.0.1:50465/'],
+  ]) {
+    const ctx = createMockCtx()
+    ctx.get = (name) => {
+      if (name === 'webServer') return { port: 50465, protocol: 'http:' }
+      if (name === 'connection') return { authenticatedUrl: () => authed }
+      return undefined
+    }
+    try {
+      const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-ui-bad', autoConnect: true })
+      await waitFor(() => relay.host.registers === 1, `host/register 到达（${label}）`)
+      assert.equal(relay.host.registerFrame.uiUrl, undefined, `${label}：不发 uiUrl 字段`)
+      const res = await callRoute(ctx, '/__wbsync/status')
+      assert.equal(res.json.data.uiAvailable, false, `${label}：status uiAvailable=false`)
+    } finally {
+      ctx.dispose()
+    }
+  }
+  await relay.stop()
+})
+
+test('v2.3（r18）：派生结果非回环或缺 token → 如实不发 uiUrl', async () => {
+  const relay = await startFakeRelay()
+  for (const [label, url] of [
+    ['非回环', 'http://192.168.0.103:50465/?token=abc1234567890123'],
+    ['缺 token', 'http://127.0.0.1:50465/'],
+  ]) {
+    const ctx = createMockCtx()
+    ctx.get = (name) => {
+      if (name === 'webServer') return { getAdvertisedUrl: () => url }
+      if (name === 'connection') return { authenticatedUrl: (base) => base }
+      return undefined
+    }
+    try {
+      const plugin = apply(ctx, { relayUrl: relay.url, deviceId: 'pc-ui-bad', autoConnect: true })
+      await waitFor(() => relay.host.registers === 1, `host/register 到达（${label}）`)
+      assert.equal(relay.host.registerFrame.uiUrl, undefined, `${label}：不发 uiUrl 字段`)
+      const res = await callRoute(ctx, '/__wbsync/status')
+      assert.equal(res.json.data.uiAvailable, false, `${label}：status uiAvailable=false`)
+    } finally {
+      ctx.dispose()
+    }
+  }
+  await relay.stop()
 })
 
 test('v2.3（r16）：Relay 拒绝注册（COMMIT_DRIFT）→ 记录原因、停住重连，不再空转打点', async () => {

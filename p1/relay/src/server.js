@@ -25,6 +25,9 @@
  */
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
+import net from 'node:net'
+import tls from 'node:tls'
+import { Readable } from 'node:stream'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createControlPlane } from '../../cp/src/index.js'
@@ -53,6 +56,9 @@ const DEFAULTS = {
   // v2.3（r16）：期望的 DSH pinned commit（来自 pinned-commit.txt）。配置后，注册帧
   // 声明的 dshCommit 与之不符即拒绝（COMMIT_DRIFT）；空串 = 不启用强制校验，只落库展示。
   pinnedDshCommit: '',
+  // v2.3（r18，S-6.7 方案 A）：官方 UI 反代的会话票 TTL。手机 WebView 拿到票后
+  // 存在自己的（按档案隔离的）cookie jar 里，期内免重验；到期重走 ?pt= 换票。
+  uiTicketTtlMs: 12 * 60 * 60 * 1000,
 }
 
 /** 定长比较，避免按字符比密钥时的时序泄漏（`===` 会在首字节不同处提前返回）。 */
@@ -393,6 +399,15 @@ export function createRelay(options = {}) {
     // 产物下载票（ADR-011）：只在内存里，60s TTL、单次使用、绑定手机令牌摘要。
     // 绝不用它承载会话正文，也绝不落盘。
     downloads: new Map(),    // ticketId -> { bytes, name, mime, expiresAt, tokenDigest }
+    // v2.3（r18，S-6.7 方案 A）：官方 dsh web 反代。三样都**只在内存**：
+    //   uiUrls    —— 注册帧推来的带令牌回环 URL（URL 对象；DSH 重启即轮换，重连注册覆盖）
+    //   uiCookies —— 服务端向上游换来的 dsh-auth-* cookie（绝不透传给手机）
+    //   uiTickets —— 手机 WebView 的反代会话票（票 -> { hostId, clientId, expiresAt }）
+    //   uiSockets —— 反代透传的原始 socket（stop 时一并断）
+    uiUrls: new Map(),
+    uiCookies: new Map(),
+    uiTickets: new Map(),
+    uiSockets: new Set(),
   }
 
   /** 手机侧已建立的事件订阅连接，按设备归组（审批通知要发给该设备的每一台手机）。 */
@@ -476,6 +491,180 @@ export function createRelay(options = {}) {
     const conn = state.sockets.get(deviceId)
     if (conn?.isOpen()) return true
     return cp.isDeviceAlive(deviceId, now())
+  }
+
+  /* ── v2.3（r18）：官方 dsh web 反代（S-6.7 方案 A）────────────────────────────
+   * 凭据流转：插件注册帧推 uiUrl（带 launch token 的回环 URL，connection 服务派生）
+   *   → Relay 内存持有（不落盘、不进日志、不进任何响应体）
+   *   → 手机访问 /d/<hostId>/ui/?pt=<deviceToken> 时换发短时会话票（HttpOnly cookie）
+   *   → 反代请求前用 uiUrl 的 token 向上游 /connect 换 dsh-auth-* cookie（服务端持有）
+   * 手机全程只见自己的 deviceToken 与会话票，不见 launch token 也不见上游 cookie。
+   * 官方 UI 挂载点自适应（资源/RPC/WS mux 均相对 document.baseURI 解析），
+   * 前缀路径透传天然成立；Relay 只透传，不改写正文、不塞自定义资源（S-6.7 约束）。
+   * ──────────────────────────────────────────────────────────────────────────── */
+  const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
+  const uiCookieName = (hostId) => `wbsync-ui-${String(hostId).replace(/[^a-zA-Z0-9_-]/g, '_')}`
+
+  /** 注册帧的 uiUrl 三关校验：http(s) / 回环主机 / 带 token。拒收绝不回显原值。 */
+  const checkUiUrl = (raw) => {
+    let u
+    try { u = new URL(raw) } catch { return { ok: false, reason: 'unparseable' } }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, reason: 'scheme' }
+    if (!LOOPBACK_HOSTS.has(u.hostname.toLowerCase())) return { ok: false, reason: 'non-loopback' }
+    if (u.username || u.password) return { ok: false, reason: 'userinfo' }
+    if (!(u.searchParams.get('token') ?? '')) return { ok: false, reason: 'token-missing' }
+    return { ok: true, url: u }
+  }
+
+  /** 注册收口：有效则覆盖（新令牌），无效或缺席则清掉旧值（令牌已随重启轮换）。 */
+  const acceptUiUrl = (deviceId, raw) => {
+    if (typeof raw !== 'string' || !raw.trim()) {
+      state.uiUrls.delete(deviceId)
+      state.uiCookies.delete(deviceId)
+      return
+    }
+    const checked = checkUiUrl(raw.trim())
+    if (checked.ok) {
+      state.uiUrls.set(deviceId, checked.url)
+      state.uiCookies.delete(deviceId)   // 入口变了，旧 cookie 不再可靠，下次访问重新换
+    } else {
+      // 日志里绝不出现 uiUrl 本体（含 token）：只记原因
+      console.warn(`[relay] uiUrl 拒收（${checked.reason}），该主机的官方 UI 反代不可用`)
+      state.uiUrls.delete(deviceId)
+      state.uiCookies.delete(deviceId)
+    }
+  }
+
+  /**
+   * 用 uiUrl 的 launch token 向上游换 dsh-auth-* 浏览器会话 cookie（服务端持有）。
+   * 走官方浏览器入口「根路径 ?token=」——它铸 v1 浏览器 cookie（authorizeIndex 与
+   * WS admit 都认）；/connect 铸的是 v2 API 票，GET / 的 isAuthenticated 不认（真机取证）。
+   */
+  const ensureUiCookie = async (hostId) => {
+    const entry = state.uiUrls.get(hostId)
+    if (!entry) {
+      throw Object.assign(new Error('no ui url'), { code: 'UI_UNAVAILABLE' })
+    }
+    const token = entry.searchParams.get('token') ?? ''
+    const r = await fetch(`${entry.origin}/?token=${encodeURIComponent(token)}`, {
+      redirect: 'manual',
+    }).catch((e) => {
+      throw Object.assign(new Error(`upstream unreachable: ${e?.cause?.code ?? e?.message ?? ''}`),
+        { code: 'UI_UPSTREAM_UNREACHABLE' })
+    })
+    const minted = (r.headers.getSetCookie?.() ?? [])
+      .map((c) => c.split(';')[0].trim())
+      .filter((c) => /^dsh-auth-/i.test(c))
+    if (!minted.length) {
+      // token 失效 / 上游拒绝：如实区分，让手机知道该等插件重连
+      throw Object.assign(new Error('upstream did not mint cookie'), { code: 'UI_UPSTREAM_AUTH' })
+    }
+    state.uiCookies.set(hostId, minted)
+    return minted
+  }
+
+  /** 手机 WebView 的反代会话票：入口 ?pt= 换一次，期内（含滑动续期）免重验。 */
+  const issueUiTicket = (hostId, clientId) => {
+    sweepUiTickets()
+    const ticket = hex(24)
+    state.uiTickets.set(ticket, { hostId, clientId, expiresAt: now() + cfg.uiTicketTtlMs })
+    return ticket
+  }
+  const verifyUiTicket = (hostId, ticket) => {
+    const row = typeof ticket === 'string' && ticket ? state.uiTickets.get(ticket) : null
+    if (!row || row.hostId !== hostId || row.expiresAt < now()) return null
+    row.expiresAt = now() + cfg.uiTicketTtlMs      // 滑动续期：活跃使用不过期
+    return row
+  }
+  const sweepUiTickets = () => {
+    const t = now()
+    for (const [k, row] of state.uiTickets) if (row.expiresAt < t) state.uiTickets.delete(k)
+  }
+  /** 手机被收回时连它的 UI 会话票一起作废（吊销要即刻生效，见 /admin/revoke-client）。 */
+  const dropUiTicketsOf = (hostId, clientId) => {
+    let dropped = 0
+    for (const [k, row] of state.uiTickets) {
+      if (row.hostId === hostId && row.clientId === clientId) { state.uiTickets.delete(k); dropped++ }
+    }
+    return dropped
+  }
+
+  /** Cookie 头解析（WebView 会话票用；上游 cookie 由 Relay 自己记账，不走这里）。 */
+  const parseCookies = (header) => {
+    const out = new Map()
+    for (const part of String(header ?? '').split(';')) {
+      const i = part.indexOf('=')
+      if (i > 0) out.set(part.slice(0, i).trim(), part.slice(i + 1).trim())
+    }
+    return out
+  }
+
+  /** 反代用原始请求体：不解析 JSON（上游收什么就转发什么），只限大小。 */
+  const readBodyRaw = async (req, maxBytes) => {
+    const chunks = []
+    let size = 0
+    for await (const chunk of req) {
+      size += chunk.length
+      if (size > maxBytes) throw new Error('BODY_TOO_LARGE')
+      chunks.push(chunk)
+    }
+    return Buffer.concat(chunks)
+  }
+
+  /**
+   * HTTP 反代一跳：透传方法/路径/查询（剥 pt）/体，附加服务端上游 cookie；
+   * 响应透传状态/头（剥 hop-by-hop 与 dsh-auth-* Set-Cookie）/体流。
+   * 上游 401 时重换一次 cookie 再试（token 轮换 / 家目录密钥更换的自愈路径）。
+   */
+  const proxyUiHttp = async (req, res, hostId, entry, subPath, search) => {
+    const qs = (() => {
+      const sp = new URLSearchParams(search)
+      sp.delete('pt')
+      const s = sp.toString()
+      return s ? `?${s}` : ''
+    })()
+    const target = `${entry.origin}${subPath}${qs}`
+    const call = async (cookie) => fetch(target, {
+      method: req.method,
+      redirect: 'manual',
+      headers: {
+        ...(cookie?.length ? { cookie: cookie.join('; ') } : {}),
+        ...(req.headers['content-type'] ? { 'content-type': req.headers['content-type'] } : {}),
+        ...(req.headers.accept ? { accept: req.headers.accept } : {}),
+        ...(req.headers['accept-language'] ? { 'accept-language': req.headers['accept-language'] } : {}),
+        // 不透传 Cookie / Origin / Referer / Authorization：cookie 是 Relay 的责任，
+        // Origin/Referer 是回环围栏的判定输入（带上去反而可能 403），Authorization 属于本 Relay。
+      },
+      body: ['GET', 'HEAD'].includes(req.method) ? undefined : await readBodyRaw(req, cfg.maxBodyBytes),
+    })
+    let jar = state.uiCookies.get(hostId)
+    if (!jar?.length) jar = await ensureUiCookie(hostId)   // 首次访问先换票再打
+    let r = await call(jar)
+    if (r.status === 401 || r.status === 403) {
+      jar = await ensureUiCookie(hostId)
+      r = await call(jar)
+    }
+    const headers = {}
+    for (const [k, v] of r.headers.entries()) {
+      // content-encoding 必须剥：undici fetch 已透明解压，体是解码后的明文（真机取证：
+      // 带着 gzip 头转发解码体，手机侧 text() 直接 terminated）。长度/逐跳头照剥。
+      if (['transfer-encoding', 'connection', 'keep-alive', 'content-length', 'content-encoding', 'set-cookie'].includes(k)) continue
+      headers[k] = v
+    }
+    // dsh-auth-* 永远不给手机（服务端持有）；其余 Set-Cookie 照透。
+    // 与入口处 setHeader 种下的会话票合并（writeHead 的同名头会覆盖 setHeader）。
+    const prior = res.getHeader('set-cookie')
+    const passCookies = [
+      ...(Array.isArray(prior) ? prior.map(String) : prior ? [String(prior)] : []),
+      ...(r.headers.getSetCookie?.() ?? []).filter((c) => !/^dsh-auth-/i.test(c)),
+    ]
+    if (passCookies.length) headers['set-cookie'] = passCookies
+    res.writeHead(r.status, headers)
+    if (!r.body) return res.end()
+    const stream = Readable.fromWeb(r.body)
+    stream.on('error', () => { try { res.destroy() } catch { /* 已断开 */ } })
+    res.on('close', () => { try { stream.destroy() } catch { /* 已结束 */ } })
+    stream.pipe(res)
   }
 
   /**
@@ -741,6 +930,8 @@ export function createRelay(options = {}) {
           ...(typeof body.engineState === 'string' && body.engineState.trim()
             ? { engineState: body.engineState.trim().slice(0, 32) } : {}),
         })
+        // v2.3（r18）：HTTP 降级通道与 WS 注册同一套 uiUrl 收口（仅内存）
+        acceptUiUrl(body.deviceId, body.uiUrl)
         return ok(res, { deviceId: body.deviceId, protocol: PROTOCOL })
       }
       if (method === 'POST' && path === '/host/heartbeat') {
@@ -806,6 +997,8 @@ export function createRelay(options = {}) {
             online: isOnline(d.deviceId),
             state: d.state ?? null,
             lastSeenAt: d.lastSeenAt ?? null,
+            // v2.3（r18）：官方 UI 反代入口是否可用（布尔；S-6.8/S-6.9 的档案入口置灰依据）
+            uiAvailable: state.uiUrls.has(d.deviceId),
             sessionCount: cp.listSessions({ hostId: d.deviceId, archived: null }).length,
             phones: cp.listPhones(d.deviceId)
               .filter((p) => !p.tombstone)
@@ -1177,6 +1370,8 @@ export function createRelay(options = {}) {
         }
         const r = cp.revokePhone(clientId)
         closePhoneClient(deviceId, clientId)
+        // v2.3（r18）：该手机的官方 UI 反代会话票一并作废（吊销即刻生效）
+        dropUiTicketsOf(deviceId, clientId)
         return ok(res, { deviceId, clientId, tombstone: Boolean(r?.tombstone) })
       }
 
@@ -1200,6 +1395,55 @@ export function createRelay(options = {}) {
       }
       if (method === 'GET' && path.startsWith('/src/')) {
         return sendStatic(res, readStaticFile(staticRoots?.srcRoot, path.replace(/^\/src\//, '')))
+      }
+
+      // v2.3（r18，S-6.7 方案 A）：官方 dsh web 反代 /d/<hostId>/ui(/**)。
+      // 只透传：不塞自定义资源、不改写正文（S-6.7 约束）。官方 UI 挂载点自适应
+      // （资源/RPC/WS mux 均相对 document.baseURI 解析），前缀透传天然成立；
+      // 文档地址必须带尾斜杠，/ui → 301 到 ./（相对路径解析依赖目录形态）。
+      // 凭据：入口 ?pt=<deviceToken>（WebView 发不了 Authorization 头，沿用 WS
+      // 令牌走 query 的先例）→ 换发 HttpOnly 会话票 cookie；上游凭据
+      // （launch token → dsh-auth-* cookie）由 Relay 服务端持有，手机全程不见。
+      // 刻意不做 isOnline / ENGINE_SAFE_MODE 拦截：官方 web 服务与插件连接是
+      // 两条独立生命线，插件断连或安全模式不代表 web 不可用（r18 决策，04 §5 记录）。
+      const mui = /^\/d\/([^/]+)\/ui(\/(.*))?$/.exec(path)
+      if (mui) {
+        const [, hostId, , subPath = ''] = mui
+        const cookieJar = parseCookies(req.headers.cookie)
+        let ticket = verifyUiTicket(hostId, cookieJar.get(uiCookieName(hostId)))
+        if (!ticket) {
+          const pt = url.searchParams.get('pt') ?? ''
+          const caller = pt ? cp.verifyClientToken(hostId, pt) : { ok: false }
+          if (!caller.ok) {
+            return fail(res, 401, 'UNAUTHORIZED', 'UI 反代需要有效手机令牌（?pt=）或会话票')
+          }
+          const value = issueUiTicket(hostId, caller.clientId)
+          // 票只种在反代路径下，不与 /api/*、/app 的凭据空间重叠
+          res.setHeader('Set-Cookie',
+            `${uiCookieName(hostId)}=${value}; Path=/d/${encodeURIComponent(hostId)}/ui/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(cfg.uiTicketTtlMs / 1000)}`)
+          ticket = { clientId: caller.clientId }
+        }
+        // /d/<hostId>/ui（无尾斜杠）→ 301 补斜杠，保留其余查询参数（剥掉 pt）
+        if (subPath === '' && !path.endsWith('/')) {
+          const sp = new URLSearchParams(url.searchParams); sp.delete('pt')
+          const s = sp.toString()
+          res.writeHead(301, { Location: `${path}/${s ? `?${s}` : ''}` })
+          return res.end()
+        }
+        const entry = state.uiUrls.get(hostId)
+        if (!entry) {
+          return fail(res, 409, 'UI_UNAVAILABLE', '该主机未提供官方 UI 反代入口（插件未派生 uiUrl 或版本过旧）', true)
+        }
+        try {
+          return await proxyUiHttp(req, res, hostId, entry, subPath === '' ? '/' : `/${subPath}`, url.search)
+        } catch (e) {
+          const code = String(e?.code ?? '')
+          if (code === 'UI_UNAVAILABLE') return fail(res, 409, 'UI_UNAVAILABLE', '该主机未提供官方 UI 反代入口', true)
+          if (code === 'UI_UPSTREAM_AUTH') return fail(res, 409, 'UI_UPSTREAM_AUTH', '上游 launch token 已失效，等待插件重新注册', true)
+          if (code === 'UI_UPSTREAM_UNREACHABLE') return fail(res, 502, 'UI_UPSTREAM_UNREACHABLE', '上游 dsh web 不可达', true)
+          if (String(e?.message ?? '') === 'BODY_TOO_LARGE') return fail(res, 413, 'INVALID_JSON', '请求体超过上限')
+          throw e
+        }
       }
 
       // 手机侧端点：/d/<hostId>/<endpoint>
@@ -1331,6 +1575,66 @@ export function createRelay(options = {}) {
       return
     }
 
+    // v2.3（r18，S-6.7 方案 A）：官方 UI 的 WS mux（/api/remote.mux 等）——socket 级透传。
+    // 不解帧、不干预握手内容：重建请求头（Host 改上游 authority、附加服务端 cookie、
+    // 剥 Origin），之后双向裸管道。会话票与 HTTP 反代同一枚（WebView cookie 自动携带）。
+    const muiWs = /^\/d\/([^/]+)\/ui\/(.+)$/.exec(url.pathname)
+    if (muiWs && /websocket/i.test(String(req.headers.upgrade ?? ''))) {
+      const [, hostId, subPath] = muiWs
+      const deny = (status) => {
+        try { socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`) } catch { /* 已断开 */ }
+      }
+      const row = verifyUiTicket(hostId, parseCookies(req.headers.cookie).get(uiCookieName(hostId)))
+      if (!row) return deny('401 Unauthorized')
+      const entry = state.uiUrls.get(hostId)
+      if (!entry) return deny('409 Conflict')
+      // cookie 交换是异步流程，upgrade 回调是同步的——装进异步 IIFE，socket 竞争由 deny 的 try/catch 兜住
+      void (async () => {
+        let jar = state.uiCookies.get(hostId)
+        if (!jar?.length) {
+          try { jar = await ensureUiCookie(hostId) } catch { return deny('409 Conflict') }
+        }
+        // 重建升级请求：Key/Version/Protocol/Extensions 原样透传（accept 由上游按同一把 Key 计算）
+        const sp = new URLSearchParams(url.searchParams); sp.delete('pt')
+        const qs = sp.toString()
+        const lines = [
+          `GET /${subPath}${qs ? `?${qs}` : ''} HTTP/1.1`,
+          `Host: ${entry.host}`,
+          'Upgrade: websocket',
+          'Connection: Upgrade',
+          ...(req.headers['sec-websocket-key'] ? [`Sec-WebSocket-Key: ${req.headers['sec-websocket-key']}`] : []),
+          ...(req.headers['sec-websocket-version'] ? [`Sec-WebSocket-Version: ${req.headers['sec-websocket-version']}`] : []),
+          ...(req.headers['sec-websocket-protocol'] ? [`Sec-WebSocket-Protocol: ${req.headers['sec-websocket-protocol']}`] : []),
+          ...(req.headers['sec-websocket-extensions'] ? [`Sec-WebSocket-Extensions: ${req.headers['sec-websocket-extensions']}`] : []),
+          `Cookie: ${jar.join('; ')}`,
+        ]
+        const upHost = entry.hostname.replace(/^\[|\]$/g, '')
+        const upPort = Number(entry.port) || (entry.protocol === 'https:' ? 443 : 80)
+        const dial = entry.protocol === 'https:'
+          ? tls.connect({ host: upHost, port: upPort, servername: upHost })
+          : net.connect({ host: upHost, port: upPort })
+        state.uiSockets.add(socket)
+        state.uiSockets.add(dial)
+        const teardown = () => {
+          state.uiSockets.delete(socket)
+          state.uiSockets.delete(dial)
+          try { socket.destroy() } catch { /* 已断开 */ }
+          try { dial.destroy() } catch { /* 已断开 */ }
+        }
+        dial.on('connect', () => {
+          dial.write(lines.join('\r\n') + '\r\n\r\n', 'latin1')
+          if (head?.length) dial.write(head)
+          dial.pipe(socket)
+          socket.pipe(dial)
+        })
+        dial.on('error', () => deny('502 Bad Gateway'))
+        socket.on('error', teardown)
+        dial.on('close', teardown)
+        socket.on('close', teardown)
+      })()
+      return
+    }
+
     // Host 主动长连：/ws/host → 注册帧 → 帧保序双向透传
     if (url.pathname !== '/ws/host') { socket.destroy(); return }
 
@@ -1372,6 +1676,9 @@ export function createRelay(options = {}) {
             ...(typeof msg.engineState === 'string' && msg.engineState.trim()
               ? { engineState: msg.engineState.trim().slice(0, 32) } : {}),
           })
+          // v2.3（r18）：官方 UI 反代入口（S-6.7 方案 A）。只在 Relay 内存，不进 CP、
+          // 不落盘；注册帧缺字段或非法（非回环/缺 token）即清旧值——令牌已随重启轮换。
+          acceptUiUrl(deviceId, msg.uiUrl)
           conn.sendJson({ t: 'host/registered', deviceId, protocol: PROTOCOL })
           // 时序窗口：配对 / 心跳先把 CP 标成在线，但 WS 还没注册时，bridge 会把
           // 下行帧投进降级轮询队列；而 Host 只走 WS，帧会躺到 10s 超时 → 504。
@@ -1420,6 +1727,12 @@ export function createRelay(options = {}) {
     state.hub.closeAll()                                    // 手机订阅连接
     for (const conn of state.sockets.values()) conn.close(1001, 'server stopping')
     state.sockets.clear()
+    // v2.3（r18）：反代透传 socket 与会话票一并清理
+    for (const s of [...state.uiSockets]) { try { s.destroy() } catch { /* 已断开 */ } }
+    state.uiSockets.clear()
+    state.uiTickets.clear()
+    state.uiCookies.clear()
+    state.uiUrls.clear()
     const timer = setTimeout(() => resolve(), 2000)         // 兜底：不被残留连接挂死
     server.closeAllConnections?.()
     server.close(() => { clearTimeout(timer); resolve() })

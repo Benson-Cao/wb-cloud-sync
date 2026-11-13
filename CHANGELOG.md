@@ -4,6 +4,74 @@
 
 ---
 
+## [v2.3 P2 · r18] · 2026-11-13 · 官方 dsh web 反代（S-6.7 方案 A，bundle 0.2.4）
+
+S-6.7「SSH / Relay 档案直连官方 `dsh web`」的 Relay 侧落地。发起人确认方案 A 后实施：
+凭据流转 = 插件注册帧推派生 `uiUrl` → Relay 内存持有 → 服务端换持上游 cookie →
+手机全程只见自己的 deviceToken 与短时会话票，不见 launch token 也不见上游 cookie。
+
+### 可行性取证（实施前侦察）
+- 宿主 v0.2.2-rc.1（asar 内未压缩源码）：launch token 为进程内 32 字节 base64url
+  随机值（`processLaunchToken`，WeakMap 记账）；`?token=`（GET `/` 或 `/connect`）
+  铸 `dsh-auth-*` 长效 cookie（签名密钥持久，cookie 跨 DSH 重启有效）。
+- **`connection` 服务公开 `authenticatedUrl(baseUrl)`**（把本进程 launch token 附加到
+  干净 URL）+ `webServer` 服务公开 `getAdvertisedUrl()` → 插件可用与
+  `resolveService`（typert / agents / sessionController）相同的 `ctx.get()` 机制
+  派生 uiUrl，无需触碰原始令牌变量。
+- 官方 UI 挂载点自适应：`index.html` 资源引用全相对（`./assets/…`，`file://` 兼容），
+  WS mux 路径 `/api/remote.mux` 相对 `document.baseURI` 解析（源码注释明示
+  「A shell-owned Host on another origin supplies that base through the transport」）
+  → **前缀路径反代天然成立**，无需改写正文。
+- 实证：DSH web（50465）`/` 无令牌 401，而 `/__wbsync/*` 免令牌 200 —— 插件路由
+  免鉴权公开，故 uiUrl **绝不进 status**（只报布尔）。
+
+### Host 插件（`src/index.js` → bundle 0.2.4）
+- `deriveUiUrlFrom(connection, webServer)`：与官方 desktop-host / web-runtime 同款公式
+  `${webServer.protocol}//127.0.0.1:${webServer.port}/` + `connection.authenticatedUrl(...)`
+  （asar 源码先例 @desktop-host main / web-runtime printUrl；`getAdvertisedUrl` 在
+  `webApp` 服务上、插件 ctx 不可达，故不走那条路）。非回环 / 缺 token / 服务缺失 → null。
+- **两路派生**：apply 时 `ctx.get` 即取（服务已可见时零延迟）+ `ctx.inject(["connection","webServer"])`
+  就绪回调补取（宿主官方跨服务先例）；晚于首次注册到达时**弹一次连接**（500ms 重连）
+  让 Relay 经新注册帧收到 uiUrl，值不变不弹。
+- 注册帧加 `uiUrl`（派生失败不发空字段，与 deviceName 同规则）；`/__wbsync/status`
+  加 `uiAvailable` 布尔（只增不删）。
+- 版本 0.2.3 → 0.2.4。
+
+### Relay（`p1/relay/src/server.js`）
+- **uiUrl 收口**：WS 与 HTTP 注册同口径——三关校验（http(s) / 回环主机 / 带 token，
+  拒收日志不回显原值），有效覆盖、无效或缺席清旧值；**只存内存**
+  （`state.uiUrls` / `uiCookies` / `uiTickets` / `uiSockets`），不进 CP、不落盘。
+- **HTTP 反代 `ANY /d/<hostId>/ui(/**)`**：入口 `?pt=<deviceToken>`（WebView 发不了
+  Authorization 头，沿用 WS 令牌走 query 先例）→ 换发短时 HttpOnly 会话票 cookie
+  （Path 限反代路径下，12h 滑动续期）；`/ui` → 301 补尾斜杠（保留其余查询、剥 pt）；
+  反代请求前由服务端向上游**根路径 `?token=`**（官方浏览器入口）换 `dsh-auth-*` **v1
+  浏览器 cookie**，**401 自动重换自愈**；剥 Origin / Referer / Authorization /
+  `content-encoding`（undici 已透明解压，真机取证：带 gzip 头转发解码体 → 手机侧
+  terminated）/ 上游无关头；`dsh-auth-*` Set-Cookie 永不透传手机，其余 Set-Cookie
+  照透；只透传不改写正文（S-6.7 约束）。
+  **真机取证两坑**：① `/connect` 铸的是 v2 API 票，`GET /` 的 `authorizeIndex`
+  只认 v1 浏览器 cookie——直连复现（带 /connect 票仍 401）后改走根路径入口；
+  ② 同上 content-encoding。cookie 名与负载都绑定请求 authority（Host 头，
+  `cookieName = dsh-auth- + sha256url(authority)`），同源透传天然满足。
+- **WS 透传 `WS /d/<hostId>/ui/**`**：会话票鉴权 → 重建升级请求头（Host 改上游
+  authority、附加服务端 cookie）→ **socket 级裸管道**（不解帧），stop 时统一清理。
+- **刻意不做 isOnline / ENGINE_SAFE_MODE 拦截**：官方 web 服务与插件连接是两条
+  独立生命线（r18 决策，docs/04 r18 记录）。
+- `GET /api/hosts` 行加 `uiAvailable` 布尔（S-6.8 / S-6.9 档案入口置灰依据）；
+  `/admin/revoke-client` 连带作废该手机的 UI 会话票（吊销即刻生效）。
+
+### 测试与文档
+- 新增 `p1/relay/test/ui-proxy.test.mjs` 9 条（R1–R9：uiUrl 收口内存不落盘 /
+  三关校验 / 反代鉴权负向 / 正向链路 mock 上游 / dsh-auth-* 剥离 / 401 自愈 /
+  301 补斜杠 / WS 透传 / 吊销作废）；插件 3 条（派生成功 / 失败不发字段 /
+  status 不含令牌本体）。测试 **355 → 366 / 366 PASS**。
+- `docs/04` r18：版本行、§5 路由表 + `uiUrl` 帧字段说明、§9、§10；`PROTOCOL.md`
+  重生成（G4 一致）。
+- 既有教训重复应用：注册帧加字段走 r15 白名单纪律（本次 uiUrl 只进 Relay 内存，
+  不触碰 CP 落盘，无 hydrate 风险）。
+
+---
+
 ## [v2.3 P2 · r17] · 2026-11-13 · (hostId, sessionId) 命名空间隔离 + /api/hosts（CP 地基）
 
 P2（本机引擎与三档案直连官方 UI，W7–W10）的 PC 侧开工件：S-2.2「CP 数据模型落地」的
