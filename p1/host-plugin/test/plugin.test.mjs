@@ -471,7 +471,7 @@ test('卸载即撤回：路由注销、监听移除、不再上行也不再重�
     await waitFor(() => plugin.state.connected, '已连接')
     // 五条 exact 功能路由：状态 / 配置 / 配对码 / 镜像同步 / 镜像清理（ADR-012）。
     // v2.3 要求「不注册任何 UI 路由」，因此这里应该永远没有 prefix 静态托管。
-    const EXPECTED_ROUTES = ['/__wbsync/config', '/__wbsync/mirror-clear', '/__wbsync/mirror-sync', '/__wbsync/pair', '/__wbsync/status']
+    const EXPECTED_ROUTES = ['/__wbsync/config', '/__wbsync/pair', '/__wbsync/status']
     assert.deepEqual(ctx.calls.registered.sort(), EXPECTED_ROUTES)
     assert.deepEqual(ctx.calls.registeredKinds.map((r) => r.kind), Array(EXPECTED_ROUTES.length).fill('exact'))
     assert.ok(ctx.calls.registered.every((p) => p.startsWith('/__wbsync/') && !p.includes('/ui/') && !p.includes('/static/')))

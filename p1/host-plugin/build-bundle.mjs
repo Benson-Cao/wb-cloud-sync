@@ -35,21 +35,12 @@ const topLevelNames = (source, label) => {
 
 const stripExports = (source) => source.replace(/^export\s+(?=(?:async\s+)?(?:const|let|function|class))/gm, '')
 
-const [helperReplay, helperSessions, helperHostAdapters, helperApprovals, helperArtifacts, helperMirror, helperRoutes, helperMirrorSync, mainSrc] = [
+const [helperReplay, helperSessions, helperHostAdapters, helperApprovals, helperArtifacts, helperRoutes, mainSrc] = [
   read('src/replay.js'), read('src/sessions.js'), read('src/host-adapters.js'),
   // approvals.js 自带 node:crypto 的 randomUUID 导入，内联前要掐掉（BANNER 已提供）
   read('src/approvals.js').replace(/^import \{ randomUUID \} from 'node:crypto'\r?\n/m, ''),
   read('src/artifacts.js'),
-  // mirror.js 的 fs / path 导入由 BANNER 提供，内联前掐掉
-  read('src/mirror.js')
-    .replace(/^import \{ promises as fs \} from 'node:fs'\r?\n/m, '')
-    .replace(/^import \{ join, resolve, sep \} from 'node:path'\r?\n/m, ''),
   read('src/routes.js'),
-  // mirror-sync.js 的 fs / path / crypto 由 BANNER 提供，内联前掐掉
-  read('src/mirror-sync.js')
-    .replace(/^import \{ promises as fs \} from 'node:fs'\r?\n/m, '')
-    .replace(/^import \{ randomUUID \} from 'node:crypto'\r?\n/m, '')
-    .replace(/^import \{ join \} from 'node:path'\r?\n/m, ''),
   read('src/index.js'),
 ]
 
@@ -60,9 +51,7 @@ const groups = [
   topLevelNames(helperHostAdapters, 'host-adapters.js'),
   topLevelNames(helperApprovals, 'approvals.js'),
   topLevelNames(helperArtifacts, 'artifacts.js'),
-  topLevelNames(helperMirror, 'mirror.js'),
   topLevelNames(helperRoutes, 'routes.js'),
-  topLevelNames(helperMirrorSync, 'mirror-sync.js'),
   topLevelNames(mainSrc, 'index.js'),
 ]
 const seen = new Map()
@@ -79,9 +68,7 @@ const helpers = `// ===== 内联自 src/replay.js（重启后历史补齐，只�
 // ===== 内联自 src/host-adapters.js（宿主真实入口：create / prompt 软探测） =====\n${stripExports(helperHostAdapters).trim()}
 // ===== 内联自 src/approvals.js（审批瀑布 → 手机，先答先得） =====\n${stripExports(helperApprovals).trim()}
 // ===== 内联自 src/artifacts.js（产物索引，只读日志扫描） =====\n${stripExports(helperArtifacts).trim()}
-// ===== 内联自 src/mirror.js（会话镜像：电脑侧只读导出，ADR-012） =====\n${stripExports(helperMirror).trim()}
-// ===== 内联自 src/routes.js（下行端点表：协议名唯一落点） =====\n${stripExports(helperRoutes).trim()}
-// ===== 内联自 src/mirror-sync.js（手机侧镜像落盘 + 注册表，ADR-012） =====\n${stripExports(helperMirrorSync).trim()}`
+// ===== 内联自 src/routes.js（下行端点表：协议名唯一落点） =====\n${stripExports(helperRoutes).trim()}`
 
 // ---- 主模块：去掉相对导入；apply 改名 __apply（wrapper 接管配置合并） ----
 const EXPECTED_IMPORTS = [
@@ -90,9 +77,7 @@ const EXPECTED_IMPORTS = [
   /^import \{ createHostAdapters(?:, resolveService)? \} from '\.\/host-adapters\.js'$/m,
   /^import \{ createApprovalBridge \} from '\.\/approvals\.js'$/m,
   /^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts\.js'$/m,
-  /^import \{ listMirrorSessions, readSessionChunk \} from '\.\/mirror\.js'$/m,
   /^import \{ createRoutes, notAllowed \} from '\.\/routes\.js'$/m,
-  /^import \{ pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored, writeProjectionStub, clearProjectionStubs \} from '\.\/mirror-sync\.js'$/m,
 ]
 for (const pattern of EXPECTED_IMPORTS) {
   if (!pattern.test(mainSrc)) throw new Error('src/index.js 的相对导入与打包器预期不一致——请同步更新本脚本')
@@ -103,9 +88,7 @@ const main = mainSrc
   .replace(/^import \{ createHostAdapters(?:, resolveService)? \} from '\.\/host-adapters.js'\r?\n/m, '')
   .replace(/^import \{ createApprovalBridge \} from '\.\/approvals.js'\r?\n/m, '')
   .replace(/^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts.js'\r?\n/m, '')
-  .replace(/^import \{ listMirrorSessions, readSessionChunk \} from '\.\/mirror.js'\r?\n/m, '')
   .replace(/^import \{ createRoutes, notAllowed \} from '\.\/routes.js'\r?\n/m, '')
-  .replace(/^import \{ pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored, writeProjectionStub, clearProjectionStubs \} from '\.\/mirror-sync.js'\r?\n/m, '')
   .replace(/^export function apply\(/m, 'function __apply(')
 if (!main.includes('function __apply(')) throw new Error('apply 改名失败')
 

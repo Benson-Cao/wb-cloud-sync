@@ -4,6 +4,35 @@
 
 ---
 
+## [v2.3 收口 · E] · 2026-11-13 13:2x · 撤销 ADR-012：镜像模式整体移除（0.2.2）
+
+v2.3 非目标「不做主机间会话/文件迁移」裁定生效。镜像与官方 UI 方向冲突，
+且真机验证停在「侧栏出现工作区、会话仍未列出」的未完成态。
+
+### 移除
+
+- `src/mirror.js`（电脑侧只读导出）、`src/mirror-sync.js`（手机侧落盘 + 注册表），
+  连同 `session/mirror-list` / `session/mirror-file` 两个下行端点与
+  `/__wbsync/mirror-sync` / `/__wbsync/mirror-clear` 两条本地路由。
+- 对应测试 `mirror.test.mjs`（5 条）+ `mirror-sync.test.mjs`（5 条）删除；
+  `routes.test` 端点表与 `plugin.test` 路由清单断言同步收敛。
+- `build-bundle.mjs` 的内联链、冲突检测组、`EXPECTED_IMPORTS`、import 剥离共 8 处同步。
+- `docs/03` ADR-012 标注**已作废**（保留原文供对照）；PWA 从未调用 mirror 端点（grep 证实），删除零影响。
+
+### 真机验证（13:2x）
+
+DSH 重启（web 端口 62599）后：`GET /__wbsync/mirror-sync` 与 `/__wbsync/mirror-clear`
+返回 **404 空响应体**，与确定不存在的路径（`/__wbsync/nonexist-probe-xyz`）完全一致；
+三条功能路由（status / config / pair）仍 200，`connected: true`、索引 24 条、协议 2.3。
+（注：POST 探测返回 405 是宿主对未注册 POST 的统一行为，不能作删除判据；GET 与
+不存在路径对比才是可靠判据。）
+
+bundle 体积 53.5 kB → **45.1 kB**。
+
+- 测试 364 → **345** / 345 PASS；门禁 10/10 PASS / CURRENT；产物 0.2.2 已部署。
+
+---
+
 ## [v2.3 收口 · A 第一步] · 2026-11-13 13:1x · 协议 wbsync/2.3 r15 + hostId 贯通（0.2.1）
 
 用户裁定取消会签后继续。本轮完成清单 §3 A 项第一步（命名迁移：字段贯通、值兼容）。

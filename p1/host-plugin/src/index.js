@@ -27,9 +27,7 @@ import { createSessionIndexReporter } from './sessions.js'
 import { createHostAdapters, resolveService } from './host-adapters.js'
 import { createApprovalBridge } from './approvals.js'
 import { createArtifactIndex, createArtifactExporter } from './artifacts.js'
-import { listMirrorSessions, readSessionChunk } from './mirror.js'
 import { createRoutes, notAllowed } from './routes.js'
-import { pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored, writeProjectionStub, clearProjectionStubs } from './mirror-sync.js'
 
 export const name = 'wb-cloud-sync'
 export const inject = ['webServer', 'sessionPersistence']
@@ -325,28 +323,6 @@ export function apply(ctx, config = {}) {
   adapters.renameSession = cfg.renameSession ?? hostAdapters.renameSession
 
   /**
-   * 会话镜像（ADR-012）：把电脑上的**原始会话文件字节**分块导出给手机。
-   * 只读、只走 sessions/ 目录、只认真实存在的文件——手机不能自报任意路径。
-   * 分块是因为 WS 帧 1 MiB 硬限，而会话文件常是几十 MB。
-   */
-  const mirrorRoot = () => join(homedir(), '.dsh', 'sessions')
-  adapters.mirrorList = cfg.mirrorList ?? (async () => {
-    try {
-      const rows = await listMirrorSessions(mirrorRoot())
-      return { ok: true, value: { rows } }
-    } catch (error) {
-      return { ok: false, code: 'HOST_ADAPTER_ERROR', message: `镜像清单失败：${error?.message ?? error}` }
-    }
-  })
-  adapters.mirrorFile = cfg.mirrorFile ?? (async (args) => {
-    try {
-      return { ok: true, value: await readSessionChunk(mirrorRoot(), args) }
-    } catch (error) {
-      return { ok: false, code: error?.code ?? 'HOST_ADAPTER_ERROR', message: error?.message ?? '镜像读取失败' }
-    }
-  })
-
-  /**
    * 会话索引：`sessionPersistence.list()` 是唯一来源。拿不到就不上报（status 里
    * `indexReady:false`），而不是发一份空表骗手机「你没有会话」。
    * `lastSeq` 需要解码日志才知道，交给 sessions.js 按 `revision` 缓存。
@@ -628,140 +604,6 @@ export function apply(ctx, config = {}) {
         }
       },
     }))
-    /**
-     * 镜像同步（ADR-012）：客户端在同一个 web 页面里调这条同源路由，
-     * 由**宿主**去拉远端、写本地文件、登记侧栏。
-     *
-     * 为什么必须走宿主：WebView 里的 JS 没有文件系统权限，
-     * 而镜像的最后一步是「把字节写进本机会话目录 + 改 workspace.json」。
-     *
-     * 安全：这条路由在本机回环上，任何人都能 POST。所以要求 body 带 Relay 令牌
-     * （配对得到的 deviceToken）——它既是访问电脑的凭据，也证明调用方是已配对的客户端。
-     * 路由本身**不接受任意路径**：目标工作区由 hostName 推导，不接受客户端指定。
-     */
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: '/__wbsync/mirror-sync',
-      handler: async (req, res) => {
-        if ((req.method ?? 'GET') !== 'POST') {
-          return json(res, 405, errBody('ENDPOINT_NOT_ALLOWED', '仅支持 POST'))
-        }
-        let body
-        try { body = await readJson(req, 256 * 1024) } catch (error) {
-          return json(res, 400, errBody('INVALID_JSON', error?.message ?? '请求体不是 JSON'))
-        }
-        const relayUrl = String(body?.relayUrl ?? '').replace(/\/+$/, '')
-        const hostDeviceId = String(body?.hostDeviceId ?? '')
-        const token = String(body?.token ?? '')
-        const hostName = String(body?.hostName ?? '').trim() || '我的电脑'
-        if (!relayUrl || !hostDeviceId || !token) {
-          return json(res, 400, errBody('INVALID_ARGUMENT', '需要 relayUrl / hostDeviceId / token'))
-        }
-
-        const post = async (endpoint, payload) => {
-          const r = await fetch(`${relayUrl}/d/${encodeURIComponent(hostDeviceId)}/${endpoint}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify(payload),
-          })
-          const out = await r.json().catch(() => null)
-          if (out?.ok !== true) {
-            throw Object.assign(new Error(out?.error?.message ?? `HTTP ${r.status}`), { code: out?.error?.code ?? `HTTP_${r.status}` })
-          }
-          return out.data
-        }
-
-        const base = join(homedir(), '.dsh')
-        const workspacePath = join(base, 'mirror', hostName.replace(/[\\/:*?"<>|]/g, '_'))
-        const sessionsRoot = join(base, 'sessions')
-        try {
-          await mkdirSync(workspacePath, { recursive: true })
-          const list = await post('session/mirror-list', {})
-          const rows = Array.isArray(list?.rows) ? list.rows : []
-          const cap = Math.max(1, Number(cfg.mirrorMaxSessions) || 20)
-          const picked = rows.slice(0, cap)
-
-          let files = 0
-          let bytes = 0
-          for (const row of picked) {
-            for (const f of row.files ?? []) {
-              const out = await pullSessionFile({
-                sessionsRoot, cwdPath: workspacePath, sid: row.sid, name: f.name,
-                fetchChunk: ({ offset, maxBytes }) => post('session/mirror-file', {
-                  sid: `${row.dir}/${row.sid}`, name: f.name, offset, maxBytes,
-                }),
-              })
-              files++
-              bytes += out.bytes
-              if (bytes > (Number(cfg.mirrorMaxTotalBytes) || 64 * 1024 * 1024)) {
-                throw Object.assign(new Error('单次镜像超过总量上限'), { code: 'MIRROR_TOO_LARGE' })
-              }
-            }
-          }
-
-          const reg = await upsertMirrorWorkspace({
-            registryPath: join(base, 'storages', 'workspace.json'),
-            workspacePath, title: hostName,
-            sids: picked.map((r) => r.sid),
-          })
-
-          /*
-           * 只搬 sessions/ 时侧栏不列会话：宿主靠 projcache 的 identity.cwd 判断归属。
-           * 这里补一条**最小**投影缓存（只 identity，不伪造 rows）。
-           * 被跳过（已归属别的工作区）的会话**不写**——那是本机的条目，不碰。
-           */
-          const skipped = new Set(Array.isArray(reg.skipped) ? reg.skipped : [])
-          const projRoot = join(base, 'storages', 'session_projcache', 'sessions')
-          let stubs = 0
-          for (const row of picked) {
-            if (skipped.has(row.sid)) continue
-            const r = await writeProjectionStub({ projRoot, sid: row.sid, cwd: workspacePath })
-            if (r.written) stubs++
-          }
-          return json(res, 200, okBody({
-            workspaceId: reg.id, workspaceTitle: hostName, created: reg.created,
-            sessions: picked.length, truncated: rows.length > picked.length,
-            files, bytes, totalInWorkspace: reg.total,
-            skipped: Array.isArray(reg.skipped) ? reg.skipped.length : 0,
-            stubs,
-          }))
-        } catch (error) {
-          return json(res, 409, errBody(error?.code ?? 'MIRROR_FAILED', `镜像失败：${error?.message ?? error}`, true))
-        }
-      },
-    }))
-
-    disposers.push(ctx.webServer.register({
-      kind: 'exact',
-      path: '/__wbsync/mirror-clear',
-      handler: async (req, res) => {
-        if ((req.method ?? 'GET') !== 'POST') {
-          return json(res, 405, errBody('ENDPOINT_NOT_ALLOWED', '仅支持 POST'))
-        }
-        let body
-        try { body = await readJson(req, 256 * 1024) } catch {
-          return json(res, 400, errBody('INVALID_JSON', '请求体不是 JSON'))
-        }
-        const hostName = String(body?.hostName ?? '').trim() || '我的电脑'
-        const base = join(homedir(), '.dsh')
-        const workspacePath = join(base, 'mirror', hostName.replace(/[\\/:*?"<>|]/g, '_'))
-        try {
-          const reg = await removeMirrorWorkspace({ registryPath: join(base, 'storages', 'workspace.json'), workspacePath })
-          const dir = await clearMirrored({ sessionsRoot: join(base, 'sessions'), cwdPath: workspacePath })
-          // 只删「cwd 指向镜像目录」的投影缓存：sid 万一撞上本机会话，不能连带删人家的
-          const proj = await clearProjectionStubs({
-            projRoot: join(base, 'storages', 'session_projcache', 'sessions'),
-            sids: reg.sids ?? [], cwd: workspacePath,
-          })
-          return json(res, 200, okBody({
-            registry: reg.removed, files: dir.removed, stubs: proj.removed, workspaceTitle: hostName,
-          }))
-        } catch (error) {
-          return json(res, 409, errBody('MIRROR_FAILED', `清理失败：${error?.message ?? error}`, true))
-        }
-      },
-    }))
-
     return disposers
   }
 

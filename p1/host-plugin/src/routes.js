@@ -77,11 +77,6 @@ export function createRoutes({ adapters, approvals, unwrap, errBody, protocol })
     }), { created: true }),
 
     // ADR-012：镜像只读导出（原件字节，分块）
-    'session/mirror-list': () => call(adapters.mirrorList(), { rows: [] }),
-
-    'session/mirror-file': (body) => call(adapters.mirrorFile({
-      sid: body?.sid, name: body?.name, offset: body?.offset, maxBytes: body?.maxBytes,
-    }), { sid: body?.sid ?? null, bytes: '', eof: true }),
 
     'session/follow': (body) => call(adapters.replay({
       sessionId: body?.sessionId, sinceSeq: body?.sinceSeq,
