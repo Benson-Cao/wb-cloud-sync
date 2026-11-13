@@ -27,7 +27,7 @@
   所有注册均为 `exact` 且无 `/ui/` `/static/` 路由、`ctx.effect` 可逆。
 - 顺手清掉 3 处过时注释（patch 层「不声明 dsh.client」、打包器「4 个 src 模块」）。
 
-### 一个照抄文档会踩的坑
+### 一处会导致连接失败的配置优先级冲突
 
 04 §10 的 `cordis.patch.yml` 示例带 `config: { relayUrl: "" }`。本仓库 wrapper 的优先级是
 `...fileCfg, ...env, ...config`，`apply` 的 `config` **最高**——写进 patch 会覆盖
