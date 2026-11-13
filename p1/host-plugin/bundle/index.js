@@ -1,5 +1,5 @@
 /**
- * dsh-wb-cloud-sync-host · P1 W3 Host 插件可安装 bundle（**自动生成，勿手改**）
+ * dsh-wb-cloud-sync · PC 唯一插件可安装 bundle（v2.3）（**自动生成，勿手改**）
  * ---------------------------------------------------------------
  * 由 p1/host-plugin/build-bundle.mjs 从 src/ 下 9 个模块合成：
  * 改源码后运行 `node p1/host-plugin/build-bundle.mjs` 重新生成（CI 有 --check 同步校验）。
@@ -2185,7 +2185,7 @@ async function clearProjectionStubs({ projRoot, sids, cwd }) {
  *                                                  sessionId，可附 index 行）
  */
 
-export const name = 'wbsync-host-dev'
+export const name = 'wb-cloud-sync'
 export const inject = ['webServer', 'sessionPersistence']
 
 const PROTOCOL = 'wbsync/1'

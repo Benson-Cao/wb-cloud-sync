@@ -158,51 +158,43 @@ test('B-client 前端半边声明自洽：dsh.client 必须配 "./client" 导出
   assert.match(client, /window\.__ModuleLoader__\.load\(/, 'client.js 必须是自注册的浏览器模块')
 })
 
-test('B-client2 面板走真数据：真配对、真会话接口，不许再放样例行', () => {
+test('B-client2 设置页只读同源 /__wbsync/*：不拉会话、不碰写入', () => {
   const client = readFileSync(new URL('../bundle/client.js', import.meta.url), 'utf8')
 
-  // 配对必须两步：/pair 拿 challenge → HMAC 后 /pair/verify 换令牌
-  assert.match(client, /'\/pair'/, '要走 /pair 拿 challenge')
-  assert.match(client, /'\/pair\/verify'/, '要走 /pair/verify 换令牌')
-  assert.match(client, /importKey\('raw'/, '配对签名用 WebCrypto HMAC')
-  assert.match(client, /sign\('HMAC'/, '配对签名用 WebCrypto HMAC')
+  // 设置页跑在 PC 的 DSH web 里，与插件同源：状态与配置直接读本地路由
+  assert.match(client, /'\/__wbsync\/status'/, '要读同源状态路由')
+  assert.match(client, /'\/__wbsync\/config'/, '要读同源配置路由')
+  assert.match(client, /'\/__wbsync\/pair'/, '配对码走同源 pair 路由')
 
-  // 会话列表来自 Relay，不是本地编的
-  assert.match(client, /\/api\/sessions\?deviceId=/, '会话列表要打 Relay 的 /api/sessions')
-  // host（在线/名字）在响应**顶层**，不在每行；读错层会得到 undefined 且界面永远显示离线
-  assert.match(client, /data\?\.host/, '要读响应顶层的 host')
-  assert.ok(!client.includes('rows[0].host'), '不许从行里读 host')
+  // v2.3（13 §1）：不再自己拉会话、不再渲染会话列表
+  assert.equal(client.includes('/api/sessions'), false, '不许再自己拉 Relay 会话列表')
+  assert.equal(/function\s+Conversation/.test(client), false, '不许保留会话视图')
+  assert.equal(/function\s+SessionRow/.test(client), false, '不许保留会话行')
+  assert.equal(client.includes('写回缓存'), false)
 
-  // 令牌失效要能自愈：清链并提示重配，而不是一直转圈
-  assert.match(client, /HTTP_401|UNAUTHORIZED/, '要处理令牌失效')
-  assert.match(client, /writeLink\(null\)/, '失效时清掉链接')
+  // 令牌只展示「是否配置」布尔，绝不在页面里读取或展示明文
+  assert.match(client, /hostTokenConfigured/, '只读脱敏布尔')
+  assert.equal(/config\?\.hostToken\b/.test(client), false, '不许从 config 读 hostToken 字段')
 
-  // 样例数据不许回来（曾经为了量尺寸放过假行）
+  // 样例数据不许回来
   assert.equal(client.includes('季度报告整理'), false, '不许留样例会话名')
   assert.equal(client.includes('半导体调研'), false, '不许留样例会话名')
 })
 
-test('B-client3 事件流活在别人的页面里：必须可卸载、可续读、可补齐', () => {
+test('B-client3 零事件流：不订阅、不解析、不代发（界面归官方 dsh web）', () => {
   const client = readFileSync(new URL('../bundle/client.js', import.meta.url), 'utf8')
 
-  // 订阅地址：/d/<host>/events/<session>?token&sinceSeq（与 PWA 同一条通道）
-  assert.match(client, /\/events\/\$\{encodeURIComponent\(sessionId\)\}/, '走 WS 事件通道')
-  assert.match(client, /sinceSeq=\$\{lastSeq\.current\}/, '重连必须带 sinceSeq，靠 Relay 补齐')
+  // v2.3：手机界面由官方 dsh web 提供，插件前端半边不再持有事件通道
+  assert.equal(/new WebSocket|EventSource/.test(client), false, '不许订阅事件流')
+  assert.equal(client.includes('/events/'), false, '不许拼事件通道地址')
+  assert.equal(client.includes('sinceSeq'), false, '不许做断线补齐')
 
-  // 卸载要收连接：这是与 PWA 最大的差异（PWA 的 WS 属于页面，组件不会卸载）
-  assert.match(client, /return \(\) => \{[\s\S]{0,220}ws\?\.close\(\)/, 'cleanup 必须关掉 WS')
-  assert.match(client, /if \(closed\) return/, '卸载后要丢弃尾包')
+  // 写路径与审批由官方 UI 直接走宿主入口，插件不再代理
+  assert.equal(client.includes('/session/prompt'), false, '不许代发消息')
+  assert.equal(client.includes('$events/result'), false, '不许代答审批')
+  assert.equal(client.includes('assistant/message'), false, '不许解析事件正文')
 
-  // 跨挂载续读：lastSeq 存模块级缓存，不能只活在组件 state 里
-  assert.match(client, /new Map\(\)/, 'lastSeq 要有模块级缓存')
-  assert.match(client, /SESSION_LAST_SEQ\.set/, '读到的 seq 要写回缓存')
-
-  // 写路径与审批：仍走宿主唯一写者，不自造事件
-  assert.match(client, /\/session\/prompt/, '发消息走 session/prompt')
-  assert.match(client, /clientMsgId/, '发送要带幂等键')
-  assert.match(client, /\/\$events\/result/, '审批应答走 $events/result')
-  assert.match(client, /allowed-once/, '审批 outcome 用协议里的取值')
-
-  // 只读取不推断：插件内部流量不占屏
-  assert.match(client, /startsWith\('plugin:'\)/, '插件事件要识别并跳过')
+  // 只保留设置：两个 slot（设置面板 + 侧栏入口），不多不少
+  assert.equal((client.match(/slots\.register/g) ?? []).length, 2, '只注册设置面板与入口两个 slot')
+  assert.equal(client.includes('data-wbsync'), true, '设置组件要有可定位标记')
 })

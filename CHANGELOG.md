@@ -4,6 +4,59 @@
 
 ---
 
+## [v2.3 收口 · B+C] · 2026-11-13 11:1x · 改名 0.2.0 + 客户端半边收为设置页
+
+用户裁定四方会签取消，继续执行 `docs/v2.3/收口差异清单.md` 的剩余项。本轮完成 B（改名）与 C（删手机端 UI），A（协议 2.3）与 E 的 Host 侧镜像清理列为下一批。
+
+### B · 改名（04 §10）
+
+- 包名 `dsh-wb-cloud-sync-host` → **`dsh-wb-cloud-sync`**，插件 id → **`wb-cloud-sync`**，版本 → **0.2.0**。
+- 落点：bundle/package.json、cordis.patch.yml、`src/index.js` 的 `export const name`、
+  client.js 模块 id、build-bundle BANNER、plugin.test 断言、开发骨架 patch id。
+- 有意保留 `main: index.js` 单文件结构（文档示例是 `dist/` 目录布局）——部署与
+  profile 校验都按单文件 bundle 进行，换布局是又一次结构变更，本轮不做。
+
+### C · `dsh.client` 半边只做桌面设置页（13 §1）
+
+- `client.js` 820 行 → **约 200 行**：只注册 `main`（设置面板）与
+  `sidebar.footer.action`（侧栏入口）。内容 = 连接状态 / relayUrl / HOST_TOKEN 布尔 /
+  hostId / dshCommit / engineState / 协议版本 / 配对码生成。
+- **删除**：会话列表、会话内对话、事件流订阅（WS + sinceSeq）、发消息、审批应答、
+  镜像面板与按钮——这些全部归官方 `dsh web` 或宿主入口，插件前端不再持有。
+- 设置页与插件同源，直接读 `/__wbsync/status` / `/__wbsync/config`，不需要 Relay 令牌。
+- bundle.test 的 B-client2 / B-client3 改写为断言**新形态**：只读同源路由、
+  不拉 `/api/sessions`、无 WebSocket / EventSource、无 `/session/prompt` 代发、
+  恰好两个 slot。旧断言测的正是被删除的功能，保留即矛盾。
+
+### 打包器加固（真教训）
+
+改文件时 Windows 文本模式把换行写成 CRLF，打包器剥离 `import` 的正则只匹配 `\n`，
+匹配失败 → 8 条 `import` 残留在 bundle 里与内联定义重复声明，bundle 测试 9 条全红
+（报 `Identifier 'createBackfillReader' has already been declared`）。
+已把 8 处正则放宽为 `'\r?\n`，并把 6 个被改文件统一回 LF。
+**换行敏感的正则今后一律容错 CRLF。**
+
+### 部署切换
+
+- 新目录 `~/.dsh/profiles/desktop/node_modules/dsh-wb-cloud-sync/`（5 文件逐字节校验一致）；
+  旧目录备份至 `~/.dsh/backups/dsh-wb-cloud-sync-host-0.1.29-20261113/` 后退役
+  （改名 `.retired-0.1.29`，不直接删除）。
+- profile `bundles` 与 `dependencies` 同步切到新包名 + `file:.../dsh-wb-cloud-sync-0.2.0.tgz`，
+  原文件备份 `~/.dsh/backups/desktop-package.json.bak-0.1.29-20261113`。
+- 运行中的 DSH 仍加载内存里的旧模块（`/__wbsync/config` 此刻仍 200，因为 0.1.29 已在跑）；
+  新包 0.2.0 与新 id 要**下次重启 DSH** 才生效。重启后按 `bundle/README.md` 自检。
+
+### 未执行（下一批）
+
+- **A**：协议 `wbsync/2.3`。常量在 Host / Relay / PWA 与 5 个测试文件；PWA 与 Relay 的
+  路径、参数、CP 索引全用 `deviceId` 表达主机标识，需要四端同批改 + 全量 E2E。
+- **E 的 Host 侧**：`mirror.js` / `mirror-sync.js` 与 mirror 两条路由仍在（PWA 可调用），
+  彻底删除需同步移除约 25 条测试。手机端入口已随 C 删除。
+
+- 测试 364 / 364 PASS；`build-bundle --check` 一致；产物 `dist/dsh-wb-cloud-sync-0.2.0.tgz`（53.3 kB）。
+
+---
+
 ## [v2.3 契约对齐] · 2026-11-13 10:3x · 基线落地 + 本地只读契约补齐（0.1.29）
 
 用户发来 15 份 **v2.3 文档包**（D-005「官方原生 UI、零皮肤」为最高优先级），要求修改

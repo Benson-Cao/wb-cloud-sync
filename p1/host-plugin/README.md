@@ -1,8 +1,10 @@
-# P1 W3 · Host 侧插件骨架（`wbsync-host-dev`）
+# PC 唯一插件 · `dsh-wb-cloud-sync`（v2.3 收口后）
 
-DSH 宿主里的那一半：**主动外连 Relay**、把宿主事件原样上行、把手机投递的指令交回宿主提交入口、注册两个本地只读/代理路由。
-
-> 这是**开发骨架**，不是可发布插件：`private: true`，包名/插件 id 都是 `wbsync-host-dev`。正式包会是 `wb-cloud-sync` / `dsh-wb-cloud-sync`，届时只换 `package.json` 与 `cordis.patch.yml` 的标识，帧语义不变。
+> 原 P1 W3 开发骨架（`@wbsync/host-plugin-dev`）的正式包已按 `docs/v2.3/04 §10` 收口：
+> 包名 `dsh-wb-cloud-sync`、插件 id `wb-cloud-sync`、版本 `0.2.0`。
+> `dsh.client` 半边**只做桌面设置页**（同源读 `/__wbsync/status` / `/__wbsync/config`、出配对码），
+> 不再渲染会话列表 / 对话 / 审批 / 镜像，不托管任何 UI 资源（13 §1）。
+> 本文以下内容描述 host 半边的行为与测试，仍然有效。
 
 ---
 
@@ -201,7 +203,7 @@ node --test p1/host-plugin/test/*.test.mjs
 ## 十一、可安装 bundle（`bundle/`）
 
 - `bundle/index.js` 由 `node p1/host-plugin/build-bundle.mjs` 从 `src/` **自动生成**（单文件自包含，顶层重名构建期即失败）；CI 用 `--check` 防「改了 src 忘了生成」。
-- `npm pack` 产出 `dist/dsh-wb-cloud-sync-host-0.1.29.tgz` → DSH「添加插件」安装；`dsh` 块声明 `bundle.patch` 与 `client`（前端半边，写法对齐已验证的探针 / dsh-nas-sync）。
+- `npm pack` 产出 `dist/dsh-wb-cloud-sync-0.2.0.tgz` → DSH「添加插件」安装；`dsh` 块声明 `bundle.patch` 与 `client`（桌面设置页半边）。
 - **真机取证（2026-11-10）**：装包后插件在 PC 端 DSH 正常加载——`/__wbsync/status` 报 `connected:true`、索引 11 条已上送；DSH web 端口是**动态**的（`netstat -ano | findstr <DSH进程PID>` 查 LISTENING），浏览器地址栏 `http://127.0.0.1:<端口>/__wbsync/pair` 即可出码。
 - wrapper 配置链（低→高）：代码默认（本机 Relay + 主机名 deviceId）← `~/.dsh/wbsync-host.json` ← `WBSYNC_*` 环境变量 ← `apply` 的 `config`。
 - 安装 / 配置详见 `bundle/README.md`。

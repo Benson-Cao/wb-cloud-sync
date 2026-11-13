@@ -31,7 +31,7 @@ import { listMirrorSessions, readSessionChunk } from './mirror.js'
 import { createRoutes, notAllowed } from './routes.js'
 import { pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored, writeProjectionStub, clearProjectionStubs } from './mirror-sync.js'
 
-export const name = 'wbsync-host-dev'
+export const name = 'wb-cloud-sync'
 export const inject = ['webServer', 'sessionPersistence']
 
 const PROTOCOL = 'wbsync/1'

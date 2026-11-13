@@ -136,7 +136,7 @@ const framesOf = (relay, type) => relay.frames.filter((f) => f.t === type)
 /* ------------------------------------------------------- 插件契约（静态） */
 
 test('插件声明：名字、inject 与协议版本', () => {
-  assert.equal(pluginName, 'wbsync-host-dev')
+  assert.equal(pluginName, 'wb-cloud-sync')
   // 只 inject 宿主已有的两个服务；未注入也不应让整个插件 pending
   assert.deepEqual(inject, ['webServer', 'sessionPersistence'])
   assert.equal(PROTOCOL, 'wbsync/1')

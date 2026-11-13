@@ -1,9 +1,10 @@
-# dsh-wb-cloud-sync-host · Cordis **bundle** patch 层
+# dsh-wb-cloud-sync · Cordis **bundle** patch 层（v2.3）
 #
 # 必须是 `- insert:` 形式（profile root 是 []，不带 insert 的 patch 会被静默跳过）。
 # 写法对齐已验证可用的 dsh-nas-sync / dsh-remote / P0 探针。
-# patch 层只负责把插件插进组合树；前端半边由 package.json 的 dsh.client 声明，
-# 宿主按 exports["./client"] 加载 bundle/client.js（0.1.21 起真机验证可用）。
+# 插件 id 与包名按 docs/v2.3/04 §10 收口为 wb-cloud-sync / dsh-wb-cloud-sync。
+# 前端半边由 package.json 的 dsh.client 声明，宿主按 exports["./client"] 加载，
+# 只提供一个桌面设置页，不托管任何 UI 资源。
 - insert:
-    - id: wb-cloud-sync-host
-      name: dsh-wb-cloud-sync-host
+    - id: wb-cloud-sync
+      name: dsh-wb-cloud-sync

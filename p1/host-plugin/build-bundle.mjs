@@ -38,18 +38,18 @@ const stripExports = (source) => source.replace(/^export\s+(?=(?:async\s+)?(?:co
 const [helperReplay, helperSessions, helperHostAdapters, helperApprovals, helperArtifacts, helperMirror, helperRoutes, helperMirrorSync, mainSrc] = [
   read('src/replay.js'), read('src/sessions.js'), read('src/host-adapters.js'),
   // approvals.js 自带 node:crypto 的 randomUUID 导入，内联前要掐掉（BANNER 已提供）
-  read('src/approvals.js').replace(/^import \{ randomUUID \} from 'node:crypto'\n/m, ''),
+  read('src/approvals.js').replace(/^import \{ randomUUID \} from 'node:crypto'\r?\n/m, ''),
   read('src/artifacts.js'),
   // mirror.js 的 fs / path 导入由 BANNER 提供，内联前掐掉
   read('src/mirror.js')
-    .replace(/^import \{ promises as fs \} from 'node:fs'\n/m, '')
-    .replace(/^import \{ join, resolve, sep \} from 'node:path'\n/m, ''),
+    .replace(/^import \{ promises as fs \} from 'node:fs'\r?\n/m, '')
+    .replace(/^import \{ join, resolve, sep \} from 'node:path'\r?\n/m, ''),
   read('src/routes.js'),
   // mirror-sync.js 的 fs / path / crypto 由 BANNER 提供，内联前掐掉
   read('src/mirror-sync.js')
-    .replace(/^import \{ promises as fs \} from 'node:fs'\n/m, '')
-    .replace(/^import \{ randomUUID \} from 'node:crypto'\n/m, '')
-    .replace(/^import \{ join \} from 'node:path'\n/m, ''),
+    .replace(/^import \{ promises as fs \} from 'node:fs'\r?\n/m, '')
+    .replace(/^import \{ randomUUID \} from 'node:crypto'\r?\n/m, '')
+    .replace(/^import \{ join \} from 'node:path'\r?\n/m, ''),
   read('src/index.js'),
 ]
 
@@ -98,19 +98,19 @@ for (const pattern of EXPECTED_IMPORTS) {
   if (!pattern.test(mainSrc)) throw new Error('src/index.js 的相对导入与打包器预期不一致——请同步更新本脚本')
 }
 const main = mainSrc
-  .replace(/^import \{ createBackfillReader, createReplayAdapter \} from '\.\/replay\.js'\n/m, '')
-  .replace(/^import \{ createSessionIndexReporter \} from '\.\/sessions\.js'\n/m, '')
-  .replace(/^import \{ createHostAdapters(?:, resolveService)? \} from '\.\/host-adapters\.js'\n/m, '')
-  .replace(/^import \{ createApprovalBridge \} from '\.\/approvals\.js'\n/m, '')
-  .replace(/^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts\.js'\n/m, '')
-  .replace(/^import \{ listMirrorSessions, readSessionChunk \} from '\.\/mirror\.js'\n/m, '')
-  .replace(/^import \{ createRoutes, notAllowed \} from '\.\/routes\.js'\n/m, '')
-  .replace(/^import \{ pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored, writeProjectionStub, clearProjectionStubs \} from '\.\/mirror-sync\.js'\n/m, '')
+  .replace(/^import \{ createBackfillReader, createReplayAdapter \} from '\.\/replay.js'\r?\n/m, '')
+  .replace(/^import \{ createSessionIndexReporter \} from '\.\/sessions.js'\r?\n/m, '')
+  .replace(/^import \{ createHostAdapters(?:, resolveService)? \} from '\.\/host-adapters.js'\r?\n/m, '')
+  .replace(/^import \{ createApprovalBridge \} from '\.\/approvals.js'\r?\n/m, '')
+  .replace(/^import \{ createArtifactIndex, createArtifactExporter \} from '\.\/artifacts.js'\r?\n/m, '')
+  .replace(/^import \{ listMirrorSessions, readSessionChunk \} from '\.\/mirror.js'\r?\n/m, '')
+  .replace(/^import \{ createRoutes, notAllowed \} from '\.\/routes.js'\r?\n/m, '')
+  .replace(/^import \{ pullSessionFile, upsertMirrorWorkspace, removeMirrorWorkspace, clearMirrored, writeProjectionStub, clearProjectionStubs \} from '\.\/mirror-sync.js'\r?\n/m, '')
   .replace(/^export function apply\(/m, 'function __apply(')
 if (!main.includes('function __apply(')) throw new Error('apply 改名失败')
 
 const BANNER = `/**
- * dsh-wb-cloud-sync-host · P1 W3 Host 插件可安装 bundle（**自动生成，勿手改**）
+ * dsh-wb-cloud-sync · PC 唯一插件可安装 bundle（v2.3）（**自动生成，勿手改**）
  * ---------------------------------------------------------------
  * 由 p1/host-plugin/build-bundle.mjs 从 src/ 下 9 个模块合成：
  * 改源码后运行 \`node p1/host-plugin/build-bundle.mjs\` 重新生成（CI 有 --check 同步校验）。

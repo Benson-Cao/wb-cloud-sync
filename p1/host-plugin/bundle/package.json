@@ -1,7 +1,7 @@
 {
-  "name": "dsh-wb-cloud-sync-host",
-  "version": "0.1.29",
-  "description": "WB-Cloud-Sync P1 W3 host plugin bundle — uplink session events, downlink prompt/cancel/create/replay dispatch, session index reporting. Pairs with p1/relay.",
+  "name": "dsh-wb-cloud-sync",
+  "version": "0.2.0",
+  "description": "WB-Cloud-Sync PC-only plugin: host event uplink, downlink dispatch, session index reporting, local status/config routes, and a desktop settings page. No UI assets are hosted.",
   "type": "module",
   "main": "index.js",
   "exports": {

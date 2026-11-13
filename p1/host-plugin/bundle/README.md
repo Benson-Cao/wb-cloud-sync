@@ -1,10 +1,11 @@
-# dsh-wb-cloud-sync-host · 可安装 bundle
+# dsh-wb-cloud-sync · 可安装 bundle
 
 > `index.js` 由 `p1/host-plugin/build-bundle.mjs` 从 `src/` **自动生成**（单文件自包含），勿手改。
+> `client.js` 是桌面设置页半边（同源读 `/__wbsync/status` / `/__wbsync/config`、出配对码），不托管任何 UI 资源。
 
 ## 安装
 
-DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-host-0.1.29.tgz`（由本目录 `npm pack` 产出）。
+DSH → 插件 → 「添加插件」→ 选择 `dist/dsh-wb-cloud-sync-0.2.0.tgz`（由本目录 `npm pack` 产出）。
 
 ## v2.3 契约对齐（0.1.29，2026-11-13）
 
