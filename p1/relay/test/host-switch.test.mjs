@@ -269,3 +269,22 @@ test('SW9 离线目标也可切（切过去看离线页，S-6.8）', async () =>
     assert.equal(relay.cp.findPhoneByToken(t).boundHostId, 'sw-b')
   } finally { await shutdown() }
 })
+
+test('SW10 /api/hosts 的 bound 标记随切换翻转（切换器 UI 的数据契约，r20）', async () => {
+  const { advance } = await boot()
+  try {
+    advance(0)
+    await registerHost('sw-a')
+    await registerHost('sw-b')
+    const t = await pairPhone('sw-a', 'phone-sw10')
+    let rows = (await call('/api/hosts', { token: t })).json.data.rows
+    assert.equal(rows.length, 2, '手机视角列出全部可切主机（不只绑定主机）')
+    assert.equal(rows.find((r) => r.hostId === 'sw-a').bound, true)
+    assert.equal(rows.find((r) => r.hostId === 'sw-b').bound, false)
+    assert.equal('phones' in rows.find((r) => r.hostId === 'sw-a'), false, '手机视角不收 phones')
+    await select(t, { hostId: 'sw-b', confirmNoMigration: true })
+    rows = (await call('/api/hosts', { token: t })).json.data.rows
+    assert.equal(rows.find((r) => r.hostId === 'sw-a').bound, false, '切换后旧主机 bound 翻转')
+    assert.equal(rows.find((r) => r.hostId === 'sw-b').bound, true, '新主机 bound:true')
+  } finally { await shutdown() }
+})

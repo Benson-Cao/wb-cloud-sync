@@ -71,6 +71,9 @@ export function createPwaClient({
   const follows = new Map()    // sessionId -> 订阅记录
   // 这台电脑的在线状态（W7 状态点）：null = 还没探过，别画成离线
   let hostStatus = { deviceId, online: null, lastSeenAt: null }
+  // r20（S-6.9 切换语义）：令牌有效但服务端绑定已换到另一台主机（409 HOST_MISMATCH）。
+  // 置位后由 UI 提示用户切到对应档案；成功刷新即复位。
+  let hostMismatch = false
   let stopped = false
 
   const notify = (notice) => { try { onNotice?.(notice) } catch { /* 回调异常不影响客户端 */ } }
@@ -87,8 +90,16 @@ export function createPwaClient({
     const payload = await r.json().catch(() => null)
     if (!r.ok || payload?.ok !== true) {
       const code = payload?.error?.code ?? `HTTP_${r.status}`
+      // r20（S-6.9 切换语义）：令牌有效但服务端绑定已换到另一台主机——不是 401 也
+      // 不是网络错误，提示用户切档案；只通知一次，避免重连风暴刷屏。
+      if (code === 'HOST_MISMATCH' && !hostMismatch) {
+        hostMismatch = true
+        emitState()
+        notify({ type: 'host-mismatch', deviceId })
+      }
       throw Object.assign(new Error(`会话列表获取失败：${code}`), { code })
     }
+    hostMismatch = false
     sessions.clear()
     for (const row of payload.data?.rows ?? []) sessions.set(row.sessionId, row)
     // 状态点靠这一句更新：sessions 响应里带 host.online（协议 r10）
@@ -733,6 +744,7 @@ export function createPwaClient({
   const snapshot = () => ({
     deviceId,
     host: { ...hostStatus },
+    hostMismatch,
     stopped,
     sessions: [...sessions.values()],
     follows: [...follows.values()].map((r) => ({

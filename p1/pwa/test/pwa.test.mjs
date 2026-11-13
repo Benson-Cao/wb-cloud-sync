@@ -534,3 +534,34 @@ test('P9 会话列表要带出「这台电脑在不在线」，供状态点用�
 
   client.stop()
 })
+
+test('P10 HOST_MISMATCH 兜底（r20）：绑定被切到另一台主机后，列表刷新发 host-mismatch 通知而非静默失败', async () => {
+  const hostA = 'pwa-mm-a'
+  const hostB = 'pwa-mm-b'
+  await registerHost(hostA)
+  await registerHost(hostB)
+  const token = await pair(hostA)
+  // 服务端把绑定切到 B（S-6.9 切换语义；这里直接调 Relay 端点，不走 UI）
+  const sel = await call('/api/hosts/select', { method: 'POST', token, body: { hostId: hostB, confirmNoMigration: true } })
+  assert.equal(sel.status, 200, '切换成功')
+
+  const notices = []
+  const client = createPwaClient({ baseUrl: base, deviceId: hostA, token, onNotice: (n) => notices.push(n) })
+  await assert.rejects(client.refreshSessions(), (e) => e.code === 'HOST_MISMATCH', '旧 hostId 刷新必须报 HOST_MISMATCH')
+  const mm = notices.find((n) => n.type === 'host-mismatch')
+  assert.ok(mm, '收到 host-mismatch 通知（UI 据此引导用户切档案）')
+  assert.equal(mm.deviceId, hostA)
+  assert.equal(client.snapshot().hostMismatch, true, 'snapshot 暴露 mismatch 状态供状态点渲染')
+  // 重试第二次：mismatch 已在位，不重复刷通知（防重连风暴刷屏）
+  await assert.rejects(client.refreshSessions(), (e) => e.code === 'HOST_MISMATCH')
+  assert.equal(notices.filter((n) => n.type === 'host-mismatch').length, 1)
+  client.stop()
+
+  // 切回 A 后新实例刷新成功，状态复位
+  const back = await call('/api/hosts/select', { method: 'POST', token, body: { hostId: hostA, confirmNoMigration: true } })
+  assert.equal(back.status, 200)
+  const c2 = createPwaClient({ baseUrl: base, deviceId: hostA, token })
+  await c2.refreshSessions()
+  assert.equal(c2.snapshot().hostMismatch, false, '成功刷新即复位')
+  c2.stop()
+})

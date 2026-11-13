@@ -613,7 +613,7 @@ test('T18 跨域：只回显本机源（WebView 场景），不对任意站点�
   assert.equal(evilPre.headers.get('access-control-allow-origin'), null)
 })
 
-test('H-1 /api/hosts：手机令牌只看到绑定主机；adminToken 看到全部；坏令牌 401', async () => {
+test('H-1 /api/hosts：手机令牌看全部可切主机（bound 标记、不收 phones）；adminToken 看全部含 phones；坏令牌 401', async () => {
   const reg = await call('/host/register', {
     method: 'POST',
     body: {
@@ -623,13 +623,24 @@ test('H-1 /api/hosts：手机令牌只看到绑定主机；adminToken 看到全�
     },
   })
   assert.equal(reg.status, 200)
+  const reg2 = await call('/host/register', {
+    method: 'POST',
+    body: { deviceId: 'hosts-dev2', hostId: 'hosts-host2', deviceName: '档案B', platform: 'win32' },
+  })
+  assert.equal(reg2.status, 200, '第二台主机（切换器目标）')
 
   const phone = await pair('hosts-dev', { phoneId: 'phone-hosts1' })
   const r1 = await call('/api/hosts', { token: phone.token })
   assert.equal(r1.status, 200)
-  assert.equal(r1.json.data.rows.length, 1, '手机只看到自己绑定的主机')
-  const row = r1.json.data.rows[0]
-  assert.equal(row.hostId, 'hosts-host')
+  // 共享 relay 里还有前面用例注册的主机——手机视角 = 全部非墓碑主机（r20 放宽），
+  // 所以只做包含性断言，不写死行数
+  const row = r1.json.data.rows.find((h) => h.hostId === 'hosts-host')
+  const other = r1.json.data.rows.find((h) => h.hostId === 'hosts-host2')
+  assert.ok(row && other, '手机视角列出全部可切主机（切换器 UI 数据源），含未绑定主机')
+  assert.equal(row.bound, true, '当前绑定主机标记 bound:true')
+  assert.equal(other.bound, false, '其它主机 bound:false（切换目标）')
+  assert.equal(r1.json.data.rows.filter((h) => h.bound === true).length, 1, '只有一台绑定主机')
+  assert.equal(r1.json.data.rows.every((h) => !('phones' in h)), true, '手机视角所有行都不收 phones')
   assert.equal(row.deviceId, 'hosts-dev', '旧客户端兼容字段与 hostId 同值并存')
   assert.equal(row.kind, 'relay')
   assert.equal(row.name, '档案A')
@@ -637,11 +648,15 @@ test('H-1 /api/hosts：手机令牌只看到绑定主机；adminToken 看到全�
   assert.equal(row.dshCommit, 'abc123def456')
   assert.equal(row.engineState, 'running')
   assert.equal(row.online, true)
-  assert.ok(Array.isArray(row.phones))
+  assert.equal('phones' in row, false, '手机视角不收 phones（管理信息，防枚举留缝）')
 
   const admin = await call('/api/hosts', { token: 'admin-secret' })
   assert.equal(admin.status, 200)
-  assert.ok(admin.json.data.rows.some((h) => h.hostId === 'hosts-host'), 'admin 看到注册过的主机')
+  const adminA = admin.json.data.rows.find((h) => h.hostId === 'hosts-host')
+  assert.ok(adminA, 'admin 看到注册过的主机')
+  assert.ok(admin.json.data.rows.some((h) => h.hostId === 'hosts-host2'), 'admin 看到全部主机')
+  assert.equal(adminA.bound, null, 'admin 视角无绑定概念')
+  assert.ok(Array.isArray(adminA.phones), 'admin 视角保留 phones[]')
 
   const bad = await call('/api/hosts', { token: 'wrong-token' })
   assert.equal(bad.status, 401)

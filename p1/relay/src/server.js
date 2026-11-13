@@ -489,8 +489,12 @@ export function createRelay(options = {}) {
     return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
   }
 
-  /** HostProfile 行（/api/hosts 与 /api/hosts/select 共用，r19 抽取）。 */
-  const hostProfileRow = (d) => ({
+  /**
+   * HostProfile 行（/api/hosts 与 /api/hosts/select 共用，r19 抽取；r20 参数化）。
+   * `phones` 默认收（admin 视角 / select 响应）；手机视角传 false——手机列表里的
+   * 其它主机的手机清单属管理信息，切换/离线页都用不到，不收窄等于给枚举留缝。
+   */
+  const hostProfileRow = (d, { phones = true } = {}) => ({
     hostId: d.hostId ?? d.deviceId,
     deviceId: d.deviceId,          // 旧客户端兼容字段；值 = hostId（命名迁移期并存）
     kind: 'relay',
@@ -504,14 +508,18 @@ export function createRelay(options = {}) {
     // v2.3（r18）：官方 UI 反代入口是否可用（布尔；S-6.8/S-6.9 的档案入口置灰依据）
     uiAvailable: state.uiUrls.has(d.deviceId),
     sessionCount: cp.listSessions({ hostId: d.deviceId, archived: null }).length,
-    phones: cp.listPhones(d.deviceId)
-      .filter((p) => !p.tombstone)
-      .map((p) => ({
-        deviceId: p.deviceId,
-        name: p.deviceName ?? null,
-        online: isOnline(p.deviceId),
-        lastSeenAt: p.lastSeenAt ?? null,
-      })),
+    // v2.3（r20）：手机视角的「当前绑定」标记（切换器 UI 与离线页）；admin 视角无绑定概念 → null
+    bound: null,
+    ...(phones ? {
+      phones: cp.listPhones(d.deviceId)
+        .filter((p) => !p.tombstone)
+        .map((p) => ({
+          deviceId: p.deviceId,
+          name: p.deviceName ?? null,
+          online: isOnline(p.deviceId),
+          lastSeenAt: p.lastSeenAt ?? null,
+        })),
+    } : {}),
   })
 
   const rateLimited = (deviceId, ip) => {
@@ -998,25 +1006,30 @@ export function createRelay(options = {}) {
       // 手机侧待审批清单（审批是设备级的，与当前看哪个会话无关）。
       // 手机断线期间错过的审批靠这条补回来——推送只是「更快」，拉取才是「不漏」。
       // v2.3（P2 · S-6.8/S-6.9 数据源）：主机档案列表。
-      // 手机（设备令牌）只看到自己绑定的那台主机；adminToken 看到全部非墓碑主机。
+      // r20：手机视角放宽为「可切主机清单」——切换器 UI 必须能列出全部主机
+      // （v2.3 文档包 04 §7 `/api/me/hosts` = HostProfile[] 多台）；当前绑定主机行
+      // `bound:true`、其余 `bound:false`（S-6.9 切换目标选择 + S-6.8 离线页设备清单）。
+      // 手机视角**不收 `phones[]`**（其它主机的手机清单属管理信息）；adminToken 看全部。
       // kind 恒为 'relay'——CP 视角里所有注册主机都经 Relay 接入；on-device / ssh
       // 档案直连各自的 dsh web，不经 CP，此处如实不列（S-2.2 模型的单机实现）。
       if (method === 'GET' && path === '/api/hosts') {
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
         const isAdmin = Boolean(cfg.adminToken) && Boolean(token) && sameSecret(token, cfg.adminToken)
-        let scope = null
+        let owner = null
         if (!isAdmin) {
-          const owner = cp.findPhoneByToken(token)
+          owner = cp.findPhoneByToken(token)
           if (!owner?.boundHostId) {
             return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
           }
-          scope = owner.boundHostId
         }
         const rows = cp.listDevices()
           .filter((d) => d.role === 'host' && !d.tombstone)
-          .filter((d) => scope === null || d.deviceId === scope)
-          .map((d) => hostProfileRow(d))
+          .map((d) => {
+            const row = hostProfileRow(d, { phones: isAdmin })
+            if (!isAdmin) row.bound = d.deviceId === owner.boundHostId
+            return row
+          })
         return ok(res, { rows })
       }
 

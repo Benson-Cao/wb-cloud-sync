@@ -4,6 +4,49 @@
 
 ---
 
+## [v2.3 P2 · r20] · 2026-11-13 · S-6.9 数据面：/api/hosts 可切主机清单 + PWA HOST_MISMATCH 兜底
+
+S-6.9 的第一块 FE 地皮：**数据面放宽 + 客户端兜底**。完整切换器 UI 随手机壳 App
+（Android/WebView 侧，未开工）；PWA 现有的「多令牌本地档案切换」（r9 机制）保持
+不动——两种切换世界观并存且分工明确：PWA 档案切换处理「多台电脑各自配对」的
+场景，服务端切换器（单令牌重绑）供手机壳做「一枚令牌跳主机」。
+
+### Relay（`GET /api/hosts` 手机视角放宽，r20）
+
+- 手机令牌从「只看绑定主机」（r17 口径）改为**全部非墓碑主机 + `bound` 标记**：
+  v2.3 文档包 04 §7 `/api/me/hosts` 的 HostProfile[] 多台语义；这是切换器 UI
+  选目标主机与 S-6.8 离线页设备清单的共同数据前提（此前切换 UI 无从列出可切主机）。
+- 行加 `bound`：当前绑定主机 `true`、其余 `false`；admin 视角 `bound:null`
+  （无绑定概念）。
+- 手机视角**不收 `phones[]`**——其它主机的手机清单属管理信息，切换/离线页都用不到，
+  收了等于给枚举留缝；admin 视角不变（`bound:null` + `phones[]`）。
+- `hostProfileRow` 参数化 `phones` 开关（admin/手机两种视角共用构造）。
+- 安全边界不变：手机令牌的有效性仍以绑定关系为准（无绑定/坏令牌 401），
+  清单放宽不放行任何其它主机数据（`/api/sessions` 等仍 409 HOST_MISMATCH / 401）。
+
+### PWA 兜底（`p1/pwa`）
+
+- `client.js`：`refreshSessions` 收到 409 `HOST_MISMATCH`（令牌有效但服务端绑定
+  已换到另一台主机）→ `hostMismatch` 置位 + `onNotice({ type: 'host-mismatch' })`
+  **只发一次**（防重连风暴刷屏）；`snapshot()` 暴露 `hostMismatch`；成功刷新即复位。
+  这不是 401 也不是网络错误——旧版本会把它显示成「连接失败」，用户无从知道该切档案。
+- `index.html`：状态点新增 `mismatch` 态（`✕` / 「绑定已变」）+ 提示文案引导
+  「切换到对应电脑的档案，或重新配对」。
+- `sw.js`：SHELL_CACHE v27 → v28（壳缓存随新版失效）。
+
+### 测试与文档
+
+- 测试 **379 → 381 / 381**：host-switch 套件加 SW10（`/api/hosts` 的 `bound`
+  随切换翻转——切换器 UI 的数据契约）；pwa.test 加 P10（409 → host-mismatch
+  通知一次 / snapshot 置位 / 切回复位）；H-1 迁移为可切清单断言（共享 relay 里
+  用包含性断言，不写死行数）。
+- docs/04 r20（版本行、§4 `/api/hosts` 行与「可切主机清单」约束、§9、§10）→
+  PROTOCOL.md 重生成（G4 一致）→ 本文件；收口清单 §2octies + §5 r20 段。
+- 部署：Relay 重启（BE 改动）；PWA 静态文件由 Relay 直接伺服，改完即生效
+  （SW 缓存版本已递增，客户端一次刷新换新壳）。
+
+---
+
 ## [v2.3 P2 · r19] · 2026-11-13 · 主机切换器（S-6.9 BE-CP，POST /api/hosts/select）
 
 v2.3 文档包 04 §6「主机切换协议」的服务端半边落地：手机在多台主机间切换绑定，
