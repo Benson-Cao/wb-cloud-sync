@@ -51,8 +51,15 @@
   依赖声明落后 9 个版本，下次装卸插件会被包管理器从旧 tgz 重装回去。
   已改为 `file:.../0.1.29.tgz`，原文件备份在 `~/.dsh/backups/desktop-package.json.bak-0.1.20-20261113`。
   **以后每次升版本必须同步这行**。
-- **验证边界**：DSH 当时正在运行（5 进程），未重启宿主以免打断会话，
-  故 0.1.29 要等下次重启 DSH 才加载；真机目视打开 `/__wbsync/config` 属重启后步骤。
+- **真机验证通过**（宿主重启后实测 `127.0.0.1:57052`）：`GET /__wbsync/config` 由
+  0.1.26 的 404 变为 **200**；响应只含 `hostTokenConfigured: true`，**无令牌明文**；
+  `status` 已含 `hostId` / `hostIdSource` / `engineState` / `engineScope`。
+  协议仍是 `wbsync/1`，未因本次改动漂移。
+- `dshCommit` 已按设计从 `pinned-commit.txt` 取 `66491b0…` 注入
+  `~/.dsh/wbsync-host.json`；该值在 `apply` 时读取，**下次宿主重启后**才出现在
+  `status` / `config`，本次未再重启以免中断会话。
+- 附注：Windows 上 Node `mode: 0o600` 对已存在文件不生效，该配置实际为
+  当前用户读写、同级可读；单用户桌面可接受，多用户机器需收紧 ACL。
 
 ---
 
