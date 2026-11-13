@@ -42,8 +42,17 @@
 
 - 测试全仓 356 → **364**（host-plugin 183/183）；`build-bundle --check` 一致；
   门禁 **PASS / 10/10 / CURRENT**；产物 `dist/dsh-wb-cloud-sync-host-0.1.29.tgz`。
-- **未部署**：0.1.29 尚未覆盖进 `~/.dsh/profiles/desktop/node_modules/dsh-wb-cloud-sync-host/`，
-  也未在真机打开 `/__wbsync/config`。
+- **已部署**：整目录先备份到 `~/.dsh/backups/dsh-wb-cloud-sync-host-0.1.26-20261113/`，
+  再把 5 个文件覆盖进 `~/.dsh/profiles/desktop/node_modules/dsh-wb-cloud-sync-host/`，
+  逐文件 sha256 与仓库一致、版本 0.1.29。另对生成的 `bundle/index.js` 跑了独立运行时冒烟
+  （config 脱敏 / status 新字段 / 非 GET 405 / 卸载无残留）PASS。
+- **顺手修掉一个静默降级缺陷**：profile `desktop/package.json` 把该插件钉在
+  `file:.../dsh-wb-cloud-sync-host-0.1.20.tgz`，而目录里实际跑的是 0.1.26——
+  依赖声明落后 9 个版本，下次装卸插件会被包管理器从旧 tgz 重装回去。
+  已改为 `file:.../0.1.29.tgz`，原文件备份在 `~/.dsh/backups/desktop-package.json.bak-0.1.20-20261113`。
+  **以后每次升版本必须同步这行**。
+- **验证边界**：DSH 当时正在运行（5 进程），未重启宿主以免打断会话，
+  故 0.1.29 要等下次重启 DSH 才加载；真机目视打开 `/__wbsync/config` 属重启后步骤。
 
 ---
 
