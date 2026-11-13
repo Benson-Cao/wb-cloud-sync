@@ -419,6 +419,59 @@ test('T14 归档（r12）：DELETE 是软移除别名，列表默认看不到、
   assert.equal(both.json.error.code, 'INVALID_JSON')
 })
 
+test('T20 路径形态（r21）：PATCH/DELETE /api/sessions/:hostId/:id 与旧单段形态等价生效', async () => {
+  const p = await pair('path-dev', { phoneId: 'phone-path1' })
+  await call('/host/register', { method: 'POST', body: { deviceId: 'path-dev' } })
+  relay.cp.putSession('path-dev', { sessionId: 'session-path', state: 'stopped', lastSeq: 1 })
+
+  const round = async (method, path, body, answer = {}) => {
+    const inflight = call(path, { method, token: p.token, body })
+    await waitForQueue('path-dev')
+    const frame = (await call('/host/poll?deviceId=path-dev')).json.data.frames[0]
+    await call('/host/respond', {
+      method: 'POST', body: {
+        reqId: frame.reqId, status: 200,
+        body: {
+          ok: true,
+          data: {
+            pinned: answer.pinned ?? null,
+            archived: answer.archived ?? true,
+            archivedSessionIds: answer.archivedSessionIds ?? [],
+            pinnedSessionIds: answer.pinnedSessionIds ?? [],
+          },
+          protocol: PROTOCOL,
+        },
+      },
+    })
+    return { r: await inflight, frame }
+  }
+
+  // 新形态：hostId 在路径，body 不带任何 host 字段
+  const pin = await round('PATCH', '/api/sessions/path-dev/session-path', { pinned: true },
+    { pinned: true, pinnedSessionIds: ['session-path'] })
+  assert.equal(pin.r.status, 200, pin.r.text)
+  assert.equal(pin.frame.endpoint, 'session/pin')
+  assert.equal(pin.frame.body.sessionId, 'session-path', '路径第一段归 hostId、第二段归 sessionId')
+  assert.equal(relay.cp.getSession('path-dev', 'session-path').pinned, true)
+
+  // 旧单段形态继续工作（hostId 在 body）——兼容期不破老客户端
+  const unpin = await round('PATCH', '/api/sessions/session-path', { pinned: false, deviceId: 'path-dev' })
+  assert.equal(unpin.r.status, 200, '旧形态仍接受')
+
+  // DELETE 新形态 = 归档（软移除别名）
+  const del = await round('DELETE', '/api/sessions/path-dev/session-path', {},
+    { archived: true, archivedSessionIds: ['session-path'] })
+  assert.equal(del.r.status, 200)
+  assert.equal(del.frame.endpoint, 'session/archive')
+  assert.equal(del.frame.body.archived, true, 'DELETE 永远是归档')
+  assert.equal(relay.cp.getSession('path-dev', 'session-path').archived, true)
+
+  // 路径 hostId 与令牌绑定不符 → 409 HOST_MISMATCH（鉴权边界不因形态改变）
+  const cross = await call('/api/sessions/pin-dev/session-path', { method: 'PATCH', token: p.token, body: { pinned: true } })
+  assert.equal(cross.status, 409)
+  assert.equal(cross.json.error.code, 'HOST_MISMATCH')
+})
+
 test('T15 产物下载票（ADR-011）：手机只见元数据，票据单次/绑手机/TTL', async () => {
   const p = await pair('art-dev')
   const p2 = await pair('art-dev')

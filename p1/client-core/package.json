@@ -1,0 +1,11 @@
+{
+  "name": "@wbsync/client-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "v2.3 P1 S-2.4/S-2.5：DshCarrier×3 + DshMux 纯协议骨架（不依赖 UI 框架、不给 UI 供数）",
+  "engines": { "node": ">=24.9" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

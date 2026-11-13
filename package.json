@@ -30,7 +30,7 @@
   },
   "scripts": {
     "verify": "node spike/check-plugin.mjs && node spike/probe-host.mjs",
-    "test": "node --test p1/cp/test/*.test.mjs p1/relay/test/*.test.mjs p1/host-plugin/test/*.test.mjs p1/pwa/test/*.test.mjs",
+    "test": "node --test p1/cp/test/*.test.mjs p1/relay/test/*.test.mjs p1/host-plugin/test/*.test.mjs p1/pwa/test/*.test.mjs p1/client-core/test/*.test.mjs",
     "beta-check": "node scripts/beta-check.mjs",
     "gate": "node scripts/gate-check.mjs --check",
     "e2e": "node scripts/e2e-check.mjs"

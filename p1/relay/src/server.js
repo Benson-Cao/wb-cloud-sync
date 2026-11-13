@@ -1213,16 +1213,29 @@ export function createRelay(options = {}) {
         return bridge(req, res, deviceId, 'session/schedule-run', { id })
       }
 
-      // 置顶（r11）/ 归档（r12）/ 改名（M2-10）：PATCH /api/sessions/:id 三选一
+      // 置顶（r11）/ 归档（r12）/ 改名（M2-10）/ 调序：PATCH /api/sessions/:id 三选一
       // DELETE /api/sessions/:id = 归档（软移除别名，协议 §4 的「移除工作空间」）。
+      // v2.3（r21）：规格形态 `PATCH|DELETE /api/sessions/:hostId/:id`（两段路径）落地——
+      // hostId 从路径取（不再依赖 body/query），旧单段形态继续接受（兼容期）。
+      // 路径优先：显式形态胜过重载参数。
       // 为什么不真删：手机误点的代价应该只是「从列表消失、能一键恢复」，
       // 而不是把宿主落盘日志删掉。归档集合由宿主权威，Relay 照它刷新 CP。
       if ((method === 'PATCH' || method === 'DELETE') && path.startsWith('/api/sessions/')) {
-        const sessionId = decodeURIComponent(path.slice('/api/sessions/'.length))
+        const rest = path.slice('/api/sessions/'.length)
+        const segs = rest.split('/')
+        let pathHostId = null
+        let sessionId
+        if (segs.length >= 2) {
+          // r21 形态：/api/sessions/<hostId>/<sessionId>
+          pathHostId = decodeURIComponent(segs[0])
+          sessionId = decodeURIComponent(segs.slice(1).join('/'))
+        } else {
+          sessionId = decodeURIComponent(rest)
+        }
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
         const body = await readBody(req, cfg.maxBodyBytes)
-        const deviceId = body.hostId ?? body.deviceId
+        const deviceId = pathHostId ?? body.hostId ?? body.deviceId
           ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
         const caller = cp.verifyClientToken(deviceId, token)
         if (!caller.ok) return clientAuthFail(res, caller)

@@ -4,6 +4,51 @@
 
 ---
 
+## [v2.3 P2 · r21] · 2026-11-13 · S-2.4/S-2.5 client-core Carrier 骨架 + PATCH/DELETE 路径形态（命名迁移第四步）
+
+两个遗留工作包一起收口：**Carrier 骨架**（S-2.4/S-2.5，P1 阶段工作包，本机可做）
+与 **PATCH/DELETE 路径形态切换**（r17 裁定「随 client-core 落地」的遗留项）。
+
+### `p1/client-core/`（新增，纯协议骨架）
+
+- `DshCarrier` 契约（04 §1bis 逐字对齐）：`supportsUplink` / `allowsEndpoint` /
+  `call(endpoint, args)` / `openLink(opts)`。三个实现共用一个构造骨架：
+  - `RelayCarrier`：现网形态（`POST /d/<hostId>/<endpoint>` + Bearer；
+    `WS /d/<hostId>/events/<sessionId>?token=&sinceSeq=`）——与 r17/r19 反代链路一致；
+  - `LocalCarrier` / `SshCarrier`：`pathOf` / `authHeaders` / `linkFactory` 全可注入
+    （官方 web 的 HTTP/WS 形态由 App 壳校准，骨架不编造端点语义）；SSH 带 TOFU
+    指纹守卫（指纹变化 → `SSH_FINGERPRINT_MISMATCH` 阻断）。
+- `DshMux`：重连（指数退避）、**generation**（旧连接迟到帧一律丢弃）、
+  `watch()` 重同步（重连带本地最后一条 seq，连续 seq 是唯一游标；跳帧不冒险消费，
+  报 `gap` 交上层补齐）、`call()` 统一注入 `clientMsgId`（幂等键）。
+- **能力声明下沉（S-2.5）**：`allowsEndpoint` 拒绝发生在网络层之前（统一
+  `ENDPOINT_NOT_ALLOWED`）；401 进 `unauthorized` 状态**不再自动重连**（等显式
+  `reconnect()`）；能力表 `CAPABILITY_TABLE` 默认值 + 可注入覆盖——禁止 App 硬编码
+  「Relay 只支持图片」（我们自建 Relay 已补全附件）。
+- 验收（12 号手册 S-2.4）：「换 carrier 后上层 watch/prompt 调用序列不变」——
+  单测用**同一套脚本化流程**跑 real relay/local/ssh 三个 carrier（fake fetch +
+  fake WebSocket），断言事件序列、订阅游标序列、状态转场逐项一致。
+  另修掉一个初始边界 bug：`lastSeq=-1` 时第一条合法事件（seq=1）曾被误判为跳帧
+  （期望位应为 1 而非 0）。
+
+### Relay（`PATCH|DELETE /api/sessions/:hostId/:id`，r21）
+
+- 规格形态落地：hostId 从路径段取（不再依赖 body/query），**路径优先**；
+  旧单段形态（`/api/sessions/:id` + body/query hostId）继续接受——兼容期不破旧客户端。
+- 鉴权边界不变：路径 hostId 与令牌绑定不符 → 409 `HOST_MISMATCH`。
+
+### 测试与文档
+
+- 测试 **381 → 394 / 394**：client-core 12 条（序列一致性 / 幂等键 / 能力声明 /
+  unauthorized 不傻重试 / generation 丢旧帧 / TOFU / 错误码映射）+
+  Relay T20（双形态等价、DELETE 归档别名、跨主机 409）。
+- docs/04 r21（版本行、§4 PATCH/DELETE 双形态、§9、§10）→ PROTOCOL.md 重生成
+  （G4 一致）→ 本文件；收口清单 §2novies + §5 r21 段。
+- 根 `package.json` 的 test 脚本纳入 `p1/client-core/test/*.test.mjs`。
+- Host 插件零改动（bundle 保持 0.2.4）；Relay 需重启（路径形态改动）。
+
+---
+
 ## [v2.3 P2 · r20] · 2026-11-13 · S-6.9 数据面：/api/hosts 可切主机清单 + PWA HOST_MISMATCH 兜底
 
 S-6.9 的第一块 FE 地皮：**数据面放宽 + 客户端兜底**。完整切换器 UI 随手机壳 App
