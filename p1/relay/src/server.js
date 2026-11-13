@@ -50,6 +50,9 @@ const DEFAULTS = {
   eventBufferBytes: 32 * 1024 * 1024,
   // 一台 Host 最多绑几台手机（r9）。够用即可：这是「谁的手机能看这台电脑」的清单长度。
   maxPhonesPerHost: 8,
+  // v2.3（r16）：期望的 DSH pinned commit（来自 pinned-commit.txt）。配置后，注册帧
+  // 声明的 dshCommit 与之不符即拒绝（COMMIT_DRIFT）；空串 = 不启用强制校验，只落库展示。
+  pinnedDshCommit: '',
 }
 
 /** 定长比较，避免按字符比密钥时的时序泄漏（`===` 会在首字节不同处提前返回）。 */
@@ -114,6 +117,38 @@ const isAllowed = (endpoint, allowlist = ALLOWED_ENDPOINTS) =>
     const rest = endpoint.slice(head.length)
     return rest.length > 0 && !rest.includes('/')
   })
+
+/**
+ * v2.3（r16）注册协商：只拒绝「明确声明且不符」的注册帧，未声明（旧客户端）一律放行。
+ *   1. protocol 声明且 ≠ 当前协议 → HOST_MISMATCH。wbsync/1→2 是不兼容升级，协议号
+ *      在 r15 之前只是声明性字段，2.3 插件连 1.0 Relay 不会被拒——r16 起注册即拦截。
+ *      HOST_MISMATCH 的「主机切换」语义（请求 hostId ≠ 当前链路主机）属于 P2 CP，
+ *      本轮的 hostId 值兼容 deviceId，没有可判定不一致的场景。
+ *   2. dshCommit 声明、Relay 配置了 pinnedDshCommit、两者不符 → COMMIT_DRIFT：
+ *      拒绝注册即索引不合并（§6「索引不合并、只提示升级」）；未配置 pinned 时不启用
+ *      强制校验，只把声明值落库展示。
+ * WS 关闭原因走 `detail`（RFC 6455 关闭帧 reason ≤ 123 字节，必须短）；HTTP 走 `message`。
+ */
+const registerIdentityError = (cfg, body) => {
+  const declaredProtocol = typeof body.protocol === 'string' ? body.protocol.trim() : ''
+  if (declaredProtocol && declaredProtocol !== PROTOCOL) {
+    return {
+      code: 'HOST_MISMATCH',
+      detail: `protocol ${declaredProtocol.slice(0, 32)} != ${PROTOCOL}`,
+      message: `注册帧协议 ${declaredProtocol} 与 Relay ${PROTOCOL} 不符（wbsync/1→2 为不兼容升级）`,
+    }
+  }
+  const declaredCommit = typeof body.dshCommit === 'string' ? body.dshCommit.trim().slice(0, 64) : ''
+  const pinned = String(cfg.pinnedDshCommit ?? '').trim()
+  if (declaredCommit && pinned && declaredCommit !== pinned) {
+    return {
+      code: 'COMMIT_DRIFT',
+      detail: 'dshCommit != pinned',
+      message: '主机 DSH commit 与 pinned-commit 不一致，拒绝注册：请升级主机或同步 pinned 基线',
+    }
+  }
+  return null
+}
 
 /* ------------------------------------------------------------ 静态壳服务 */
 
@@ -685,6 +720,9 @@ export function createRelay(options = {}) {
         if (!hostAuthOk(req, body, url)) return rejectHost(res)
         const prev = cp.getDevice(body.deviceId)
         if (prev?.tombstone) return fail(res, 401, 'UNAUTHORIZED', '设备已吊销')
+        // v2.3（r16）：HTTP 降级通道与 WS 注册同一套协商，判定口径完全一致
+        const reject = registerIdentityError(cfg, body)
+        if (reject) return fail(res, 409, reject.code, reject.message)
         cp.upsertDevice({
           deviceId: body.deviceId,
           state: 'online',
@@ -697,6 +735,11 @@ export function createRelay(options = {}) {
           // v2.3：主机标识正式名称；缺省回落 deviceId（命名迁移第一步，值兼容）
           ...(typeof body.hostId === 'string' && body.hostId.trim()
             ? { hostId: body.hostId.trim().slice(0, 64) } : {}),
+          // v2.3（r16）：引擎基线与状态声明，落库展示 + safe-mode 503 判定
+          ...(typeof body.dshCommit === 'string' && body.dshCommit.trim()
+            ? { dshCommit: body.dshCommit.trim().slice(0, 64) } : {}),
+          ...(typeof body.engineState === 'string' && body.engineState.trim()
+            ? { engineState: body.engineState.trim().slice(0, 32) } : {}),
         })
         return ok(res, { deviceId: body.deviceId, protocol: PROTOCOL })
       }
@@ -1108,14 +1151,18 @@ export function createRelay(options = {}) {
         return sendStatic(res, readStaticFile(staticRoots?.srcRoot, path.replace(/^\/src\//, '')))
       }
 
-      // 手机侧端点：/d/<deviceId>/<endpoint>
+      // 手机侧端点：/d/<hostId>/<endpoint>
+      // v2.3（r16）：路径段语义改为 **hostId**（主机标识正式名，命名迁移第二步）；
+      // 值与 deviceId 完全兼容（同一台主机），旧客户端 URL 不用改。CP 存储字段
+      // 仍叫 deviceId，随 P2 CP Postgres 迁移再改名——存储命名不动是为了不与
+      // 数据模型变更加在一起滚雪球。
       const m = /^\/d\/([^/]+)\/(.+)$/.exec(path)
       if (m) {
-        const [, deviceId, rawEndpoint] = m
+        const [, hostId, rawEndpoint] = m
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-        // deviceId 是**目标 Host**，令牌属于某台已配对的手机 —— 两者不是同一个身份
-        const caller = cp.verifyClientToken(deviceId, token)
+        // hostId 是**目标 Host**，令牌属于某台已配对的手机 —— 两者不是同一个身份
+        const caller = cp.verifyClientToken(hostId, token)
         if (!caller.ok) {
           return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
         }
@@ -1128,9 +1175,14 @@ export function createRelay(options = {}) {
         if (!isAllowed(endpoint, allowlist)) {
           return fail(res, 403, 'ENDPOINT_NOT_ALLOWED', `端点不在白名单：${endpoint}`)
         }
-        if (!isOnline(deviceId)) {
-          cp.markDeviceOffline(deviceId)
+        if (!isOnline(hostId)) {
+          cp.markDeviceOffline(hostId)
           return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
+        }
+        // v2.3（r16）：主机自报引擎处于安全模式 → 一律 503，不把请求投给一个跑不了的
+        // 引擎（真 Host 会在注册帧里如实声明；未声明该字段的旧主机行为不变）。
+        if (cp.getDevice(hostId)?.engineState === 'safe-mode') {
+          return fail(res, 503, 'ENGINE_SAFE_MODE', '本机引擎处于安全模式，插件未加载', true)
         }
         let body = {}
         try { body = await readBody(req, cfg.maxBodyBytes) } catch (e) {
@@ -1138,7 +1190,7 @@ export function createRelay(options = {}) {
         }
         // #5b：客户端 sinceSeq 只作观测记录，服务端不据此替客户端决定补齐起点。
         // Cursor 的主键是 (clientId, sessionId)：拿不到 sessionId 就不记，
-        // 不用 endpoint 或 deviceId 冒充会话键（那会让位点落到错误的行上）。
+        // 不用 endpoint 或 hostId 冒充会话键（那会让位点落到错误的行上）。
         // clientId 优先取**鉴权结果**里的手机身份：body 里那个是客户端自报的，
         // 谁都能填，用它记位点等于允许别人改写你的进度。
         if (typeof body.sinceSeq === 'number' && body.sessionId) {
@@ -1151,14 +1203,14 @@ export function createRelay(options = {}) {
         // 审批应答：先答先得。已在别处应答/过期的一律 409，不再占用 Host 一个往返。
         if (endpoint === '$events/result') {
           const approvalId = String(body?.approvalId ?? '')
-          sweepApprovals(deviceId)
+          sweepApprovals(hostId)
           if (!approvalId || !state.approvals.has(approvalId)) {
             return fail(res, 409, 'APPROVAL_GONE', '该审批已被应答或已过期', false)
           }
-          return bridge(req, res, deviceId, endpoint, body, (response) => {
+          return bridge(req, res, hostId, endpoint, body, (response) => {
             if (response?.status !== 200) return
             state.approvals.delete(approvalId)
-            broadcastToDevice(deviceId, {
+            broadcastToDevice(hostId, {
               t: 'approval/resolved',
               approvalId,
               outcome: body?.outcome ?? 'cancelled',
@@ -1166,7 +1218,7 @@ export function createRelay(options = {}) {
             })
           })
         }
-        return bridge(req, res, deviceId, endpoint, body)
+        return bridge(req, res, hostId, endpoint, body)
       }
 
       return fail(res, 404, 'ENDPOINT_NOT_ALLOWED', `未知路径：${path}`)
@@ -1186,19 +1238,25 @@ export function createRelay(options = {}) {
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
 
-    // 手机侧事件订阅：/d/<deviceId>/events/<sessionId>?token=&sinceSeq=
+    // 手机侧事件订阅：/d/<hostId>/events/<sessionId>?token=&sinceSeq=
+    // v2.3（r16）：路径段语义与 HTTP /d/ 同步改为 hostId（值兼容 deviceId）。
     // 浏览器 WebSocket 不能设 Authorization 头，所以令牌走 query；不得把它写进日志。
     const sub = /^\/d\/([^/]+)\/events\/([^/]+)$/.exec(url.pathname)
     if (sub) {
-      const [, deviceId, sessionId] = sub
+      const [, hostId, sessionId] = sub
       const token = url.searchParams.get('token') ?? ''
-      const caller = cp.verifyClientToken(deviceId, token)
+      const caller = cp.verifyClientToken(hostId, token)
       if (!caller.ok) {
         socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n')
         return
       }
-      if (!isOnline(deviceId)) {
+      if (!isOnline(hostId)) {
         socket.end('HTTP/1.1 409 Conflict\r\nContent-Length: 0\r\n\r\n')
+        return
+      }
+      // v2.3（r16）：安全模式主机不接受事件订阅，与 HTTP /d/ 的 503 判定同源。
+      if (cp.getDevice(hostId)?.engineState === 'safe-mode') {
+        socket.end('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n')
         return
       }
       const rawSince = url.searchParams.get('sinceSeq')
@@ -1209,14 +1267,14 @@ export function createRelay(options = {}) {
         onClose() {
           if (!conn) return
           state.hub.unsubscribe(conn)
-          untrackPhoneConn(deviceId, conn)   // 审批通知要发到这台设备的所有手机连接
+          untrackPhoneConn(hostId, conn)   // 审批通知要发到这台设备的所有手机连接
         },
       }, { maxPayload: cfg.maxFrameBytes })
       if (!conn) { socket.destroy(); return }
       // 记住是哪台手机连的：按手机吊销时要把它的长连一起断掉，
       // 否则「吊销」只挡住了新请求，旧连接还能继续收事件。
       conn.clientId = caller.clientId
-      trackPhoneConn(deviceId, conn)
+      trackPhoneConn(hostId, conn)
       state.hub.subscribe(sessionId, Number.isInteger(sinceSeq) ? sinceSeq : -1, conn)
       return
     }
@@ -1234,6 +1292,10 @@ export function createRelay(options = {}) {
           if (msg.t !== 'host/register') return conn.close(1008, 'register first')
           if (cfg.hostToken && msg.hostToken !== cfg.hostToken) return conn.close(1008, 'bad host token')
           if (!msg.deviceId) return conn.close(1008, 'deviceId required')
+          // v2.3（r16）：注册协商——协议不符 HOST_MISMATCH、基线漂移 COMMIT_DRIFT，
+          // 都发生在落库之前：被拒的注册帧不会留下任何设备行或在线状态。
+          const reject = registerIdentityError(cfg, msg)
+          if (reject) return conn.close(1008, `${reject.code}: ${reject.detail}`.slice(0, 123))
           deviceId = String(msg.deviceId)
           if (registerTimer) { clearTimeout(registerTimer); registerTimer = null }
           const prev = cp.getDevice(deviceId)
@@ -1252,6 +1314,11 @@ export function createRelay(options = {}) {
             // v2.3：hostId 缺省回落 deviceId；值兼容，命名语义见 PROTOCOL 变更记录
             ...(typeof msg.hostId === 'string' && msg.hostId.trim()
               ? { hostId: msg.hostId.trim().slice(0, 64) } : {}),
+            // v2.3（r16）：引擎基线与状态声明清空即回落旧值（展示 + safe-mode 503 判定）
+            ...(typeof msg.dshCommit === 'string' && msg.dshCommit.trim()
+              ? { dshCommit: msg.dshCommit.trim().slice(0, 64) } : {}),
+            ...(typeof msg.engineState === 'string' && msg.engineState.trim()
+              ? { engineState: msg.engineState.trim().slice(0, 32) } : {}),
           })
           conn.sendJson({ t: 'host/registered', deviceId, protocol: PROTOCOL })
           // 时序窗口：配对 / 心跳先把 CP 标成在线，但 WS 还没注册时，bridge 会把

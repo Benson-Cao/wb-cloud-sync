@@ -86,7 +86,7 @@ function callRoute(ctx, path, { method = 'GET', body = null } = {}) {
   })
 }
 
-async function startFakeRelay() {
+async function startFakeRelay({ rejectRegister = null } = {}) {
   const frames = []
   const host = { conn: null, closes: 0, registers: 0, registerFrame: null }
   const server = createServer((req, res) => { res.writeHead(404); res.end() })
@@ -99,6 +99,9 @@ async function startFakeRelay() {
         if (msg.t !== 'host/register') return
         host.registers++
         host.registerFrame = msg
+        // r16：支持模拟真 Relay 的注册协商拒绝（返回关闭原因串即拒绝）
+        const rejectReason = rejectRegister?.(msg)
+        if (typeof rejectReason === 'string') return conn.close(1008, rejectReason)
         // 与真 Relay 保持一致：注册成功才回 host/registered
         conn.sendJson({ t: 'host/registered', deviceId: msg.deviceId, protocol: PROTOCOL })
       },
@@ -183,6 +186,10 @@ test('注册帧带上 deviceId / caps / hostToken，收到 host/registered 才�
     assert.equal(reg.protocol, PROTOCOL)
     assert.equal(reg.hostToken, 'tok-abc')
     assert.deepEqual(reg.caps, ['attachments'])
+    // v2.3（r16）：dshCommit / engineState 参与注册协商；没配置就不发空字段，
+    // engineState 有默认值 'running'（与真机行为一致：声明引擎健康）
+    assert.equal(reg.dshCommit, undefined, '没配置 dshCommit 就别发，免得参与 COMMIT_DRIFT 判定')
+    assert.equal(reg.engineState, 'running')
     // 设备名与平台只给手机端显示（切换电脑时认得出是哪台），不参与判定
     assert.equal(reg.deviceName, undefined, '没配置就别发空字段，免得 CP 里出现空名字')
 
@@ -191,6 +198,36 @@ test('注册帧带上 deviceId / caps / hostToken，收到 host/registered 才�
     const res = await callRoute(ctx, '/__wbsync/status')
     assert.equal(res.json.data.connected, true)
     assert.equal(res.json.data.relayConfigured, true)
+    assert.equal(res.json.data.hostMismatch, null, '正常注册不应出现拒绝原因')
+  } finally {
+    ctx.dispose()
+    await relay.stop()
+  }
+})
+
+test('v2.3（r16）：Relay 拒绝注册（COMMIT_DRIFT）→ 记录原因、停住重连，不再空转打点', async () => {
+  const relay = await startFakeRelay({
+    // 模拟真 Relay 的注册协商：基线漂移直接 close 1008，理由就是插件该展示的东西
+    rejectRegister: () => 'COMMIT_DRIFT: dshCommit != pinned',
+  })
+  const ctx = createMockCtx()
+  try {
+    const plugin = apply(ctx, {
+      relayUrl: relay.url, deviceId: 'pc-drift', autoConnect: true,
+      dshCommit: 'deadbeef-drift',
+    })
+    await waitFor(() => relay.host.registers === 1, 'host/register 到达')
+    await waitFor(() => plugin.state.hostMismatch?.startsWith('COMMIT_DRIFT'), '插件应记录拒绝原因')
+
+    // 拒绝是部署错误不是瞬时故障：给足重连周期，也不许再发第二帧
+    await new Promise((r) => setTimeout(r, 400))
+    assert.equal(relay.host.registers, 1, '被拒后不得自动重连')
+    assert.equal(plugin.state.connected, false)
+    assert.equal(plugin.state.reconnectTimer, null, '重连定时器应已停')
+
+    const res = await callRoute(ctx, '/__wbsync/status')
+    assert.equal(res.json.data.hostMismatch, 'COMMIT_DRIFT: dshCommit != pinned')
+    assert.equal(res.json.data.connected, false)
   } finally {
     ctx.dispose()
     await relay.stop()

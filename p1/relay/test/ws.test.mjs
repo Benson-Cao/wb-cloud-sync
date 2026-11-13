@@ -161,12 +161,18 @@ test('W5 同一连接多帧保序：先发的先到', async () => {
   const inbox = createInbox(ws)
   await register(ws, inbox, 'ws-order')
 
+  // 两个请求必须**先后发**：并发双请求的服务端处理顺序不受控（两条独立 HTTP 连接
+  // 的到达顺序是竞态），曾把「先发的先到」变成掷硬币（345 全绿也偶发翻红）。
+  // 保序要验证的是「同一 WS 连接上 bridge 的发送顺序」——第一帧到手后再发第二个，
+  // 顺序断言才是确定性的。
   const a = call('/d/ws-order/session/prompt', { method: 'POST', token, body: { text: 'first' } })
-  const b = call('/d/ws-order/session/prompt', { method: 'POST', token, body: { text: 'second' } })
   const f1 = await inbox.next()
-  const f2 = await inbox.next()
   assert.equal(f1.body.text, 'first')
+
+  const b = call('/d/ws-order/session/prompt', { method: 'POST', token, body: { text: 'second' } })
+  const f2 = await inbox.next()
   assert.equal(f2.body.text, 'second')
+  assert.notEqual(f1.reqId, f2.reqId, '两个请求各占一个 reqId')
 
   for (const f of [f1, f2]) {
     ws.send(JSON.stringify({

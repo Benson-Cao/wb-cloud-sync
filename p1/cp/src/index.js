@@ -112,6 +112,9 @@ export function createControlPlane({
         platform: raw.platform ?? null,
         capabilities: Array.isArray(raw.capabilities) ? [...raw.capabilities] : [],
         hostId: typeof raw.hostId === 'string' ? raw.hostId : null,
+        // v2.3（r16）：注册帧声明的引擎基线与状态；hydrate 不恢复就会被静默丢掉（r15 教训）
+        dshCommit: typeof raw.dshCommit === 'string' ? raw.dshCommit : null,
+        engineState: typeof raw.engineState === 'string' ? raw.engineState : null,
         tokenDigest: typeof raw.tokenDigest === 'string' ? raw.tokenDigest : null,
         allowMobile: raw.allowMobile !== false,
         state: 'offline',
@@ -175,6 +178,12 @@ export function createControlPlane({
       // v2.3（r15）：主机标识正式名称；缺省回落 null，值兼容 deviceId（命名迁移第一步）
       hostId: typeof input.hostId === 'string' && input.hostId.trim()
         ? input.hostId.trim().slice(0, 64) : prev?.hostId ?? null,
+      // v2.3（r16）：注册帧声明的 DSH 基线与引擎状态。展示 + ENGINE_SAFE_MODE 判定用；
+      // COMMIT_DRIFT 的强制校验在 Relay 注册协商处做，这里只忠实落库（去空白限长）。
+      dshCommit: typeof input.dshCommit === 'string' && input.dshCommit.trim()
+        ? input.dshCommit.trim().slice(0, 64) : prev?.dshCommit ?? null,
+      engineState: typeof input.engineState === 'string' && input.engineState.trim()
+        ? input.engineState.trim().slice(0, 32) : prev?.engineState ?? null,
       // 令牌摘要只由 pair/verify 写入；注册时不许改，否则任何 Host 都能顶掉别人的令牌
       tokenDigest: prev?.tokenDigest ?? null,
       allowMobile: input.allowMobile ?? prev?.allowMobile ?? true,

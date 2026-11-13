@@ -228,16 +228,20 @@ const tarballConsistent = tarballChecks.length > 0 && tarballChecks.every((c) =>
 // 混沌 + 渗透两个套件**现场重跑**（合计约 8s，确定性用例，适合放门禁）；
 // 压测只校验证据，不在这里重压 500 连接——门禁要快，重压留给 scripts/bench.mjs。
 let chaosPerf = { chaosPass: 0, chaosFail: null, chaosError: null, perfVerdict: null, perfAgeDays: null, perfReason: null }
+// r16 修复：`node --test` 管道输出的汇总格式随 Node 版本而变——Node 22 是 TAP（`# pass N`），
+// Node ≥24（本项目声明的工具链 ≥24.9）管道下也用 spec 报告器（`ℹ pass N`）。
+// 两种格式都认，只认「套件真跑了、真全绿」这一件事；解析不出来仍按失败处理。
+const TEST_SUMMARY = /(?:^|\n)[#ℹ] pass (\d+)[\s\S]*?(?:^|\n)[#ℹ] fail (\d+)/
 try {
   const out = execFileSync(process.execPath,
     ['--test', 'p1/relay/test/chaos.test.mjs', 'p1/relay/test/security.test.mjs'],
     { cwd: ROOT, encoding: 'utf8', timeout: 180_000, stdio: ['ignore', 'pipe', 'pipe'] })
-  const m = /# pass (\d+)[\s\S]*?# fail (\d+)/.exec(out)
+  const m = TEST_SUMMARY.exec(out)
   chaosPerf.chaosPass = m ? Number(m[1]) : 0
   chaosPerf.chaosFail = m ? Number(m[2]) : null
 } catch (e) {
   const out = String(e.stdout ?? '')
-  const m = /# pass (\d+)[\s\S]*?# fail (\d+)/.exec(out)
+  const m = TEST_SUMMARY.exec(out)
   chaosPerf.chaosPass = m ? Number(m[1]) : 0
   chaosPerf.chaosFail = m ? Number(m[2]) : -1
   chaosPerf.chaosError = String(e.message ?? e).split('\n')[0].slice(0, 120)

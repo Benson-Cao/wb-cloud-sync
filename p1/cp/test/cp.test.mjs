@@ -62,6 +62,24 @@ test('设备注册：令牌摘要只能由配对写入，注册不许顶掉别�
   assert.equal(cp.verifyDeviceToken('pc-1', ''), false)
 })
 
+test('v2.3（r16）：注册声明的 dshCommit / engineState 落库；未声明不清掉旧值', () => {
+  const { cp } = makeCp()
+  cp.upsertDevice(device('pc-1', { dshCommit: '  pin-abc123  ', engineState: 'safe-mode' }))
+  const d = cp.getDevice('pc-1')
+  assert.equal(d.dshCommit, 'pin-abc123', '去空白限长后落库')
+  assert.equal(d.engineState, 'safe-mode')
+
+  // 未声明（旧 Host / 降级通道）= sticky：保留上次声明值，不用空值冲掉 safe-mode 判定
+  cp.upsertDevice(device('pc-1'))
+  assert.equal(cp.getDevice('pc-1').dshCommit, 'pin-abc123')
+  assert.equal(cp.getDevice('pc-1').engineState, 'safe-mode')
+
+  // 新声明覆盖旧声明：修复配置后重新注册要能走出 safe-mode
+  cp.upsertDevice(device('pc-1', { engineState: 'running', dshCommit: 'pin-next' }))
+  assert.equal(cp.getDevice('pc-1').engineState, 'running')
+  assert.equal(cp.getDevice('pc-1').dshCommit, 'pin-next')
+})
+
 test('吊销是墓碑：不复活、清令牌、连会话与租约一起清', () => {
   const { cp } = makeCp()
   cp.upsertDevice(device('pc-1'))

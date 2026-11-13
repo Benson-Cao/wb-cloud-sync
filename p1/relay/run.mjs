@@ -42,6 +42,8 @@ const HOST_TOKEN = pick('WBSYNC_HOST_TOKEN', 'hostToken', '')
 const ADMIN_TOKEN = pick('WBSYNC_ADMIN_TOKEN', 'adminToken', '')
 const CP_FILE = pick('WBSYNC_CP_FILE', 'cpFile', defaultCpFile())
 const CP_PERSIST = CP_FILE !== ':memory:'
+// v2.3（r16）：期望的 DSH pinned commit；配置后注册帧声明的 dshCommit 不符即 COMMIT_DRIFT
+const PINNED_DSH_COMMIT = pick('WBSYNC_PINNED_DSH_COMMIT', 'pinnedDshCommit', '')
 
 if (!HOST_TOKEN) {
   console.warn('[wbsync] 未设置 WBSYNC_HOST_TOKEN——所有 /host/* 端点（注册 / 心跳 / 索引 / 轮询 / 应答）均不校验令牌，同网段任何人都能读帧与投毒（仅限本机试跑；对外必须显式设置）')
@@ -57,6 +59,8 @@ const relay = createRelay({
   adminToken: ADMIN_TOKEN || undefined,
   requestTimeoutMs: 10_000,
   controlPlane: cp,
+  // r16：COMMIT_DRIFT 强制校验只在这里真正生效；不配 = 只落库展示不拦截
+  pinnedDshCommit: PINNED_DSH_COMMIT || undefined,
 })
 
 const port = await relay.start(PORT, HOST)
@@ -79,7 +83,7 @@ for (const url of lanUrls) {
 if (!lanUrls.length) console.log('  （未发现局域网 IPv4 网卡——手机将无法访问，检查网络）')
 console.log(`[wbsync] 本机回环：http://127.0.0.1:${port}/app`)
 console.log('[wbsync] 健康检查：GET /health · 管理台：GET /admin' + (ADMIN_TOKEN ? '（需 Bearer）' : '（未设 adminToken，公开）'))
-console.log(`[wbsync] 配置来源：${fileCfg && Object.keys(fileCfg).length ? configFile : '（仅环境变量/默认值）'} · hostToken ${HOST_TOKEN ? '已设置' : '未设置'}`)
+console.log(`[wbsync] 配置来源：${fileCfg && Object.keys(fileCfg).length ? configFile : '（仅环境变量/默认值）'} · hostToken ${HOST_TOKEN ? '已设置' : '未设置'} · pinnedDshCommit ${PINNED_DSH_COMMIT ? `已设置（COMMIT_DRIFT 拦截启用）` : '未设置（仅落库展示）'}`)
 if (CP_PERSIST) {
   const r = cp.restoredSnapshot
   const tail = r ? ` 已恢复 ${r.devices} 台设备 / ${r.sessions} 个会话` : ''

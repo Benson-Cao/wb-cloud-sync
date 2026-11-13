@@ -1,6 +1,6 @@
 {
   "name": "dsh-wb-cloud-sync",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "WB-Cloud-Sync PC-only plugin: host event uplink, downlink dispatch, session index reporting, local status/config routes, and a desktop settings page. No UI assets are hosted.",
   "type": "module",
   "main": "index.js",

@@ -1,31 +1,40 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-13T05:25:09.090Z",
+  "capturedAt": "2026-11-13T06:10:15.273Z",
   "git": {
-    "head": "d74f03fbe34c3b82f798c041af8a28fe7f39f142",
+    "head": "3592ac7cf7b46c29b82b35484644d38e265d4c4a",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [],
+    "dataChanged": [
+      "gate-check.mjs"
+    ],
     "signoffChanged": [],
     "artifactChanged": [],
-    "narrativeChanged": [],
+    "narrativeChanged": [
+      "PROTOCOL.md"
+    ],
     "notes": [],
-    "previousCapturedAt": "2026-11-13T05:10:33.289Z",
-    "previousGitHead": "8da3761cecf2709dedd68aa8ab2cedabb459e01e",
+    "previousCapturedAt": "2026-11-13T05:25:09.090Z",
+    "previousGitHead": "d74f03fbe34c3b82f798c041af8a28fe7f39f142",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "CURRENT",
-      "capturedAt": "2026-11-13T05:10:33.289Z",
-      "gitHead": "8da3761cecf2709dedd68aa8ab2cedabb459e01e",
-      "dataChanged": [],
+      "previousStatus": "STALE",
+      "previousReason": "已变化（阻断）：运行代码/证据：gate-check.mjs",
+      "capturedAt": "2026-11-13T05:25:09.090Z",
+      "gitHead": "d74f03fbe34c3b82f798c041af8a28fe7f39f142",
+      "dataChanged": [
+        "gate-check.mjs"
+      ],
       "signoffChanged": [],
       "artifactChanged": [],
-      "narrativeChanged": []
+      "narrativeChanged": [
+        "PROTOCOL.md"
+      ]
     }
   },
   "fingerprints": {
@@ -35,7 +44,7 @@
       "package.json": "4a10947a3b8a6dcfe2c5b0d7b7512bc5133228c5a2f24f754dcbf971db9a417a",
       "host-probe.json": "a57205ad03ff73f8da91c578a460cbab75501bc32478fa1ae21b847d5557a751",
       "check-plugin.json": "6c212298aa2915c87a7a47428402bea4db89d30878ea97eb63acc7359c48c5a2",
-      "gate-check.mjs": "449ad1f7842d788bdfd25af8078c075d2d2246388cadd4779cdf445b357ded95",
+      "gate-check.mjs": "8220f018311e0920b8b5e62dc0f41a3e53703ac2d11ac04a61e4918f0a168071",
       "check-env.mjs": "d26c26749008404f631c64be52d908e5c0a60074235218327ff6eeb8c270e5b3",
       "signoff-check.mjs": "4491b857f555f520c6170c91e4c46d008b554de9721d9d3900d71f3a63a92938",
       "sync-protocol.mjs": "b2f251a6bea2f7313e27c828914615ee33aa8bffafcc61116d3f1b46bca8631e"
@@ -54,11 +63,11 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "3d3b17074bf9d0766237497022f2d20e564fb4e0e1f71d1e1be982b6ddb32258"
+      "PROTOCOL.md": "00953e6f8ea5eee5ff655d03db6fe554674f53ffefb09f8011e6455590c63ad7"
     }
   },
   "secretScan": {
-    "filesScanned": 144,
+    "filesScanned": 145,
     "patterns": [
       "github-classic",
       "github-fine-grained",
@@ -99,7 +108,7 @@
     "chaosFail": 0,
     "chaosError": null,
     "perfVerdict": "PASS",
-    "perfAgeDays": 2.6,
+    "perfAgeDays": 2.7,
     "perfReason": null
   },
   "automated": [

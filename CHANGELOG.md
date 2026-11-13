@@ -4,6 +4,54 @@
 
 ---
 
+## [v2.3 收口 · A-r16] · 2026-11-13 · 注册协商拦截 + 三个错误码 + /d/<hostId>/ 语义改名（0.2.3）
+
+v2.3 收口清单 A 项的剩余部分（r15 之后的第二步）。协议号从「声明性字段」变成
+**可拦截的协商字段**，`HOST_MISMATCH` / `COMMIT_DRIFT` / `ENGINE_SAFE_MODE` 三个
+错误码从文档走进代码。协议版本仍是 `wbsync/2.3`（r16 为其契约补全，不再升号）。
+
+### Relay（`p1/relay/src/server.js`）
+
+- **注册协商**（WS `/ws/host` 与 HTTP `POST /host/register` 同口径）：
+  - 注册帧声明 `protocol` ≠ Relay → WS close `1008 HOST_MISMATCH: protocol …` / HTTP 409。
+    只拒「明确声明且不符」——未声明的旧客户端照常注册，wbsync/1 时代的降级通道与探针零影响。
+  - 注册帧声明 `dshCommit` 且 Relay 配置 `pinnedDshCommit`（`relay-config.json` 新键，
+    默认空 = 不启用强制校验）→ 不符即 `COMMIT_DRIFT` 拒绝；相符或未声明放行。
+  - 两者都发生在落库之前：被拒的注册帧不留下设备行、不占在线状态。
+- **ENGINE_SAFE_MODE**：注册帧声明 `engineState: 'safe-mode'` 的主机保持在线，
+  但 `/d/<hostId>/*` HTTP 一律 503（retryable）、WS 事件订阅回裸 503——不把请求投给
+  跑不了的引擎；重新声明 `running` 即恢复（声明驱动、后到优先）。
+- **`/d/` 路径段语义改名 `hostId`**（命名迁移第二步）：URL 不变、值兼容 `deviceId`，
+  旧客户端零改动；CP 存储字段仍叫 `deviceId`，随 P2 CP Postgres 迁移再改名。
+- CP `Device` 行新增 `dshCommit` / `engineState` 落库（upsert 白名单 + hydrate 恢复段
+  同步补——r15 白名单教训的重复应用），sticky 语义：未声明保留上次声明值。
+
+### Host 插件（`src/index.js` → bundle 0.2.3）
+
+- 注册帧加 `dshCommit` / `engineState`（没配置就不发空字段，与 `deviceName` 同规则）。
+- WS close 原因以 `HOST_MISMATCH` / `COMMIT_DRIFT` 开头时：记录进 `state.hostMismatch`
+  并**停住自动重连**——部署错误不是瞬时故障，修配置重启插件才恢复；`/__wbsync/status`
+  新增 `hostMismatch` 字段（只增不删），设置页与真机排查都能看到拒绝原因。
+
+### 测试与文档
+
+- 新增 `p1/relay/test/register-negotiation.test.mjs`（5 条：新旧/未来协议拒收、
+  COMMIT_DRIFT 拒收与 sticky 落库、HTTP 同口径、safe-mode 503 与恢复）；
+  `cp.test` / `persist.test` 补落盘恢复断言；`plugin.test` 补注册帧字段断言与
+  「被拒不重连」用例。**345 → 352 / 352 PASS**。
+- 顺手修掉 W5 的既有竞态（并发双请求断言严格顺序，345 全绿也偶发翻红）：
+  改为第一帧到手后再发第二个请求，保序断言变确定性。
+- `docs/04` r16：错误码表 + 三个新码、§2 `Device` 加三字段、§5 路由表 `/d/<hostId>/`、
+  §5.2 注册帧与协商语义、§9/§10 变更记录；`PROTOCOL.md` 重生成（G4 一致）。
+  顺带修正 r15 遗留的两处 stale 协议号表述（头部与 `X-Protocol-Version` 仍是 wbsync/1）。
+- **G10 判据脚本修复**：`gate-check.mjs` 解析 `node --test` 汇总的正则只认 Node 22 的
+  TAP 格式（`# pass N`）；Node ≥24（项目声明工具链 ≥24.9）管道下改用 spec 报告器
+  （`ℹ pass N`），G10 现场重跑明明全绿却恒判 FAIL。改为两种格式都认（套件仍实跑实判，
+  解析不出仍按失败），快照重算后门禁回到 PASS 10/10 / CURRENT。
+- 真机部署与验证见收口差异清单 §2quater。
+
+---
+
 ## [v2.3 收口 · E] · 2026-11-13 13:2x · 撤销 ADR-012：镜像模式整体移除（0.2.2）
 
 v2.3 非目标「不做主机间会话/文件迁移」裁定生效。镜像与官方 UI 方向冲突，
@@ -1358,3 +1406,5 @@ ctx.on('approval/request', (request, next) => Promise<ApprovalOutcome>)   // 瀑
 ## [0.1.0] · 2026-11-07 · 首版
 
 - 可安装探针 bundle（`dsh.bundle`）、W1 Spike 三问取证脚本、隔离 `DSH_HOME` 加载验证、脱敏证据。
+
+> AI生成

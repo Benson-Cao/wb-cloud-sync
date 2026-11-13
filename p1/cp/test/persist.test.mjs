@@ -51,7 +51,12 @@ const boot = (file, opts = {}) => {
 test('D1 重启后手机不必重新配对：令牌、设备、会话都还在', () => {
   const file = tmpFile()
   const a = boot(file)
-  a.cp.upsertDevice({ deviceId: 'pc-1', platform: 'windows', capabilities: ['approval'] })
+  a.cp.upsertDevice({
+    deviceId: 'pc-1', platform: 'windows', capabilities: ['approval'],
+    // v2.3（r16）：注册帧声明的基线与引擎状态也要原样回来（r15 教训：白名单/恢复段漏补
+    // 字段会被静默丢掉，测试全绿但落盘是空的）
+    dshCommit: '66491b05e3f05ad3', engineState: 'running',
+  })
   a.cp.upsertSessions('pc-1', [sessionRow('s1'), sessionRow('s2')])
   a.cp.upsertPhone({ phoneId: 'phone-aaa111', hostId: 'pc-1', label: 'Pixel' })
   a.cp.setPhoneToken('phone-aaa111', 'tok-a')
@@ -63,6 +68,9 @@ test('D1 重启后手机不必重新配对：令牌、设备、会话都还在',
   assert.equal(b.cp.listPhones('pc-1').length, 1)
   assert.equal(b.cp.listSessions({ ownerDeviceId: 'pc-1' }).length, 2)
   assert.equal(b.cp.listSessions({ ownerDeviceId: 'pc-1' })[0].title, '标题', '标题等索引字段要原样回来')
+  // v2.3（r16）：基线与引擎状态落盘后要原样恢复，否则 safe-mode 判定重启即失效
+  assert.equal(b.cp.getDevice('pc-1').dshCommit, '66491b05e3f05ad3')
+  assert.equal(b.cp.getDevice('pc-1').engineState, 'running')
   assert.equal(b.cp.restoredSnapshot.devices, 2, '一台电脑 + 一台手机')
   assert.equal(b.cp.restoredSnapshot.sessions, 2)
 })

@@ -1805,10 +1805,11 @@ const DEFAULTS = {
   deviceName: '',      // 电脑名（给手机端的电脑切换用）；空则由 bundle 用 hostname() 填
   platform: '',        // 'win32' | 'darwin' | 'linux'
   // v2.3（04 §8 / 13 C1）：状态路由需上报 hostId / dshCommit / engineState。
-  // 这三项都是**展示与自检用**，不参与帧语义，也不改链路命名（hostId 值回落 deviceId）：
   //   hostId 空则回落 deviceId（同一台 PC），不假装已实现 (hostId, sessionId) 命名空间隔离；
   //   dshCommit 空则如实回 null，绝不从 package.json 猜一个版本号冒充锁定基线；
   //   engineState 描述**本 PC 插件自身**，不代表 Termux 本机引擎（那属于 App/引擎层）。
+  // r16 起三者都参与帧语义：注册帧带上 hostId / dshCommit / engineState，Relay 据此
+  // 做 COMMIT_DRIFT / ENGINE_SAFE_MODE 判定与落盘展示（声明空缺则不发送，见 connect）。
   hostId: '',
   dshCommit: '',
   engineState: 'running',
@@ -1912,6 +1913,9 @@ function __apply(ctx, config = {}) {
     indexCount: 0,
     indexSentAt: null,
     indexError: null,
+    // v2.3（r16）：Relay 拒绝注册时记录关闭原因（HOST_MISMATCH / COMMIT_DRIFT…），
+    // 非空时停止自动重连——部署错误重连无意义，修配置后重启插件才恢复。
+    hostMismatch: null,
   }
 
   /**
@@ -2230,7 +2234,8 @@ function __apply(ctx, config = {}) {
   }
 
   const scheduleReconnect = () => {
-    if (state.stopped || !cfg.relayUrl) return
+    // r16：注册被拒（hostMismatch 非空）时不再重连，避免对同一错误空转打点
+    if (state.stopped || state.hostMismatch || !cfg.relayUrl) return
     const delay = Math.min(cfg.reconnectMaxMs, cfg.reconnectBaseMs * 2 ** Math.min(state.attempts, 6))
     state.attempts++
     state.reconnects++
@@ -2238,7 +2243,7 @@ function __apply(ctx, config = {}) {
   }
 
   const connect = () => {
-    if (state.stopped || !cfg.relayUrl || !cfg.deviceId) return
+    if (state.stopped || state.hostMismatch || !cfg.relayUrl || !cfg.deviceId) return
     let ws
     try { ws = new WebSocket(`${toWsUrl(cfg.relayUrl)}/ws/host`) }
     catch { return scheduleReconnect() }
@@ -2251,6 +2256,10 @@ function __apply(ctx, config = {}) {
         // v2.3（04 §5.2）：主机标识以 hostId 为正式名称；本轮值仍与 deviceId 相同
         // （命名迁移第一步，语义映射见 PROTOCOL 变更记录），供 Relay/CP 落字段。
         hostId: cfg.hostId || cfg.deviceId,
+        // v2.3（r16）：引擎基线与状态参与注册协商（COMMIT_DRIFT / ENGINE_SAFE_MODE）；
+        // 与 deviceName 同规则——没配置就不发，不在帧里留空字段。
+        ...(cfg.dshCommit ? { dshCommit: cfg.dshCommit } : {}),
+        ...(cfg.engineState ? { engineState: cfg.engineState } : {}),
         // 设备名只给手机端显示（切换电脑时要认得出来），不参与任何判定
         ...(cfg.deviceName ? { deviceName: cfg.deviceName } : {}),
         ...(cfg.platform ? { platform: cfg.platform } : {}),
@@ -2271,11 +2280,18 @@ function __apply(ctx, config = {}) {
       }
       if (msg.t === 'http/request') { void handleDownlink(msg); return }
     })
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (event) => {
       state.connected = false
       stopHeartbeat()
       stopIndexRefresh()
       if (state.ws === ws) state.ws = null
+      // v2.3（r16）：注册被拒是**部署错误**而非瞬时故障——记下原因并停住重连，
+      // 让 status 能把拒绝原因如实暴露给设置页，而不是无限重连掩盖问题。
+      const reason = String(event?.reason ?? '')
+      if (/^(HOST_MISMATCH|COMMIT_DRIFT)\b/.test(reason)) {
+        state.hostMismatch = reason.slice(0, 200)
+        return
+      }
       scheduleReconnect()
     })
     ws.addEventListener('error', () => { /* close 紧随其后 */ })
@@ -2313,6 +2329,8 @@ function __apply(ctx, config = {}) {
           hostIdSource: cfg.hostId ? 'config' : 'deviceId',
           dshCommit: cfg.dshCommit || null,
           engineState: cfg.engineState || 'running',
+          // v2.3（r16）：注册被拒的原因与状态（null = 未发生或已正常注册）
+          hostMismatch: state.hostMismatch,
           engineScope: 'pc-host',
         }))
       },
