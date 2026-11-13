@@ -72,6 +72,12 @@ const startMockDshWeb = () => new Promise((resolve) => {
       res.writeHead(200, { 'Content-Type': 'text/html' })
       return res.end('<html>OFFICIAL-UI-INDEX</html>')
     }
+    // 批量预加载脚本（官方壳的 `??` 形态；`??` 的第一个 ? 是查询串起点，必须原样保留）
+    if (req.url.startsWith('/plugins/??')) {
+      seen.push({ batch: true, target: req.url, cookie: req.headers.cookie ?? '' })
+      res.writeHead(200, { 'Content-Type': 'text/javascript' })
+      return res.end('window.__ModuleLoader__.load({id:"x"})')
+    }
     if (req.url === '/assets/app.js') {
       if (!authed()) { res.writeHead(401); return res.end() }
       res.setHeader('Set-Cookie', 'pref=1; Path=/')
@@ -325,5 +331,26 @@ test('R9 revoke-client 使该手机的 UI 会话票即刻作废', async () => {
     assert.equal(rv.status, 200)
     const after = await call('/d/dev-r9/ui/', { cookie: ticketCookie })
     assert.equal(after.status, 401, '收回后票即刻作废（不带 pt 无法再进）')
+  } finally { await shutdown(mock) }
+})
+
+test('R10 批量预加载 URL：`??` 形态原样透传（不被拆成 path+search 重组）', async () => {
+  const { mock } = await boot()
+  try {
+    await registerHost('dev-r10', mock.uiUrl)
+    const phoneToken = await pairPhone('dev-r10', 'phone-r10')
+    const doc = await call(`/d/dev-r10/ui/?pt=${encodeURIComponent(phoneToken)}`)
+    const ticketCookie = ticketOf(doc, 'dev-r10')
+    // 模拟官方壳的相对批量脚本：页面在 /d/dev-r10/ui/ 下，`plugins/??…` 相对解析成
+    // /d/dev-r10/ui/plugins/??… —— `??` 的第一个 ? 是查询串起点
+    const batch = await call('/d/dev-r10/ui/plugins/??@deepseek-ai/dsh-client-modules/client.js&rev=34ea0d8e8694',
+      { cookie: ticketCookie })
+    assert.equal(batch.status, 200, '批量脚本经反代 200')
+    assert.ok(batch.text.includes('__ModuleLoader__.load'), '批量脚本体透传')
+    const rec = mock.seen.find((s) => s.batch)
+    assert.ok(rec, '上游收到批量请求')
+    assert.equal(rec.target, '/plugins/??@deepseek-ai/dsh-client-modules/client.js&rev=34ea0d8e8694',
+      '上游收到的目标必须原样保留 `??`（不得压成 /plugins/?@…）')
+    assert.ok(rec.cookie.includes('dsh-auth-test='), '批量请求带服务端 cookie')
   } finally { await shutdown(mock) }
 })

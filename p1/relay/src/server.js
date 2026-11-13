@@ -612,18 +612,11 @@ export function createRelay(options = {}) {
   }
 
   /**
-   * HTTP 反代一跳：透传方法/路径/查询（剥 pt）/体，附加服务端上游 cookie；
-   * 响应透传状态/头（剥 hop-by-hop 与 dsh-auth-* Set-Cookie）/体流。
-   * 上游 401 时重换一次 cookie 再试（token 轮换 / 家目录密钥更换的自愈路径）。
+   * HTTP 反代一跳：透传方法/原始目标（含 `??` 批量 URL 等特殊形态）/体，附加服务端
+   * 上游 cookie；响应透传状态/头（剥 hop-by-hop、content-encoding 与 dsh-auth-* Set-
+   * Cookie）/体流。上游 401 时重换一次 cookie 再试（token 轮换 / 家目录密钥更换的自愈路径）。
    */
-  const proxyUiHttp = async (req, res, hostId, entry, subPath, search) => {
-    const qs = (() => {
-      const sp = new URLSearchParams(search)
-      sp.delete('pt')
-      const s = sp.toString()
-      return s ? `?${s}` : ''
-    })()
-    const target = `${entry.origin}${subPath}${qs}`
+  const proxyUiHttp = async (req, res, hostId, entry, target) => {
     const call = async (cookie) => fetch(target, {
       method: req.method,
       redirect: 'manual',
@@ -1401,14 +1394,19 @@ export function createRelay(options = {}) {
       // 只透传：不塞自定义资源、不改写正文（S-6.7 约束）。官方 UI 挂载点自适应
       // （资源/RPC/WS mux 均相对 document.baseURI 解析），前缀透传天然成立；
       // 文档地址必须带尾斜杠，/ui → 301 到 ./（相对路径解析依赖目录形态）。
+      // **透传用原始字节**（真机取证）：官方 HTML 的批量预加载是
+      // `plugins/??@deepseek-ai/...`——`??` 的第一个问号是 URL 查询串起点，
+      // 按 path/search 拆开重组会把 `??` 压成 `?`（上游批量路由 404 →
+      // "HTML did not preload" 桌面壳报错）。故从 req.url 原样取 /ui 后缀，
+      // 只对外科手术式剥掉 pt 参数。
       // 凭据：入口 ?pt=<deviceToken>（WebView 发不了 Authorization 头，沿用 WS
       // 令牌走 query 的先例）→ 换发 HttpOnly 会话票 cookie；上游凭据
       // （launch token → dsh-auth-* cookie）由 Relay 服务端持有，手机全程不见。
       // 刻意不做 isOnline / ENGINE_SAFE_MODE 拦截：官方 web 服务与插件连接是
       // 两条独立生命线，插件断连或安全模式不代表 web 不可用（r18 决策，04 §5 记录）。
-      const mui = /^\/d\/([^/]+)\/ui(\/(.*))?$/.exec(path)
+      const mui = /^\/d\/([^/]+)\/ui(\/?[^#\s]*)$/.exec(req.url ?? '/')
       if (mui) {
-        const [, hostId, , subPath = ''] = mui
+        const [, hostId, restRaw = ''] = mui
         const cookieJar = parseCookies(req.headers.cookie)
         let ticket = verifyUiTicket(hostId, cookieJar.get(uiCookieName(hostId)))
         if (!ticket) {
@@ -1423,19 +1421,27 @@ export function createRelay(options = {}) {
             `${uiCookieName(hostId)}=${value}; Path=/d/${encodeURIComponent(hostId)}/ui/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(cfg.uiTicketTtlMs / 1000)}`)
           ticket = { clientId: caller.clientId }
         }
-        // /d/<hostId>/ui（无尾斜杠）→ 301 补斜杠，保留其余查询参数（剥掉 pt）
-        if (subPath === '' && !path.endsWith('/')) {
+        // /d/<hostId>/ui（无尾斜杠的文档地址）→ 301 补斜杠，保留其余查询参数（剥掉 pt）
+        if (!restRaw.startsWith('/')) {
           const sp = new URLSearchParams(url.searchParams); sp.delete('pt')
           const s = sp.toString()
-          res.writeHead(301, { Location: `${path}/${s ? `?${s}` : ''}` })
+          res.writeHead(301, { Location: `${url.pathname}/${s ? `?${s}` : ''}` })
           return res.end()
+        }
+        // 原始后缀 → 上游目标：pathPart + 原样查询串（剥 pt，不重编码其余字节）
+        const qIdx = restRaw.indexOf('?')
+        const pathPart = qIdx === -1 ? restRaw : restRaw.slice(0, qIdx)
+        let queryRaw = qIdx === -1 ? '' : restRaw.slice(qIdx + 1)
+        if (queryRaw) {
+          queryRaw = queryRaw.split('&').filter((seg) => seg && !seg.startsWith('pt=')).join('&')
         }
         const entry = state.uiUrls.get(hostId)
         if (!entry) {
           return fail(res, 409, 'UI_UNAVAILABLE', '该主机未提供官方 UI 反代入口（插件未派生 uiUrl 或版本过旧）', true)
         }
+        const target = `${entry.origin}${pathPart}${queryRaw ? `?${queryRaw}` : ''}`
         try {
-          return await proxyUiHttp(req, res, hostId, entry, subPath === '' ? '/' : `/${subPath}`, url.search)
+          return await proxyUiHttp(req, res, hostId, entry, target)
         } catch (e) {
           const code = String(e?.code ?? '')
           if (code === 'UI_UNAVAILABLE') return fail(res, 409, 'UI_UNAVAILABLE', '该主机未提供官方 UI 反代入口', true)
@@ -1578,9 +1584,9 @@ export function createRelay(options = {}) {
     // v2.3（r18，S-6.7 方案 A）：官方 UI 的 WS mux（/api/remote.mux 等）——socket 级透传。
     // 不解帧、不干预握手内容：重建请求头（Host 改上游 authority、附加服务端 cookie、
     // 剥 Origin），之后双向裸管道。会话票与 HTTP 反代同一枚（WebView cookie 自动携带）。
-    const muiWs = /^\/d\/([^/]+)\/ui\/(.+)$/.exec(url.pathname)
+    const muiWs = /^\/d\/([^/]+)\/ui(\/[^#\s]*)$/.exec(req.url ?? '/')
     if (muiWs && /websocket/i.test(String(req.headers.upgrade ?? ''))) {
-      const [, hostId, subPath] = muiWs
+      const [, hostId, restRaw] = muiWs
       const deny = (status) => {
         try { socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`) } catch { /* 已断开 */ }
       }
@@ -1594,11 +1600,16 @@ export function createRelay(options = {}) {
         if (!jar?.length) {
           try { jar = await ensureUiCookie(hostId) } catch { return deny('409 Conflict') }
         }
-        // 重建升级请求：Key/Version/Protocol/Extensions 原样透传（accept 由上游按同一把 Key 计算）
-        const sp = new URLSearchParams(url.searchParams); sp.delete('pt')
-        const qs = sp.toString()
+        // 重建升级请求：Key/Version/Protocol/Extensions 原样透传（accept 由上游按同一把 Key 计算）。
+        // 目标用原始字节（同 HTTP 反代：`??` 批量形态不能拆 path/search 重组）。
+        const qIdx = restRaw.indexOf('?')
+        const pathPart = qIdx === -1 ? restRaw : restRaw.slice(0, qIdx)
+        let queryRaw = qIdx === -1 ? '' : restRaw.slice(qIdx + 1)
+        if (queryRaw) {
+          queryRaw = queryRaw.split('&').filter((seg) => seg && !seg.startsWith('pt=')).join('&')
+        }
         const lines = [
-          `GET /${subPath}${qs ? `?${qs}` : ''} HTTP/1.1`,
+          `GET ${pathPart}${queryRaw ? `?${queryRaw}` : ''} HTTP/1.1`,
           `Host: ${entry.host}`,
           'Upgrade: websocket',
           'Connection: Upgrade',

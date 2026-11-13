@@ -49,10 +49,16 @@ S-6.7「SSH / Relay 档案直连官方 `dsh web`」的 Relay 侧落地。发起�
   `content-encoding`（undici 已透明解压，真机取证：带 gzip 头转发解码体 → 手机侧
   terminated）/ 上游无关头；`dsh-auth-*` Set-Cookie 永不透传手机，其余 Set-Cookie
   照透；只透传不改写正文（S-6.7 约束）。
-  **真机取证两坑**：① `/connect` 铸的是 v2 API 票，`GET /` 的 `authorizeIndex`
+  **真机取证三坑**：① `/connect` 铸的是 v2 API 票，`GET /` 的 `authorizeIndex`
   只认 v1 浏览器 cookie——直连复现（带 /connect 票仍 401）后改走根路径入口；
-  ② 同上 content-encoding。cookie 名与负载都绑定请求 authority（Host 头，
+  ② 同上 content-encoding；③ **官方壳的批量预加载是 `plugins/??pkg1/client.js,…`
+  形态——`??` 的第一个问号是 URL 查询串起点**，按 path/search 拆开重组会把 `??`
+  压成 `?`（上游批量路由 404 → 壳报 "HTML did not preload"）。修法：反代透传
+  改从 `req.url` 原样取 `/ui` 后缀，只外科手术式剥 `pt`，其余字节不动
+  （R10 回归测试锁死）。cookie 名与负载都绑定请求 authority（Host 头，
   `cookieName = dsh-auth- + sha256url(authority)`），同源透传天然满足。
+  **模拟浏览器完整加载探测**（文档 → 解析全部相对子资源 → 逐个经反代取回）
+  由此纳入验证口径：单探测打不到壳的真实子资源清单。
 - **WS 透传 `WS /d/<hostId>/ui/**`**：会话票鉴权 → 重建升级请求头（Host 改上游
   authority、附加服务端 cookie）→ **socket 级裸管道**（不解帧），stop 时统一清理。
 - **刻意不做 isOnline / ENGINE_SAFE_MODE 拦截**：官方 web 服务与插件连接是两条
