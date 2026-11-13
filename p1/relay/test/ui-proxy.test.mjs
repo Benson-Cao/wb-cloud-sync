@@ -181,7 +181,7 @@ test('R2 uiUrl 三关校验：非回环/缺 token 拒收；重新注册缺席清
   } finally { await shutdown(mock) }
 })
 
-test('R3 反代鉴权：无/错 pt 401；越权主机令牌 401；无 uiUrl 409 UI_UNAVAILABLE', async () => {
+test('R3 反代鉴权：无/错 pt 401；越权主机令牌 409 HOST_MISMATCH；无 uiUrl 409 UI_UNAVAILABLE', async () => {
   const { mock } = await boot()
   try {
     await registerHost('dev-r3', undefined)             // 本机不提供 uiUrl
@@ -193,7 +193,8 @@ test('R3 反代鉴权：无/错 pt 401；越权主机令牌 401；无 uiUrl 409 
     const badPt = await call('/d/dev-r3/ui/?pt=wrong-token')
     assert.equal(badPt.status, 401, '错 pt → 401')
     const crossPt = await call('/d/dev-r3/ui/?pt=' + t2)
-    assert.equal(crossPt.status, 401, '他机令牌（绑定 dev-r3b）打 dev-r3 → 401')
+    assert.equal(crossPt.status, 409, '他机令牌（绑定 dev-r3b）打 dev-r3 → 409 HOST_MISMATCH（r19 切换语义）')
+    assert.equal(crossPt.json.error.code, 'HOST_MISMATCH')
     const withPt = await call('/d/dev-r3/ui/?pt=' + t1)
     assert.equal(withPt.status, 409, '令牌有效但主机无 uiUrl → 409')
     assert.equal(withPt.json.error.code, 'UI_UNAVAILABLE')

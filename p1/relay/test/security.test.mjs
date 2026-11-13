@@ -70,7 +70,7 @@ after(async () => { await relay.stop() })
 
 /* --------------------------------------------------------- S1 令牌伪造 */
 
-test('S1 伪造 / 篡改设备令牌一律 401，不泄漏「哪一段错了」', async () => {
+test('S1 伪造 / 篡改设备令牌一律 401，不泄漏「哪一段错了」；真实令牌打别家 → 409', async () => {
   const deviceId = 'pen-token'
   const { token } = await pair(deviceId)
   const variants = [
@@ -79,7 +79,6 @@ test('S1 伪造 / 篡改设备令牌一律 401，不泄漏「哪一段错了」'
     ['长度不足', token.slice(0, 16)],
     ['改最后一位', `${token.slice(0, -1)}${token.endsWith('a') ? 'b' : 'a'}`],
     ['多加一位', `${token}0`],
-    ['别的设备真实令牌', (await pair('pen-token-other')).token],
     ['摘要当令牌', 'a'.repeat(64)],
   ]
   for (const [name, t] of variants) {
@@ -89,17 +88,25 @@ test('S1 伪造 / 篡改设备令牌一律 401，不泄漏「哪一段错了」'
     // 错误信息必须统一，不能区分「没这个设备」与「令牌错」——那等于给了枚举设备的接口
     assert.equal(r.json.error.message, '令牌缺失、失效或已吊销', `${name} 泄漏了具体失败原因`)
   }
+  // r19 切换语义：别的设备的**真实**令牌 = 令牌有效但绑另一台主机 → 409 HOST_MISMATCH
+  // （04 §6：切换器重绑后旧 hostId 请求的专属信号；不再与伪造令牌混同 401）
+  const other = await call(`/d/${deviceId}/session/prompt`, {
+    method: 'POST', token: (await pair('pen-token-other')).token, body: { text: 'x' },
+  })
+  assert.equal(other.status, 409, `真实令牌打别家应 409，实际 ${other.status}`)
+  assert.equal(other.json.error.code, 'HOST_MISMATCH')
 })
 
 /* --------------------------------------------------------- S2 跨设备冒用 */
 
-test('S2 拿 A 的合法令牌打 B 的路径：401，且不能读到 B 的会话列表', async () => {
+test('S2 拿 A 的合法令牌打 B 的路径：409 HOST_MISMATCH，且不能读到 B 的会话列表', async () => {
   const a = await pair('pen-a')
   await pair('pen-b')
   const prompt = await call('/d/pen-b/session/prompt', { method: 'POST', token: a.token, body: { text: 'steal' } })
-  assert.equal(prompt.status, 401)
+  assert.equal(prompt.status, 409, '跨设备调用应 409 HOST_MISMATCH（r19 切换语义）')
+  assert.equal(prompt.json.error.code, 'HOST_MISMATCH')
   const list = await call('/api/sessions?deviceId=pen-b', { token: a.token })
-  assert.equal(list.status, 401, '跨设备读列表必须被拒')
+  assert.equal(list.status, 409, '跨设备读列表必须被拒')
   assert.equal(list.json.data, undefined, '被拒时不许带回任何行')
 })
 
@@ -251,7 +258,7 @@ test('S12 无 HOST_TOKEN 的 /host/sessions 写不进索引（防投毒）', asy
     body: { deviceId, rows: [{ sessionId: 'forged', state: 'running', lastSeq: 999 }] },
   })
   assert.equal(poison.status, 401, '没有 HOST_TOKEN 不许写索引')
-  // 用该设备自己的令牌读它自己的列表：令牌与 deviceId 绑定，拿别人的令牌只会得到 401
+  // 用该设备自己的令牌读它自己的列表：令牌与 deviceId 绑定，拿别人的令牌只会得到 409 HOST_MISMATCH（r19）
   const listed = await call(`/api/sessions?deviceId=${deviceId}`, { token: own.token })
   assert.equal(listed.status, 200)
   assert.equal(listed.json.data.rows.some((r) => r.sessionId === 'forged'), false, '伪造行进了索引')

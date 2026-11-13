@@ -477,6 +477,43 @@ export function createRelay(options = {}) {
   }
   const rejectHost = (res) => fail(res, 401, 'UNAUTHORIZED', 'HOST_TOKEN 缺失或不匹配')
 
+  /**
+   * 手机令牌验证失败的统一出口（r19 切换协议）：令牌有效但绑定的是另一台主机
+   * → 409 HOST_MISMATCH（切换器重绑后旧 hostId 请求的专属信号，04 §6）；
+   * 其余（缺失 / 失效 / 已吊销）→ 401。
+   */
+  const clientAuthFail = (res, auth) => {
+    if (auth?.mismatch) {
+      return fail(res, 409, 'HOST_MISMATCH', '令牌绑定的是另一台主机：请经切换器重绑后再访问该 hostId')
+    }
+    return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+  }
+
+  /** HostProfile 行（/api/hosts 与 /api/hosts/select 共用，r19 抽取）。 */
+  const hostProfileRow = (d) => ({
+    hostId: d.hostId ?? d.deviceId,
+    deviceId: d.deviceId,          // 旧客户端兼容字段；值 = hostId（命名迁移期并存）
+    kind: 'relay',
+    name: d.deviceName ?? null,
+    platform: d.platform ?? null,
+    dshCommit: d.dshCommit ?? null,
+    engineState: d.engineState ?? null,
+    online: isOnline(d.deviceId),
+    state: d.state ?? null,
+    lastSeenAt: d.lastSeenAt ?? null,
+    // v2.3（r18）：官方 UI 反代入口是否可用（布尔；S-6.8/S-6.9 的档案入口置灰依据）
+    uiAvailable: state.uiUrls.has(d.deviceId),
+    sessionCount: cp.listSessions({ hostId: d.deviceId, archived: null }).length,
+    phones: cp.listPhones(d.deviceId)
+      .filter((p) => !p.tombstone)
+      .map((p) => ({
+        deviceId: p.deviceId,
+        name: p.deviceName ?? null,
+        online: isOnline(p.deviceId),
+        lastSeenAt: p.lastSeenAt ?? null,
+      })),
+  })
+
   const rateLimited = (deviceId, ip) => {
     const key = `${deviceId}|${ip}`
     const t = now()
@@ -979,39 +1016,74 @@ export function createRelay(options = {}) {
         const rows = cp.listDevices()
           .filter((d) => d.role === 'host' && !d.tombstone)
           .filter((d) => scope === null || d.deviceId === scope)
-          .map((d) => ({
-            hostId: d.hostId ?? d.deviceId,
-            deviceId: d.deviceId,          // 旧客户端兼容字段；值 = hostId（命名迁移期并存）
-            kind: 'relay',
-            name: d.deviceName ?? null,
-            platform: d.platform ?? null,
-            dshCommit: d.dshCommit ?? null,
-            engineState: d.engineState ?? null,
-            online: isOnline(d.deviceId),
-            state: d.state ?? null,
-            lastSeenAt: d.lastSeenAt ?? null,
-            // v2.3（r18）：官方 UI 反代入口是否可用（布尔；S-6.8/S-6.9 的档案入口置灰依据）
-            uiAvailable: state.uiUrls.has(d.deviceId),
-            sessionCount: cp.listSessions({ hostId: d.deviceId, archived: null }).length,
-            phones: cp.listPhones(d.deviceId)
-              .filter((p) => !p.tombstone)
-              .map((p) => ({
-                deviceId: p.deviceId,
-                name: p.deviceName ?? null,
-                online: isOnline(p.deviceId),
-                lastSeenAt: p.lastSeenAt ?? null,
-              })),
-          }))
+          .map((d) => hostProfileRow(d))
         return ok(res, { rows })
+      }
+
+      // v2.3（r19，S-6.9 BE-CP）：主机切换器。手机令牌反查当前绑定（**不信任 body 里的
+      // from**），目标主机存在且非墓碑即可切（离线也允许——切过去看离线页，S-6.8）；
+      // 实际切换必须显式 confirmNoMigration:true（「不带走会话/文件/插件」确认的服务端
+      // 强制点）。切换即重绑令牌（令牌不变、绑定变），旧/新主机的反代会话票与旧主机
+      // 事件订阅一并清理；响应回目标主机档案（App 直接重建视图）。
+      if (method === 'POST' && path === '/api/hosts/select') {
+        const auth = String(req.headers.authorization ?? '')
+        const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        const phone = cp.findPhoneByToken(token)
+        if (!phone) {
+          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+        }
+        const body = await readBody(req, cfg.maxBodyBytes)
+        const targetId = String(body.hostId ?? '').trim()
+        if (!targetId) return fail(res, 400, 'INVALID_ARGUMENT', '缺少 hostId')
+        const switching = targetId !== phone.boundHostId
+        if (switching && body.confirmNoMigration !== true) {
+          return fail(res, 400, 'CONFIRM_REQUIRED', '切换主机必须显式 confirmNoMigration:true（不会带走会话、文件与插件）')
+        }
+        if (switching) {
+          const target = cp.getDevice(targetId)
+          if (!target || target.tombstone || target.role === 'phone') {
+            return fail(res, 404, 'HOST_OFFLINE', '目标主机不存在或已收回')
+          }
+          try {
+            cp.rebindPhone(phone.deviceId, targetId)
+          } catch (e) {
+            const code = String(e?.code ?? '')
+            if (code === 'CLIENT_LIMIT') return fail(res, 409, 'CLIENT_LIMIT', '目标主机名下手机数已达上限')
+            if (code === 'HOST_OFFLINE') return fail(res, 404, 'HOST_OFFLINE', '目标主机不存在或已收回')
+            throw e
+          }
+          // 切换即刻生效：两张票表都清（票绑定 hostId），旧主机的事件订阅长连断掉
+          dropUiTicketsOf(phone.boundHostId, phone.deviceId)
+          dropUiTicketsOf(targetId, phone.deviceId)
+          closePhoneClient(phone.boundHostId, phone.deviceId)
+        }
+        const row = hostProfileRow(cp.getDevice(targetId))
+        return ok(res, {
+          switched: switching,
+          from: phone.boundHostId,
+          hostId: targetId,
+          kind: row.kind,
+          dshCommit: row.dshCommit,
+          // 端点就是手机当前说话的本 Relay（多 Relay 云版才会不同，S-2.3 之后才有）
+          endpoint: `${req.socket?.encrypted ? 'https' : 'http'}://${req.headers.host ?? ''}`,
+          capabilities: cp.getDevice(targetId)?.capabilities ?? [],
+          notice: '切换主机不会带走会话、文件与插件',
+          // 主机档案子集：App 清空会话视图后重建用（同 /api/hosts 行字段）
+          name: row.name,
+          platform: row.platform,
+          online: row.online,
+          engineState: row.engineState,
+          uiAvailable: row.uiAvailable,
+          sessionCount: row.sessionCount,
+        })
       }
 
       if (method === 'GET' && path === '/api/approvals') {
         const deviceId = url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-        if (!cp.verifyClientToken(deviceId, token).ok) {
-          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
-        }
+        const caller = cp.verifyClientToken(deviceId, token)
+        if (!caller.ok) return clientAuthFail(res, caller)
         sweepApprovals(deviceId)
         const rows = [...state.approvals.values()]
           .filter((r) => r.deviceId === deviceId)
@@ -1028,9 +1100,8 @@ export function createRelay(options = {}) {
         const deviceId = url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
         const auth = String(req.headers.authorization ?? '')
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-        if (!cp.verifyClientToken(deviceId, token).ok) {
-          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
-        }
+        const caller = cp.verifyClientToken(deviceId, token)
+        if (!caller.ok) return clientAuthFail(res, caller)
         const rawPinned = url.searchParams.get('pinned')
         const pinned = rawPinned === null ? null : rawPinned === 'true'
         // r12：archived=true 只回已归档（恢复列表用），缺省 false 只回未归档
@@ -1062,9 +1133,8 @@ export function createRelay(options = {}) {
         const body = await readBody(req, cfg.maxBodyBytes)
         const deviceId = body.hostId ?? body.deviceId
           ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
-        if (!cp.verifyClientToken(deviceId, token).ok) {
-          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
-        }
+        const caller = cp.verifyClientToken(deviceId, token)
+        if (!caller.ok) return clientAuthFail(res, caller)
         if (!isOnline(deviceId)) {
           cp.markDeviceOffline(deviceId)
           return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
@@ -1096,9 +1166,8 @@ export function createRelay(options = {}) {
         const body = method === 'POST' ? await readBody(req, cfg.maxBodyBytes) : {}
         const deviceId = body.hostId ?? body.deviceId
           ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
-        if (!cp.verifyClientToken(deviceId, token).ok) {
-          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
-        }
+        const caller = cp.verifyClientToken(deviceId, token)
+        if (!caller.ok) return clientAuthFail(res, caller)
         if (!isOnline(deviceId)) {
           cp.markDeviceOffline(deviceId)
           return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
@@ -1122,9 +1191,8 @@ export function createRelay(options = {}) {
         const body = await readBody(req, cfg.maxBodyBytes)
         const deviceId = body.hostId ?? body.deviceId
           ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
-        if (!cp.verifyClientToken(deviceId, token).ok) {
-          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
-        }
+        const caller = cp.verifyClientToken(deviceId, token)
+        if (!caller.ok) return clientAuthFail(res, caller)
         if (!isOnline(deviceId)) {
           cp.markDeviceOffline(deviceId)
           return fail(res, 409, 'HOST_OFFLINE', '目标 Host 离线', true)
@@ -1143,9 +1211,8 @@ export function createRelay(options = {}) {
         const body = await readBody(req, cfg.maxBodyBytes)
         const deviceId = body.hostId ?? body.deviceId
           ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
-        if (!cp.verifyClientToken(deviceId, token).ok) {
-          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
-        }
+        const caller = cp.verifyClientToken(deviceId, token)
+        if (!caller.ok) return clientAuthFail(res, caller)
         const wantPin = body.pinned === true || body.pinned === false
         const wantArchive = method === 'DELETE' || body.archived === true || body.archived === false
         const wantRename = typeof body.title === 'string' && body.title.trim().length > 0
@@ -1204,9 +1271,8 @@ export function createRelay(options = {}) {
         const body = await readBody(req, cfg.maxBodyBytes)
         const deviceId = body.hostId ?? body.deviceId
           ?? url.searchParams.get('hostId') ?? url.searchParams.get('deviceId') ?? ''
-        if (!cp.verifyClientToken(deviceId, token).ok) {
-          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
-        }
+        const caller = cp.verifyClientToken(deviceId, token)
+        if (!caller.ok) return clientAuthFail(res, caller)
         if (!body.sessionId || typeof body.path !== 'string' || !body.path.trim()) {
           return fail(res, 400, 'INVALID_ARGUMENT', '需要 { sessionId, path }')
         }
@@ -1413,7 +1479,7 @@ export function createRelay(options = {}) {
           const pt = url.searchParams.get('pt') ?? ''
           const caller = pt ? cp.verifyClientToken(hostId, pt) : { ok: false }
           if (!caller.ok) {
-            return fail(res, 401, 'UNAUTHORIZED', 'UI 反代需要有效手机令牌（?pt=）或会话票')
+            return clientAuthFail(res, caller)
           }
           const value = issueUiTicket(hostId, caller.clientId)
           // 票只种在反代路径下，不与 /api/*、/app 的凭据空间重叠
@@ -1465,7 +1531,7 @@ export function createRelay(options = {}) {
         // hostId 是**目标 Host**，令牌属于某台已配对的手机 —— 两者不是同一个身份
         const caller = cp.verifyClientToken(hostId, token)
         if (!caller.ok) {
-          return fail(res, 401, 'UNAUTHORIZED', '令牌缺失、失效或已吊销')
+          return clientAuthFail(res, caller)
         }
         // 先解码再判白名单：直接拿原始（可能带 %2F / ..）的串做前缀匹配，
         // 等于把 `session/..%2Fadmin%2Frevoke` 放行给 Host 自己解。
@@ -1549,7 +1615,8 @@ export function createRelay(options = {}) {
       const token = url.searchParams.get('token') ?? ''
       const caller = cp.verifyClientToken(hostId, token)
       if (!caller.ok) {
-        socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n')
+        // 切换器重绑后旧 hostId 的订阅尝试 → 409（升级前无法携带错误码，状态行区分）
+        socket.end(`HTTP/1.1 ${caller.mismatch ? '409 Conflict' : '401 Unauthorized'}\r\nContent-Length: 0\r\n\r\n`)
         return
       }
       if (!isOnline(hostId)) {

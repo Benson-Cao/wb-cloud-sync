@@ -4,6 +4,81 @@
 
 ---
 
+## [v2.3 P2 · r19] · 2026-11-13 · 主机切换器（S-6.9 BE-CP，POST /api/hosts/select）
+
+v2.3 文档包 04 §6「主机切换协议」的服务端半边落地：手机在多台主机间切换绑定，
+CP 完成重绑与全套反代会话票 / 事件订阅清理。客户端半边（App 清空会话视图重建、
+`dshCommit` 与 pin 基线不一致时索引不合并只提示）随 S-6.9 FE 实施。
+
+### CP（`p1/cp/src/index.js`）
+- `verifyClientToken` 返回值加 **`mismatch`** 标记（r19）：令牌本身有效但绑定的是
+  另一台主机 → `mismatch:true`——切换器重绑后「旧 hostId 请求」的专属信号，
+  调用方回 409 `HOST_MISMATCH` 而非笼统 401（04 §1 错误码表双语义）。
+- 新增 **`rebindPhone(phoneId, targetHostId)`**：切换器的服务端动作。校验与配对同口径
+  （目标存在且非墓碑且是 host 行、目标名下手机未达 `CLIENT_LIMIT`；手机不存在 /
+  已收回 → `HOST_OFFLINE`）；**同主机重绑是无害 no-op**；令牌不变（换的是绑定关系，
+  不是身份），重绑后旧令牌在新主机直接可用。
+
+### Relay（`p1/relay/src/server.js`）
+- 新增 **`POST /api/hosts/select`**：手机令牌反查当前绑定（`findPhoneByToken`，
+  **不信任 body 的 `from`**）；实际切换（目标 ≠ 当前绑定）必须显式
+  `confirmNoMigration: true`（布尔；缺省/假值/字符串 → 400 `CONFIRM_REQUIRED`，
+  绑定不被改动）；目标不存在 / 墓碑 → 404 `HOST_OFFLINE`；重绑抛
+  `CLIENT_LIMIT` → 409。切换即刻清两张反代会话票（旧/新主机 + 该手机）并断开
+  旧主机事件订阅长连（`dropUiTicketsOf` ×2 + `closePhoneClient`）。
+  **离线目标也允许切**（切过去看离线页，S-6.8），响应如实报 `online:false`。
+- 响应：`{ switched, from, hostId, kind, dshCommit, endpoint, capabilities,
+  notice, name, platform, online, engineState, uiAvailable, sessionCount }`——
+  `notice: '切换主机不会带走会话、文件与插件'`（规格原文）；`endpoint` 指回本
+  Relay；档案子集与 `/api/hosts` 行同源（App 直接重建视图）。
+- **`clientAuthFail` 统一出口**：`/api/*` 与 `/d/<hostId>/*` 的手机令牌验证失败
+  全部经它分流——`mismatch` → 409 `HOST_MISMATCH`，其余（缺失/失效/已吊销）→
+  401 `UNAUTHORIZED`；WS 事件订阅在升级握手前无法携带错误码，用状态行区分
+  （`409 Conflict` / `401 Unauthorized`）。
+- `hostProfileRow` 抽取（/api/hosts 与 select 共用，消除行构造重复）。
+
+### 修掉的实现事故（本轮测试前抓回）
+- 上一轮批量替换把 7 处「鉴权失败才返回」改成了**无条件** `return clientAuthFail(...)`
+  ——`clientAuthFail` 只在失败时构造响应，无条件返回意味着鉴权成功也 401 且后续
+  业务代码全部不可达（本轮 diff 复查发现）。统一改为 `const caller = …;
+  if (!caller.ok) return clientAuthFail(res, caller)` 守卫模式（与反代两处一致）。
+- **教训（重复强调）**：multiedit / replaceAll 批量替换后必须立即
+  `node --check` + 跑全量测试；「替换成功」不等于「语义等价」，条件外壳被吃掉
+  只有用测试才抓得住。
+
+### 测试与文档
+- 新增 `p1/relay/test/host-switch.test.mjs` 9 条（**SW1–SW9**：确认强制 / 令牌反查
+  与 body.from 不被信任 / 档案响应与 CP 落盘 / CLIENT_LIMIT / 目标不存在与墓碑 /
+  同主机 no-op / 切换后旧 hostId 409 与往返切换 / 双票表清理与订阅断开 / 离线目标
+  可切）+ CP rebind 用例 1 条。
+- 既有断言按新语义迁移（安全意图不弱化）：**伪造 / 篡改令牌仍 401**（S1 六变体），
+  真实令牌打别家 → 409 `HOST_MISMATCH`（S1 拆分 / S2 / R3 / R6 / M2 / H-2）；
+  `deepEqual` 断言补 `mismatch` 字段（cp.test ×2 / persist.test ×1）。测试
+  **369 → 379 / 379 PASS**。
+- docs/04 r19：版本行、§1 错误码表（HOST_MISMATCH 双语义 + CONFIRM_REQUIRED）、
+  §4 端点表 + 主机切换协议约束七条、§9、§10；PROTOCOL.md 重生成（G4 一致）；
+  门禁 **PASS 10/10**。
+
+### 部署与真机验证（在役 Relay 8787）
+- 旧 Relay（r18 v3，job-…-864af33d）按既定纪律先 `Get-NetTCPConnection` 反查真实
+  监听 PID（11064）+ 解码父进程 EncodedCommand 确认归属后 `/T /F` 终止，确认端口
+  FREE 后重启 → **r19 Relay（job-20261113-113019-f5665740，pid 26608）**，
+  health 200 / wbsync/2.3，插件自动重连（online:1，索引 27 会话）。
+- **真机探测 20/20**（`.temp/probe-r19.mjs`，令牌不回显）：probe 手机墓碑复活配对 →
+  no-op select（switched:false）→ 负向（未知主机 404 / 缺 confirm 400 且绑定不动 /
+  坏令牌 401）→ 注册合成主机 → **往返切换**（切走：档案响应齐全、CP 绑定重绑落盘、
+  旧 hostId → 409 HOST_MISMATCH 且不带数据、**旧主机反代票即刻作废**；切回：恢复
+  200、合成主机变 409、真实索引 27 行可读、r18 反代链路重新换票 200）→ 收尾
+  （probe 手机收回令牌即刻 401、合成主机吊销、墓碑落盘验证、admin 视角在役清单
+  干净：1 主机 5 手机）。
+- **探测收尾纪律修正（本轮实测抓到）**：CP 是单权威，内存快照会在下一次 touch 时
+  整体重写 cp.json——对探测行做物理删除会被内存快照覆盖回写（本轮第二轮实测：
+  物理删除后的墓碑行在下一轮配对触发落盘时回来了，撞上第三轮注册）。**探测行一律
+  吊销成墓碑落盘**（有 tombstone 标记、不进任何在役清单，`TOMBSTONE_TTL_MS`
+  30 天自动清），不再物理删行；合成主机 id 带时间戳避免撞历史墓碑。
+
+---
+
 ## [v2.3 P2 · r18] · 2026-11-13 · 官方 dsh web 反代（S-6.7 方案 A，bundle 0.2.4）
 
 S-6.7「SSH / Relay 档案直连官方 `dsh web`」的 Relay 侧落地。发起人确认方案 A 后实施：

@@ -311,25 +311,33 @@ export function createControlPlane({
    * 手机侧鉴权：URL 里的 `deviceId` 是**目标 Host**，令牌却属于某台手机。
    * 返回命中的手机身份（clientId）供位点与日志使用；`legacy` 表示令牌直接落在这台
    * Host 行上（r9 之前配对的手机），仍然放行——否则升级一次全体手机掉线。
+   * `mismatch`（r19）：令牌本身有效但绑定的是**另一台主机**——切换器重绑后旧 hostId
+   * 请求专属信号，调用方应回 409 HOST_MISMATCH 而非笼统 401（04 §6 切换协议）。
    */
   const verifyClientToken = (hostId, deviceToken) => {
-    const deny = { ok: false, clientId: null, legacy: false }
-    if (!hostId || !deviceToken) return deny
-    const host = devices.get(hostId)
-    if (!host || host.tombstone) return deny
-    const digest = sha256Hex(deviceToken)
-    if (host.tokenDigest && safeEqualHex(digest, host.tokenDigest)) {
-      return { ok: true, clientId: null, legacy: true }
-    }
-    const t = now()
+    const deny = { ok: false, clientId: null, legacy: false, mismatch: false };
+    if (!hostId || !deviceToken) return deny;
+    const digest = sha256Hex(deviceToken);
+    const t = now();
+    // 手机令牌（r9）：按令牌反查，命中即知绑定关系——目标主机不符 → mismatch
     for (const row of devices.values()) {
-      if (row.role !== 'phone' || row.tombstone || row.boundHostId !== hostId || !row.tokenDigest) continue
-      if (!safeEqualHex(digest, row.tokenDigest)) continue
-      row.lastSeenAt = t
-      row.state = 'online'
-      return { ok: true, clientId: row.deviceId, legacy: false }
+      if (row.role !== 'phone' || row.tombstone || !row.tokenDigest) continue;
+      if (!safeEqualHex(digest, row.tokenDigest)) continue;
+      if (row.boundHostId === hostId) {
+        row.lastSeenAt = t;
+        row.state = 'online';
+        return { ok: true, clientId: row.deviceId, legacy: false, mismatch: false };
+      }
+      return { ok: false, clientId: null, legacy: false, mismatch: true };
     }
-    return deny
+    // legacy（r9 之前）：令牌直接落在 Host 行上
+    for (const h of devices.values()) {
+      if (h.role !== 'host' || h.tombstone || !h.tokenDigest) continue;
+      if (!safeEqualHex(digest, h.tokenDigest)) continue;
+      if (h.deviceId === hostId) return { ok: true, clientId: null, legacy: true, mismatch: false };
+      return { ok: false, clientId: null, legacy: true, mismatch: true };
+    }
+    return deny;
   }
 
   /** 单独收回一台手机：Host 与其它手机不受影响。 */
@@ -339,6 +347,32 @@ export function createControlPlane({
     row.tombstone = true
     row.tokenDigest = null
     row.state = 'offline'
+    touch()
+    return cloneDevice(row)
+  }
+
+  /**
+   * r19（S-6.9）：把手机重绑到另一台主机（切换器的服务端动作）。
+   * 上限 / 墓碑 / 目标校验与配对同口径；同主机重绑是无害 no-op。
+   * 令牌不变（换的是绑定关系，不是身份），所以重绑后旧令牌在新主机上直接可用。
+   */
+  const rebindPhone = (phoneId, targetHostId) => {
+    const row = devices.get(phoneId)
+    if (!row || row.role !== 'phone' || row.tombstone) {
+      throw new ControlPlaneError('HOST_OFFLINE', '手机不存在或已收回', { retryable: false })
+    }
+    if (row.boundHostId === targetHostId) return cloneDevice(row)
+    const target = devices.get(targetHostId)
+    if (!target || target.tombstone || target.role !== 'host') {
+      throw new ControlPlaneError('HOST_OFFLINE', '目标主机不存在或已收回', { retryable: false })
+    }
+    const bound = [...devices.values()].filter((d) => d.role === 'phone' && !d.tombstone && d.boundHostId === targetHostId).length
+    if (bound >= maxPhonesPerHost) {
+      throw new ControlPlaneError('CLIENT_LIMIT', '目标主机名下手机数已达上限', { retryable: false })
+    }
+    row.boundHostId = targetHostId
+    row.lastSeenAt = now()
+    row.state = 'online'
     touch()
     return cloneDevice(row)
   }
@@ -605,7 +639,7 @@ export function createControlPlane({
     getDevice, upsertDevice, setDeviceToken, verifyDeviceToken, heartbeatDevice,
     markDeviceOffline, revokeDevice, isDeviceAlive, listDevices,
     // phone（r9）
-    upsertPhone, setPhoneToken, verifyClientToken, revokePhone, listPhones,
+    upsertPhone, setPhoneToken, verifyClientToken, revokePhone, rebindPhone, listPhones,
     // 令牌反查（P2：/api/hosts 数据源）
     findPhoneByToken,
     // session index

@@ -393,8 +393,8 @@ test('两台手机各持一枚令牌，互不作废（r9 的核心动机）', ()
   bindPhone(cp, 'ph-a', 'pc-1', 'tok-a', 'Pixel')
   bindPhone(cp, 'ph-b', 'pc-1', 'tok-b', 'iPad')
 
-  assert.deepEqual(cp.verifyClientToken('pc-1', 'tok-a'), { ok: true, clientId: 'ph-a', legacy: false })
-  assert.deepEqual(cp.verifyClientToken('pc-1', 'tok-b'), { ok: true, clientId: 'ph-b', legacy: false })
+  assert.deepEqual(cp.verifyClientToken('pc-1', 'tok-a'), { ok: true, clientId: 'ph-a', legacy: false, mismatch: false })
+  assert.deepEqual(cp.verifyClientToken('pc-1', 'tok-b'), { ok: true, clientId: 'ph-b', legacy: false, mismatch: false })
   assert.equal(cp.listPhones('pc-1').length, 2)
 
   // 同一台手机重配：只作废它自己那枚（TC-5.6 的「重配即作废旧令牌」逐台成立）
@@ -411,6 +411,8 @@ test('手机令牌不能越界：换一台 Host、或改挂绑定关系一律拒
   bindPhone(cp, 'ph-a', 'pc-1', 'tok-a')
 
   assert.equal(cp.verifyClientToken('pc-2', 'tok-a').ok, false, '同一枚令牌不能读另一台电脑')
+  // r19（S-6.9）：令牌有效但绑的是别的主机 → mismatch 标记，Relay 层据此回 409 HOST_MISMATCH
+  assert.equal(cp.verifyClientToken('pc-2', 'tok-a').mismatch, true, '越界 = 切换器语义的 mismatch')
   assert.equal(cp.verifyClientToken('nope', 'tok-a').ok, false)
 
   // phoneId 与一台电脑的 deviceId 撞车：不许把电脑改挂成手机
@@ -461,7 +463,7 @@ test('r9 之前配对的手机（令牌落在 Host 行）仍可鉴权，标记 l
   const { cp } = makeCp()
   cp.upsertDevice(device('pc-1'))
   cp.setDeviceToken('pc-1', 'old-host-token')
-  assert.deepEqual(cp.verifyClientToken('pc-1', 'old-host-token'), { ok: true, clientId: null, legacy: true })
+  assert.deepEqual(cp.verifyClientToken('pc-1', 'old-host-token'), { ok: true, clientId: null, legacy: true, mismatch: false })
   assert.equal(cp.verifyClientToken('pc-1', 'whatever').ok, false)
 })
 
@@ -480,4 +482,43 @@ test('归档是软移除（r12）：默认不进列表，显式查才看得到�
   cp.patchSession('pc-1', 's1', { archived: false })
   assert.equal(cp.listSessions({ hostId: 'pc-1' }).length, 2, '恢复后回到列表')
   assert.equal(cp.listSessions({ archived: null }).length, 2, 'null = 全回，调试用')
+})
+
+test('rebindPhone（r19 切换器）：重绑即换绑定，令牌与身份不变；校验与上限同配对口径', () => {
+  const { cp } = makeCp({ maxPhonesPerHost: 3 })
+  cp.upsertDevice(device('pc-1'))
+  cp.upsertDevice(device('pc-2'))
+  bindPhone(cp, 'ph-a', 'pc-1', 'tok-a')
+  bindPhone(cp, 'ph-x', 'pc-2', 'tok-x')
+  bindPhone(cp, 'ph-y', 'pc-2', 'tok-y')
+
+  // 同主机重绑 = no-op
+  assert.equal(cp.rebindPhone('ph-a', 'pc-1').boundHostId, 'pc-1')
+
+  // 重绑：绑定变、令牌不变——新主机直接可用，旧主机变 mismatch（409 HOST_MISMATCH 的依据）
+  const rebound = cp.rebindPhone('ph-a', 'pc-2')
+  assert.equal(rebound.boundHostId, 'pc-2')
+  assert.equal(rebound.tokenDigest, sha256Hex('tok-a'), '令牌不变：换的是绑定关系，不是身份')
+  assert.equal(cp.verifyClientToken('pc-2', 'tok-a').ok, true, '旧令牌在新主机直接可用')
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-a').ok, false)
+  assert.equal(cp.verifyClientToken('pc-1', 'tok-a').mismatch, true, '旧主机 = 切换器语义的 mismatch')
+
+  // 手机不存在 / 已收回 → HOST_OFFLINE
+  assert.throws(() => cp.rebindPhone('ph-nope', 'pc-1'), (e) => e.code === 'HOST_OFFLINE')
+  bindPhone(cp, 'ph-z', 'pc-1', 'tok-z')
+  cp.revokePhone('ph-z')
+  assert.throws(() => cp.rebindPhone('ph-z', 'pc-2'), (e) => e.code === 'HOST_OFFLINE')
+
+  // 目标不存在 / 目标是手机行 / 目标已吊销 → HOST_OFFLINE
+  assert.throws(() => cp.rebindPhone('ph-a', 'pc-nope'), (e) => e.code === 'HOST_OFFLINE')
+  assert.throws(() => cp.rebindPhone('ph-a', 'ph-x'), (e) => e.code === 'HOST_OFFLINE',
+    '手机行不是合法目标')
+  cp.upsertDevice(device('pc-3'))
+  cp.revokeDevice('pc-3')
+  assert.throws(() => cp.rebindPhone('ph-a', 'pc-3'), (e) => e.code === 'HOST_OFFLINE')
+
+  // 目标主机手机数达上限 → CLIENT_LIMIT（先回迁 ph-a，再把 pc-2 填满 3 台）
+  cp.rebindPhone('ph-a', 'pc-1')
+  bindPhone(cp, 'ph-w', 'pc-2', 'tok-w')   // pc-2 名下第 3 台（ph-x/ph-y/ph-w）
+  assert.throws(() => cp.rebindPhone('ph-a', 'pc-2'), (e) => e.code === 'CLIENT_LIMIT')
 })

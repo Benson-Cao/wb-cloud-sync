@@ -109,9 +109,9 @@ test('M2 越界：一台手机的令牌读不到另一台电脑', async () => {
   await hostOnline(hostB)
 
   const cross = await call(`/api/sessions?deviceId=${hostB}`, { token: tok })
-  assert.equal(cross.status, 401, '同一枚令牌不能读另一台电脑的索引')
+  assert.equal(cross.status, 409, '同一枚令牌不能读另一台电脑的索引（r19：409 HOST_MISMATCH）')
   const prompt = await call(`/d/${hostB}/session/prompt`, { method: 'POST', token: tok, body: { text: 'x' } })
-  assert.equal(prompt.status, 401)
+  assert.equal(prompt.status, 409, '跨设备调用同样 409 HOST_MISMATCH')
 })
 
 test('M3 上限：超过 maxPhonesPerHost 拒绝配对，返回 CLIENT_LIMIT', async () => {

@@ -242,13 +242,13 @@ test('R5 跨设备隔离：A 的审批不出现在 B 的列表，也不会推给
 
 /* ------------------------------------------------------------------ R6/R7 */
 
-test('R6 无令牌拉审批列表 → 401；别人的令牌也 401', async () => {
+test('R6 无令牌拉审批列表 → 401；别人的令牌 → 409 HOST_MISMATCH', async () => {
   const deviceId = 'ap-auth'
   const token = await pair(deviceId)
   const anon = await call(`/api/approvals?deviceId=${deviceId}`)
   assert.equal(anon.status, 401)
   const other = await call(`/api/approvals?deviceId=${deviceId}`, { token: await pair('ap-auth-other') })
-  assert.equal(other.status, 401)
+  assert.equal(other.status, 409, 'r19 切换语义：真实令牌打别家 → 409 HOST_MISMATCH')
   const own = await call(`/api/approvals?deviceId=${deviceId}`, { token })
   assert.equal(own.status, 200)
 })

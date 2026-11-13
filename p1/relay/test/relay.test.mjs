@@ -661,7 +661,8 @@ test('H-2 hostId= 查询参数：与 deviceId= 同值兼容；响应补 hostId �
   assert.equal(b.status, 200, '旧参数 deviceId= 继续接受')
   assert.equal(b.json.data.rows.length, 1)
 
-  // 越权：用 A 主机的令牌读 B 主机 → 401（hostId 参数不改变鉴权边界）
+  // 越权：用 A 主机的令牌读 B 主机 → 409 HOST_MISMATCH（hostId 参数不改变鉴权边界；r19 切换语义）
   const c = await call('/api/sessions?hostId=pin-dev', { token: p.token })
-  assert.equal(c.status, 401)
+  assert.equal(c.status, 409)
+  assert.equal(c.json.error.code, 'HOST_MISMATCH')
 })

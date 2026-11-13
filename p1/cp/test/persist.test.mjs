@@ -64,7 +64,7 @@ test('D1 重启后手机不必重新配对：令牌、设备、会话都还在',
   assert.ok(existsSync(file), 'flush 之后文件必须真的落了')
 
   const b = boot(file)
-  assert.deepEqual(b.cp.verifyClientToken('pc-1', 'tok-a'), { ok: true, clientId: 'phone-aaa111', legacy: false })
+  assert.deepEqual(b.cp.verifyClientToken('pc-1', 'tok-a'), { ok: true, clientId: 'phone-aaa111', legacy: false, mismatch: false })
   assert.equal(b.cp.listPhones('pc-1').length, 1)
 assert.equal(b.cp.listSessions({ hostId: 'pc-1' }).length, 2)
 assert.equal(b.cp.listSessions({ hostId: 'pc-1' })[0].title, '标题', '标题等索引字段要原样回来')

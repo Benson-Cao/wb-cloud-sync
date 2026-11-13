@@ -10,7 +10,7 @@
 # 04 接口协议与数据模型（PROTOCOL.md）
 
 > 协议版本：`wbsync/2.3`
-> Owner：架构师 ｜ 状态：**修订 r18（发起人裁定采纳；四方会签已取消）** ｜ 协议版本：`wbsync/2.3`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）；r12 §4 归档软移除；r13 §5.6 显式产物导出（ADR-011）；r14 §5.6 Office→PDF 转换（同一票据，ADR-011 修订）；r15 §5.2 注册帧与 §8 状态路由引入 `hostId`（命名迁移第一步，值回落 `deviceId`）；r16 注册协商拦截 + `/d/<hostId>/` 语义改名 + 三个错误码（命名迁移第二步）；r17 §2 会话/租约/位点键带 host 维度 + §4 `/api/hosts` 与 `hostId=` 参数（命名迁移第三步）；r18 官方 dsh web 反代入口 uiUrl + `/d/<hostId>/ui(/**)` HTTP·WS 反代（S-6.7 方案 A））
+> Owner：架构师 ｜ 状态：**修订 r19（S-6.9 BE-CP 主机切换器落地；四方会签已取消）** ｜ 协议版本：`wbsync/2.3`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）；r12 §4 归档软移除；r13 §5.6 显式产物导出（ADR-011）；r14 §5.6 Office→PDF 转换（同一票据，ADR-011 修订）；r15 §5.2 注册帧与 §8 状态路由引入 `hostId`（命名迁移第一步，值回落 `deviceId`）；r16 注册协商拦截 + `/d/<hostId>/` 语义改名 + 三个错误码（命名迁移第二步）；r17 §2 会话/租约/位点键带 host 维度 + §4 `/api/hosts` 与 `hostId=` 参数（命名迁移第三步）；r18 官方 dsh web 反代入口 uiUrl + `/d/<hostId>/ui(/**)` HTTP·WS 反代（S-6.7 方案 A）；r19 §4 `POST /api/hosts/select` 主机切换器 + 令牌验证加 `mismatch` 标记（S-6.9 BE-CP））
 > **本文是跨组件唯一契约源**。任何字段变更必须同时更新本文件、版本号与 CHANGELOG。
 > 字段名以锁定的 DSH commit 实际类型为准；W1 Spike 已完成实测回填（见 §3）。上游升级前须重跑全量契约测试（见 `07`）。
 
@@ -41,7 +41,8 @@
 | `CHALLENGE_EXPIRED` | 400 | 挑战超过 60s | 否 |
 | `ENDPOINT_NOT_ALLOWED` | 403 | 不在 `allowedEndpoints` 白名单 | 否 |
 | `HOST_OFFLINE` | 409 | 目标 Host 未注册到 Relay | 是（稍后） |
-| **`HOST_MISMATCH`** | **409** | **注册协商：注册帧声明的协议版本与 Relay 不符（r16 落地；WS 侧为 close 1008）。主机切换语义的「请求 hostId ≠ 当前链路主机」属 P2 CP** | 否 |
+| **`HOST_MISMATCH`** | **409** | **两种不相符场景（r19 起双语义）：① 注册协商——注册帧声明的协议版本与 Relay 不符（r16 落地；WS 侧为 close 1008）；② 主机切换——手机令牌有效但请求的 hostId ≠ 令牌绑定主机（S-6.9 BE-CP 落地：切换器重绑后旧 hostId 请求的专属信号，WS 订阅侧为握手 409）** | 否 |
+| **`CONFIRM_REQUIRED`** | **400** | **切换主机未带显式 `confirmNoMigration:true`（布尔；字符串 "true" 不算）——「不带走会话/文件/插件」的服务端强制点（r19 落地）** | 否（补确认后重发） |
 | **`COMMIT_DRIFT`** | **409** | **主机 DSH commit 与 Relay 配置的 pinned 基线不一致，拒绝注册即索引不合并（r16 落地；未配 pinned 时仅记录不拦截）** | 否 |
 | `CLIENT_LIMIT` | 409 | 该 Host 已绑定的手机达到上限（r9，默认 8 台） | 否（先在管理台收回一台） |
 | `ROUTE_CONFLICT` | 409 | 会话写句柄归属其他 Host | 否 |
@@ -206,6 +207,12 @@ GET  /api/me/devices                 → Device[]（含 state / 状态点 / devi
 GET  /api/hosts                      → HostProfile[]（P2 新增；手机令牌只看绑定主机，adminToken 看全部）
                                       行 = { hostId, deviceId, kind:'relay', name, platform, dshCommit,
                                              engineState, online, state, lastSeenAt, sessionCount, phones[] }
+POST /api/hosts/select               → 主机切换器（r19，S-6.9 BE-CP）
+                                      请求 = { hostId, confirmNoMigration: true }（切换时 confirm 必须显式 true）
+                                      响应 = { switched, from, hostId, kind, dshCommit, endpoint, capabilities,
+                                               notice: "切换主机不会带走会话、文件与插件",
+                                               name, platform, online, engineState, uiAvailable, sessionCount }
+                                      切换即重绑令牌（令牌不变、绑定变）；同主机 select = no-op（switched:false，无需 confirm）
 GET  /api/sessions?hostId=&pinned=&archived= → { deviceId, hostId, host, rows: SessionIndex[] }
                                       host = { deviceId, hostId, name, platform, online, lastSeenAt }（r10/r17）
                                       archived=true 只回已归档；缺省 false 只回未归档（r12）
@@ -222,6 +229,7 @@ GET  /api/artifacts/download/:id     → 用票据取字节（单次/60s/绑手�
 
 **约束**：
 - **(hostId, sessionId) 命名空间隔离（r17）**：会话索引、写句柄租约、消费位点的键全部带 host 维度——同名 sessionId 在两台主机下可共存，互不覆盖（S-2.2 验收；R-22 串会话的数据层防线）。`/api/*` 查询/正文参数以 `hostId=` 为正式名，`deviceId=` 继续接受（同一台主机同一枚值，旧客户端零改动）；响应对象补 `hostId` 字段（只增不删）。
+- **主机切换协议（r19，S-6.9 BE-CP）**：① 切换判定只信**令牌反查**的当前绑定，请求体里伪造 `from` 不参与判定；② 实际切换（目标 ≠ 当前绑定）必须显式 `confirmNoMigration: true`（缺省/假值 → 400 `CONFIRM_REQUIRED`，绑定不被改动）；③ 切换即重绑（CP `rebindPhone`：目标存在且非墓碑、目标名下手机未达 `CLIENT_LIMIT`、同主机 no-op；令牌不变、绑定变）；④ 切换即刻清理该手机在旧/新两台主机的反代会话票并断开旧主机事件订阅长连；⑤ **离线目标也允许切**（切过去看离线页，S-6.8），响应如实报 `online:false`；⑥ 客户端收到响应后清空当前会话视图、按新 `hostId` 重拉 `SessionIndex` 重建链路；此后任何携带旧 `hostId` 的请求 → 409 `HOST_MISMATCH`（§1 错误码表）；⑦ `dshCommit` 与客户端 pin 的基线不一致时**索引不合并、只提示升级**（客户端判定；服务端注册协商的 `COMMIT_DRIFT` 拦截在 r16，select 响应如实回 `dshCommit` 供客户端比对）。
 - `POST /api/sessions` 在目标设备离线时返回 `HOST_OFFLINE`，手机端入口置灰。
 - 手机可置顶 / 取消置顶（`PATCH { pinned }`，r11）；**排序**（`pinnedOrder`）仍由 Host 权威（最近置顶在前），手机不改序——两端各自维护顺序只会打架。**调序**仍仅 PC 可写。
 - **手机不真删会话**（r12）：「移除工作空间」= 归档，只把行标成 `archived=true`、从默认列表隐藏；落盘日志一行不动。`DELETE /api/sessions/:id` 是归档别名（强制 `archived=true`），恢复走 `PATCH { archived:false }`。真删仅 PC 侧可做。
@@ -553,6 +561,7 @@ allowedEndpoints:
 - 新增事件类型一律由客户端按白名单默认跳过；**不得依赖服务端 `ignorable` 标记**（实测宿主不下发，见 §3）。
 - 新增字段必须可选 + 有默认值；删除字段走 90 天弃用期。
 - 字段类型以锁定 DSH commit 为准；升级 DSH 前跑全量契约测试（见 `07`）。
+- **r19（2026-11-13）**：主机切换器（S-6.9 BE-CP，v2.3 §6 切换协议落地）。① §4 新增 `POST /api/hosts/select`：手机令牌反查当前绑定（不信任 body 的 `from`），切换必须显式 `confirmNoMigration:true`（否则 400 `CONFIRM_REQUIRED`）；切换即 CP `rebindPhone` 重绑（令牌不变、绑定变；目标校验/上限同配对口径，同主机 no-op），即刻清两张反代票表并断旧主机事件订阅；响应回目标主机档案（`switched/from/hostId/kind/dshCommit/endpoint/capabilities/notice` + HostProfile 子集），离线目标也允许切；② 手机令牌验证加 `mismatch` 标记（令牌有效但绑另一台主机）——`/api/*` 与 `/d/<hostId>/*` 鉴权失败统一出口区分：mismatch → 409 `HOST_MISMATCH`（切换器重绑后旧 hostId 请求的专属信号），其余仍 401 `UNAUTHORIZED`；WS 事件订阅在升级前无法携带错误码，用状态行区分（`409 Conflict` / `401 Unauthorized`）；③ 客户端（App/PWA）侧行为：切换成功后清空会话视图重建、`dshCommit` 与 pin 基线不一致时索引不合并只提示——本轮只落服务端（BE-CP），客户端随 S-6.9 FE 实施。既有测试按新语义迁移：跨主机越权从 401 改 409（伪造/篡改令牌仍 401）。
 - **r18（2026-11-13）**：官方 dsh web 反代入口（S-6.7 方案 A，发起人确认后实施）。① §5.2 注册帧加可选 `uiUrl`（插件按宿主官方先例经 `ctx.inject(["connection","webServer"])` 派生的带令牌回环 URL；Relay 校验后只存内存，不进 CP 不落盘）；② §5 新增 `ANY /d/<hostId>/ui(/**)` HTTP 反代与 `WS /d/<hostId>/ui/**` socket 级透传：手机凭 `?pt=<deviceToken>` 入场换发短时 HttpOnly 会话票 cookie，反代请求前由 Relay 服务端用 uiUrl 的 launch token 向上游**根路径 `?token=`**（官方浏览器入口）换 `dsh-auth-*` v1 浏览器 cookie 并内存持有，401 自动重换；**`/connect` 铸的是 v2 API 票，`authorizeIndex` 不认——真机取证后改走根路径**；`dsh-auth-*` Set-Cookie 永不透传手机，`content-encoding` 必须剥离（undici 已透明解压）；**透传用 `req.url` 原始字节（`/ui` 后缀整段），不按 path/search 重组——官方壳批量预加载 `plugins/??…` 的 `??` 第一个问号是查询串起点，重组会压成 `?` 致上游 404（真机取证，R10 回归锁死）**；③ 刻意不做 isOnline / ENGINE_SAFE_MODE 拦截——官方 web 服务与插件连接是两条独立生命线；④ 官方 UI 挂载点自适应（资源/RPC/WS mux 均相对 `document.baseURI` 解析），前缀透传不改写正文、不塞自定义资源（S-6.7 约束）；⑤ `/__wbsync/status` 与 `GET /api/hosts` 均只报 `uiAvailable` 布尔。插件 0.2.4；上游重启轮换由插件重连注册自动覆盖。
 - **r17（2026-11-13）**：P2 开工——(hostId, sessionId) 命名空间隔离 + `/api/hosts`。① §2 单机 CP 的会话索引、写句柄租约、消费位点**键全部带 host 维度**（同名 sessionId 两台主机可共存，S-2.2 验收；R-22 串会话的数据层防线；落盘行内字段 `ownerDeviceId` 不变，落盘格式零迁移）；② §4 新增 `GET /api/hosts`（HostProfile 视图：hostId/kind/name/platform/dshCommit/engineState/online/uiAvailable（r18）/sessionCount/phones[]；手机令牌只看绑定主机，adminToken 看全部；S-6.8 离线页与 S-6.9 切换器的数据源）；③ `/api/*` 查询/正文参数以 `hostId=` 为正式名（`deviceId=` 继续接受，值兼容），`/api/sessions` 响应补 `hostId`（只增不删）。`PATCH /api/sessions/:hostId/:id` 路径形态随手机壳（P2 client-core）落地时一并切换，本轮保留 `:id?hostId=` 形态。Host 插件零改动（bundle 保持 0.2.3）。
 - **r16（2026-11-13）**：注册协商拦截 + 三个 v2.3 错误码落地。① §5.2 注册帧加可选 `dshCommit` / `engineState`（声明且不符才拒绝：`dshCommit` 只在 Relay 配置 `pinnedDshCommit` 时启用 COMMIT_DRIFT 强制校验；`engineState: 'safe-mode'` 时 `/d/*` 全量 503 `ENGINE_SAFE_MODE`，重声明即恢复）；② 协议号不再是纯声明性字段——声明 `protocol` ≠ Relay 即拒（WS close `1008 HOST_MISMATCH`，HTTP 409），未声明的旧客户端照常注册；③ `/d/` 路径段语义改名 `hostId`（值兼容 `deviceId`，URL 不变；`/api/*?deviceId=` 查询参数随 P2 CP 迁移再改）。被拒注册发生在落库之前，不留下设备行。插件侧：被拒即记录 `hostMismatch` 并停住重连（`/__wbsync/status` 可见），不再空转打点。兼容性：wbsync/1 老客户端未声明字段 → 全部照常；声明了 1.x 协议的客户端才会被拒（wbsync/1→2 本就是不兼容升级）。
@@ -577,6 +586,7 @@ allowedEndpoints:
 
 | 版本 | 日期 | 变更 | 作者 |
 |---|---|---|---|
+ | **wbsync/2.3 r19** | 2026-11-13 | **主机切换器（S-6.9 BE-CP）**：§4 新增 `POST /api/hosts/select`（令牌反查、`confirmNoMigration:true` 强制、切换即重绑、清票断旧订阅、离线目标可切）；令牌验证加 `mismatch` 标记——旧 hostId 请求 → 409 `HOST_MISMATCH`（WS 订阅状态行区分），新增错误码 `CONFIRM_REQUIRED`（400）；测试按新语义迁移（伪造/篡改仍 401）。客户端行为随 S-6.9 FE | 架构师 |
  | **wbsync/2.3 r18** | 2026-11-13 | **官方 dsh web 反代（S-6.7 方案 A）**：§5.2 注册帧加可选 `uiUrl`（带令牌回环 URL，插件派生、Relay 内存持有）；§5 新增 `/d/<hostId>/ui(/**)` HTTP·WS 反代（?pt= 换会话票、服务端换持 dsh-auth-* cookie、401 自愈、dsh-auth-* 不透传）；status 与 /api/hosts 只报 `uiAvailable` 布尔。插件 0.2.4 | 架构师 |
  | **wbsync/2.3 r17** | 2026-11-13 | **P2 开工：命名空间隔离 + /api/hosts**：§2 会话/租约/位点键带 host 维度（同名 sessionId 两主机共存）；§4 新增 `GET /api/hosts`；`/api/*` 参数 `hostId=`（兼容 `deviceId=`）；响应补 `hostId`。落盘格式零迁移；Host 插件零改动 | 架构师 |
 | **wbsync/2.3 r16** | 2026-11-13 | **注册协商拦截 + 错误码落地**：§5.2 注册帧加可选 `dshCommit` / `engineState`；声明 `protocol` 不符即 `HOST_MISMATCH`（WS close 1008 / HTTP 409）、`dshCommit` 与 pinned 不符即 `COMMIT_DRIFT`（拒绝注册即索引不合并）、`engineState: 'safe-mode'` 时 `/d/*` 全量 503 `ENGINE_SAFE_MODE`；`/d/` 路径段语义改名 `hostId`（值兼容，URL 不变）。只拒「声明且不符」，未声明字段的老客户端不受影响 | 架构师 |
