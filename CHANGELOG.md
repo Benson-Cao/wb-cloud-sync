@@ -54,6 +54,10 @@
   彻底删除需同步移除约 25 条测试。手机端入口已随 C 删除。
 
 - 测试 364 / 364 PASS；`build-bundle --check` 一致；产物 `dist/dsh-wb-cloud-sync-0.2.0.tgz`（53.3 kB）。
+- **重启验证通过（12:26）**：DSH 关闭重启后 `/__wbsync/config` 200、`dshCommit`
+  （上轮注入的 `66491b0…`）生效、无令牌明文；后台拉起 Relay 后插件
+  `connected: true`、会话索引 24 条恢复上报、Relay `/health` `online: 1`。
+  0.2.0 标识与桌面设置页在真实宿主全部生效。
 
 ---
 
