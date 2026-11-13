@@ -33,7 +33,7 @@
 `...fileCfg, ...env, ...config`，`apply` 的 `config` **最高**——写进 patch 会覆盖
 `~/.dsh/wbsync-host.json` 里的 relayUrl，装包后连不上 Relay。故 patch 层不动。
 
-### 没做什么（结论，不是待办）
+### 未执行项及判定依据
 
 协议仍 `wbsync/1`（04 §11 写明 1→2 不兼容，需 Host/Relay/CP/PWA 同时改）；
 包名/id 仍 `-host`（前端半边模块 id 必须等于包名，改名属 S-11.1 发版动作）；
