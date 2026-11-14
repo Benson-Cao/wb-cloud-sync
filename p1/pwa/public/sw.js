@@ -7,10 +7,12 @@
  * 生效，不必等旧 SW 的缓存优先策略把旧 index.html 一直发回来。其余静态资源
  * 仍缓存优先；缓存名随外壳清单变更递增（activate 时清掉旧壳）。
  */
-const SHELL_CACHE = 'wbsync-shell-v29'
+const SHELL_CACHE = 'wbsync-shell-v30'
 const SHELL_ASSETS = [
   './index.html', './manifest.webmanifest', './icon.svg',
   '../src/client.js', '../src/pairing.js', '../src/hmac-sha256.js', '../src/transcript.js',
+  // r23（S-8.3）：协议内置卡片的契约与投递出口，离线壳必须一起缓存。
+  '../src/cards.js', '../src/card-delivery.js',
 ]
 
 self.addEventListener('install', (event) => {

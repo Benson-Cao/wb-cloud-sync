@@ -4,6 +4,39 @@
 
 ---
 
+## [v2.3 P3 · r23] · 2026-11-14 · S-8.3 协议内置卡片（`wbsync/card`）
+
+P2 在本仓库能闭环的项已收完（剩余 Postgres 版需真实实例、原生切换器 UI 属手机壳 App），
+本轮开 P3 第一项：把 v2.3 04 §4 的工具卡契约为**协议内置卡片**落地。协议字段零变更、
+Relay 服务端零改动、Host 插件零改动、无需重启。
+
+### 契约与实现
+
+- **`p1/pwa/src/cards.js`（唯一实现）**：`CARD_KINDS` 封闭枚举 + `CARD_SCHEMA
+  'wbsync.card/1'`；`validateCard()` 纯函数校验形状 / `cardId` / `view` / `actions` 与
+  UTF-8 字节限额；`createCardGuard()` 管 4 Hz 合并频率、问题数、连续 5 次违规降级与
+  `reset()`；`normalizeCard()` 出客户端渲染模型——未知 kind 灰色占位（`rawKind` 保留）、
+  违规正文不交给渲染器；`cardFromEvent()` 兼容三种下发形态并兜住 `t` 写坏的疑似卡片。
+- **`p1/client-core/src/cards.js`** 只做再导出。实现放在 `pwa/src` 是因为 Relay 静态根
+  只有 `pwa/public` 与 `pwa/src`：跨包 import 在浏览器会 404，离线壳也缓存不到。
+- **`p1/pwa/src/card-delivery.js` + `client.js`**：live 与 replay 共用同一个 `deliver()`，
+  事件原文照样进 `onEvent`，卡片另经校验/归一化后进新增的 `onCard`；违规计数进
+  `snapshot().cards`（只增字段）；回调异常全隔离，坏卡片不中断消息流。
+- **Relay 保持纯帧透传**（P5 / ADR-010 / 04 §5.4）：不解析事件正文、不改日志原文、
+  不动 `seq`；「服务端校验 Schema」由发送端契约层与接收端归一化层共同承担。
+
+### 验证与文档
+
+- 新增 27 条确定性测试（client-core 18 + PWA 9）：四种合法 kind、未知 kind 占位、
+  8 KiB / 32 KiB 限额、4 Hz 限流、连续 5 次违规降级与 `reset()`、live/replay 归一化一致、
+  回调隔离、快照不泄露正文。全量 **425 → 452 / 452 PASS**。
+- `docs/04` 升 r23（新增 §3.1 + §10 变更记录）→ `PROTOCOL.md` 重生成（G4 一致）；
+  收口清单新增 §2terdecies；`SHELL_ASSETS` 补 `cards.js` / `card-delivery.js`，
+  **SW 缓存 v29 → v30**；`static.test.mjs` 的传递引用扫描列表补三个模块，
+  防止新增模块只在开发环境能加载、离线壳静默失效。
+
+---
+
 ## [v2.3 P2 · r22] · 2026-11-14 · S-6.9 FE 切换器客户端半边 + 命名迁移第四步客户端落地
 
 本轮把收口清单 §3 里能在本仓库闭环的两项剩余工作收口。**协议字段零变更、Relay 服务端与

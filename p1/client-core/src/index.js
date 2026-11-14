@@ -15,3 +15,8 @@ export { createLocalCarrier } from './carriers/local.js'
 export { createSshCarrier } from './carriers/ssh.js'
 export { createRelayCarrier } from './carriers/relay.js'
 export { CAPABILITY_TABLE } from './capabilities.js'
+// v2.3 S-8.3（r23）：协议内置卡片契约——封闭 kind / 限额 / 频率闸门 / 灰色占位归一化。
+export {
+  CARD_T, CARD_SCHEMA, CARD_KINDS, CARD_LIMITS, CARD_ERR,
+  validateCard, normalizeCard, cardFromEvent, createCardGuard,
+} from './cards.js'

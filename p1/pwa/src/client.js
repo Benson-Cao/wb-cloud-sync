@@ -1,5 +1,5 @@
 /**
- * P1 W3 · 手机侧 PWA 客户端（纯逻辑核心，零依赖）
+ * P1 W3 · 手机侧 PWA 客户端（纯逻辑核心；r23 起只依赖同仓库的卡片契约模块）
  * ---------------------------------------------------------------
  * 职责（docs/03 §3.2 / 05 W3「PWA 骨架」）：
  *   1. 会话列表：`GET /api/sessions?hostId=`（设备令牌鉴权，W3 期由 Relay 代挂的
@@ -20,6 +20,8 @@
  *   - 所有 I/O 可注入（`fetchImpl` / `WebSocketImpl` / `now`），Node 里也能
  *     对着真 Relay 跑端到端。
  */
+
+import { createCardDelivery } from './card-delivery.js'
 
 const toWsUrl = (base) => String(base)
   .replace(/\/$/, '')
@@ -61,6 +63,9 @@ export function createPwaClient({
   onEvent = null,        // ({ sessionId, ev, source }) source: 'live' | 'replay'
   onNotice = null,       // ({ type, sessionId, ... })  gap / replay / reconnect / refill-failed / sessions
   onStateChange = null,  // (snapshot) => void
+  // r23（S-8.3）：协议内置卡片。归一化后的卡片模型交给 onCard；违规/降级计数进 snapshot().cards。
+  onCard = null,
+  cardNow = () => Date.now(),
 } = {}) {
   if (!baseUrl || !deviceId || !token) {
     throw new TypeError('createPwaClient 需要 baseUrl / deviceId / token')
@@ -84,6 +89,8 @@ export function createPwaClient({
 
   const notify = (notice) => { try { onNotice?.(notice) } catch { /* 回调异常不影响客户端 */ } }
   const emitState = () => { try { onStateChange?.(snapshot()) } catch { /* 同上 */ } }
+  // r23：live 与 replay 共用一个投递出口，卡片归一化结果与链路无关（TC-5.11）。
+  const cardDelivery = createCardDelivery({ onEvent, onCard, now: cardNow, onStateChange: emitState })
 
   const authHeaders = () => ({ Authorization: `Bearer ${token}` })
 
@@ -177,7 +184,7 @@ export function createPwaClient({
       for (const ev of data.events) {
         if (Number.isInteger(ev?.seq) && ev.seq === rec.lastSeq + 1) {
           rec.lastSeq = ev.seq
-          try { onEvent?.({ sessionId: rec.sessionId, ev, source: 'replay' }) } catch { /* 忽略 */ }
+          cardDelivery.deliver({ sessionId: rec.sessionId, ev, source: 'replay' })
         }
         // 不连续的帧直接丢：连续 seq 是唯一游标，跳帧等于撕裂视图
       }
@@ -280,7 +287,7 @@ export function createPwaClient({
         rec.lastSeq = ev.seq
         rec.attempts = 0
         if (rec.status !== 'following') { rec.status = 'following'; emitState() }
-        try { onEvent?.({ sessionId: rec.sessionId, ev, source: 'live' }) } catch { /* 忽略 */ }
+        cardDelivery.deliver({ sessionId: rec.sessionId, ev, source: 'live' })
         return
       }
       if (msg.t === 'session/replay') {
@@ -763,6 +770,8 @@ export function createPwaClient({
     host: { ...hostStatus },
     hostMismatch,
     stopped,
+    // r23：协议内置卡片的校验/降级计数（TC-1.12「标注问题数」）。
+    cards: cardDelivery.snapshot(),
     sessions: [...sessions.values()],
     follows: [...follows.values()].map((r) => ({
       sessionId: r.sessionId,

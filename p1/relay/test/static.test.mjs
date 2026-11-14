@@ -103,7 +103,9 @@ test('S6 SW 缓存清单覆盖壳页面与 src 模块的传递引用', async () 
   }
 
   // src 模块间的相对 import 也必须在清单里（新增配对依赖漏缓存会导致离线加载失败）
-  for (const name of ['client.js', 'pairing.js', 'hmac-sha256.js']) {
+  // r23：卡片契约是 client.js 的传递引用，扫描列表必须覆盖整条 import 链，
+  // 否则新增模块只在开发环境能加载、离线壳会静默失效。
+  for (const name of ['client.js', 'pairing.js', 'hmac-sha256.js', 'card-delivery.js', 'cards.js', 'transcript.js']) {
     const src = (await get(port, `/src/${name}`)).text
     for (const m of src.matchAll(/\bfrom\s*["'](\.\/[^"']+)["']/g)) {
       const dep = m[1].replace(/^\.\//, '')
