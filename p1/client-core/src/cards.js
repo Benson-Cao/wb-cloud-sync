@@ -12,4 +12,5 @@
 export {
   CARD_T, CARD_SCHEMA, CARD_KINDS, CARD_LIMITS, CARD_ERR,
   validateCard, normalizeCard, cardFromEvent, createCardGuard,
+  APPROVAL_ACTION_OUTCOMES, cardTarget, resolveCardAction,
 } from '../../pwa/src/cards.js'

@@ -10,7 +10,7 @@
 # 04 接口协议与数据模型（PROTOCOL.md）
 
 > 协议版本：`wbsync/2.3`
-> Owner：架构师 ｜ 状态：**修订 r24（S-8.5 设备公钥 pin / TOFU 指纹阻断；四方会签已取消）** ｜ 协议版本：`wbsync/2.3`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）；r12 §4 归档软移除；r13 §5.6 显式产物导出（ADR-011）；r14 §5.6 Office→PDF 转换（同一票据，ADR-011 修订）；r15 §5.2 注册帧与 §8 状态路由引入 `hostId`（命名迁移第一步，值回落 `deviceId`）；r16 注册协商拦截 + `/d/<hostId>/` 语义改名 + 三个错误码（命名迁移第二步）；r17 §2 会话/租约/位点键带 host 维度 + §4 `/api/hosts` 与 `hostId=` 参数（命名迁移第三步）；r18 官方 dsh web 反代入口 uiUrl + `/d/<hostId>/ui(/**)` HTTP·WS 反代（S-6.7 方案 A）；r19 §4 `POST /api/hosts/select` 主机切换器 + 令牌验证加 `mismatch` 标记（S-6.9 BE-CP）；r20 §4 `/api/hosts` 手机视角放宽为可切主机清单 + `bound` 标记（S-6.9 数据面）；r21 §1bis Carrier 骨架实现（client-core）+ §4 PATCH/DELETE `:hostId/:id` 路径形态（命名迁移第四步）；r22 §4 客户端半边落地（S-6.9 FE 切换器协议层 + 写操作真正使用 `:hostId/:id` 两段路径）；r23 §3.1 协议内置卡片 `wbsync/card`（封闭 kind / 限额频率闸门 / 灰色占位归一化，S-8.3 开工件）；r24 §5.1 设备公钥指纹 `devicePubKey` 钉住 + `DEVICE_KEY_MISMATCH` 阻断（S-8.5））
+> Owner：架构师 ｜ 状态：**修订 r25（S-8.4 收尾：卡片动作回传语义 + 定时任务 hostId 分组；四方会签已取消）** ｜ 协议版本：`wbsync/2.3`（r3 `fileUploads/*`；r4 安全收紧；r5 §5.5 审批转发；r6 §5.6 产物索引；r7 §5.3 传输上限；r8 §5.7 首屏窗口与反向补读 `session/backfill`；r9 §2 手机独立设备行 + §5.1 多手机配对；r10 §4 会话列表回带 `host` 状态 + §5.2 注册帧带设备名；r11 §4 手机可置顶（排序仍宿主权威）；r12 §4 归档软移除；r13 §5.6 显式产物导出（ADR-011）；r14 §5.6 Office→PDF 转换（同一票据，ADR-011 修订）；r15 §5.2 注册帧与 §8 状态路由引入 `hostId`（命名迁移第一步，值回落 `deviceId`）；r16 注册协商拦截 + `/d/<hostId>/` 语义改名 + 三个错误码（命名迁移第二步）；r17 §2 会话/租约/位点键带 host 维度 + §4 `/api/hosts` 与 `hostId=` 参数（命名迁移第三步）；r18 官方 dsh web 反代入口 uiUrl + `/d/<hostId>/ui(/**)` HTTP·WS 反代（S-6.7 方案 A）；r19 §4 `POST /api/hosts/select` 主机切换器 + 令牌验证加 `mismatch` 标记（S-6.9 BE-CP）；r20 §4 `/api/hosts` 手机视角放宽为可切主机清单 + `bound` 标记（S-6.9 数据面）；r21 §1bis Carrier 骨架实现（client-core）+ §4 PATCH/DELETE `:hostId/:id` 路径形态（命名迁移第四步）；r22 §4 客户端半边落地（S-6.9 FE 切换器协议层 + 写操作真正使用 `:hostId/:id` 两段路径）；r23 §3.1 协议内置卡片 `wbsync/card`（封闭 kind / 限额频率闸门 / 灰色占位归一化，S-8.3 开工件）；r24 §5.1 设备公钥指纹 `devicePubKey` 钉住 + `DEVICE_KEY_MISMATCH` 阻断（S-8.5）；r25 §3.1 卡片动作回传语义（approval / artifact 前缀约定）+ 定时任务按 `hostId` 分组（S-8.4，发起人裁定 S-8.2 iOS PWA 不做））
 > **本文是跨组件唯一契约源**。任何字段变更必须同时更新本文件、版本号与 CHANGELOG。
 > 字段名以锁定的 DSH commit 实际类型为准；W1 Spike 已完成实测回填（见 §3）。上游升级前须重跑全量契约测试（见 `07`）。
 
@@ -226,6 +226,21 @@ type SessionEvent = {
 > 以及 `t` 写坏但仍带 `cardId` / `kind` / `view` 中至少两项的疑似卡片（交给校验器
 > 记 `BAD_SHAPE`，不允许伪装成普通事件静默溜过）。PWA 侧 `onCard` 回调拿到的
 > 是归一化模型；`snapshot().cards` 只暴露问题数 / 降级标记，不暴露正文。
+
+**卡片动作回传（r25 / S-8.4）**：`cardId` 使用封闭前缀约定——`approval:<approvalId>`、
+`artifact:<artifactId>`；其他前缀（含前缀后为空，如 `approval:`）**不产生回传目标**，
+客户端不得猜测。`resolveCardAction(model, actionId)` 是唯一映射入口：
+
+| kind | 回传目标（`target`） | 动作语义 |
+|---|---|---|
+| `approval` | `{ type: 'approval', approvalId }` | `allow → allowed-once`、`deny → rejected`（与 §5.5 `$events/result` 同词表，经 `answerApproval` 作答，先答先得）；其他 actionId 不映射 |
+| `artifact` | `{ type: 'artifact', artifactId }` | 预览 / 保存均由产物票承载（§5.6 `createArtifactTicket`），actionId 不限 |
+| `metric` / `table` / 未知 kind | 无 | 只展示，不回传 |
+
+`card-delivery` 的投递载荷以 `target` 字段随归一化模型一起交出，UI 不自行解析 `cardId`。
+**Host 侧按协议发卡片的边界**：卡片必须由宿主随会话日志写入（日志是唯一真源），
+插件遵循 ADR-008 铁律不伪造事件、不追加日志；宿主未暴露写事件入口前，
+「插件发卡」停留在约定层，由审批转发（§5.5）与产物索引（§5.6）承担实际回传。
 
 ---
 
@@ -643,6 +658,7 @@ allowedEndpoints:
 
 | 版本 | 日期 | 变更 | 作者 |
 |---|---|---|---|
+| **wbsync/2.3 r25** | 2026-11-14 | **S-8.4 收尾**：§3.1 卡片动作回传语义——`cardId` 封闭前缀 `approval:` / `artifact:`、`resolveCardAction` 唯一映射入口（allow→allowed-once、deny→rejected 与 §5.5 同词表）、`target` 随投递载荷交出；PWA 定时任务三操作统一切正式参数 `hostId`（取当前执行位置，切换器重绑后按新主机路由 / 分组，TC-8.6；Relay 侧 r17 起双名兼容，服务端零改动）。**发起人裁定：S-8.2 iOS PWA 降级视图不做**，从 P3 清单剔除。测试 467 → 477 | 架构师 |
 | **wbsync/2.3 r24** | 2026-11-14 | **S-8.5 设备公钥 pin / TOFU 指纹阻断**：§5.1 `/pair/verify` 新增可选 `devicePubKey`（设备公钥 SHA-256 hex 指纹）；CP 手机行钉住并落盘恢复，指纹变化 → 409 `DEVICE_KEY_MISMATCH` 阻断且旧令牌不受影响；`/admin/revoke-client` 连带清空钉住值、断连、清 UI 票；未携带字段的旧客户端零影响。与 r21 的 SSH 主机指纹守卫（防中间人）互补。测试 452 → 467 | 架构师 |
 | **wbsync/2.3 r23** | 2026-11-14 | **S-8.3 协议内置卡片（P3 开工件）**：§3.1 新增 `wbsync/card` 契约——`kind` 封闭枚举 `artifact / approval / metric / table` + 卡片 schema `wbsync.card/1`；单卡 ≤8 KiB / 视图 ≤32 KiB / 合并 ≤4 Hz / 效果窗口 3s / 连续 5 次违规降级；未知 kind 灰色占位、违规正文不进渲染器；Relay 纯透传不解析正文（ADR-010）。`p1/pwa/src/cards.js` 为唯一实现、`client-core` 再导出，PWA live 与 replay 共用 `createCardDelivery`，`onCard` / `snapshot().cards` 新增（只增字段）。SW 缓存 v29 → v30；测试 425 → 452 | 架构师 |
 | **wbsync/2.3 r22** | 2026-11-14 | **S-6.9 FE 切换器客户端半边 + 命名迁移第四步客户端落地**：`client-core` 新增 `createHostSwitcher`（确认强制 / 清视图重建 / cookie jar / COMMIT_DRIFT 索引不合并 / 执行位置常驻）与 `createSessionWrites`（两段路径 + `hostId=` 正式参数）；PWA 三个写操作与列表查询同步切换。协议字段零变更、服务端零改动；测试 394 → 425 | 架构师 |

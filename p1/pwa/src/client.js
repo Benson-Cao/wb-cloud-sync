@@ -495,9 +495,12 @@ export function createPwaClient({
     return payload.data?.rows ?? []
   }
 
-  /** 定时任务（W9）：列表 / 创建（N 分钟后）/ 立即运行一次。 */
+  /** 定时任务（W9）：列表 / 创建（N 分钟后）/ 立即运行一次。
+   * r25（S-8.4 / TC-8.6）：参数切换为正式名 `hostId` 且取 `activeHostId`——
+   * 服务端切换器重绑后，任务必须路由到当前执行位置，按 hostId 分组可见，
+   * 不能再拿初次配对的 deviceId 打到旧主机。 */
   const listSchedules = async () => {
-    const r = await fetchImpl(`${base}/api/schedules?deviceId=${encodeURIComponent(deviceId)}`, { headers: authHeaders() })
+    const r = await fetchImpl(`${base}/api/schedules?hostId=${encodeURIComponent(activeHostId)}`, { headers: authHeaders() })
     const payload = await r.json().catch(() => null)
     if (!r.ok || payload?.ok !== true) {
       const code = payload?.error?.code ?? `HTTP_${r.status}`
@@ -510,7 +513,7 @@ export function createPwaClient({
     const r = await fetchImpl(`${base}/api/schedules`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ deviceId, title, prompt, afterSeconds, target }),
+      body: JSON.stringify({ hostId: activeHostId, title, prompt, afterSeconds, target }),
     })
     const payload = await r.json().catch(() => null)
     if (!r.ok || payload?.ok !== true) {
@@ -525,7 +528,7 @@ export function createPwaClient({
     const r = await fetchImpl(`${base}/api/schedules/${encodeURIComponent(id)}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ deviceId }),
+      body: JSON.stringify({ hostId: activeHostId }),
     })
     const payload = await r.json().catch(() => null)
     if (!r.ok || payload?.ok !== true) {

@@ -160,6 +160,46 @@ export function cardFromEvent(ev) {
 }
 
 /**
+ * v2.3 · S-8.4（r25）：卡片动作的回传语义。
+ * `cardId` 的封闭前缀约定——`approval:<approvalId>` 与 `artifact:<artifactId>`。
+ * 没有这两个前缀的卡片（含未知 kind 的灰色占位）不产生回传目标，UI 不得猜。
+ */
+export const APPROVAL_ACTION_OUTCOMES = Object.freeze({
+  allow: 'allowed-once',
+  deny: 'rejected',
+})
+
+/** 从归一化卡片解析回传目标；无可回传语义返回 null。 */
+export function cardTarget(model) {
+  const id = typeof model?.cardId === 'string' ? model.cardId : ''
+  if (model?.kind === 'approval' && id.startsWith('approval:')) {
+    const approvalId = id.slice('approval:'.length)
+    return approvalId ? { type: 'approval', approvalId } : null
+  }
+  if (model?.kind === 'artifact' && id.startsWith('artifact:')) {
+    const artifactId = id.slice('artifact:'.length)
+    return artifactId ? { type: 'artifact', artifactId } : null
+  }
+  return null
+}
+
+/**
+ * 把卡片的某个 actionId 解析成可执行回传：
+ * approval 卡映射到 `$events/result` 的 outcome（allow → allowed-once、deny → rejected，
+ * 与 `answerApproval` 同词表）；artifact 卡不限 actionId——预览 / 保存都由产物票
+ * （`createArtifactTicket`）承载，这里只交出目标身份。未知 actionId 返回 null。
+ */
+export function resolveCardAction(model, actionId) {
+  const target = cardTarget(model)
+  if (!target || typeof actionId !== 'string' || actionId === '') return null
+  if (target.type === 'approval') {
+    const outcome = APPROVAL_ACTION_OUTCOMES[actionId]
+    return outcome ? { type: 'approval', approvalId: target.approvalId, outcome } : null
+  }
+  return { type: 'artifact', artifactId: target.artifactId }
+}
+
+/**
  * 发送/接收侧的合并频率与违规降级闸门（有状态，时间可注入）。
  * 只统计、不改写事件，保证 `seq` 连续与日志原文不变。
  */

@@ -11,7 +11,7 @@
  *  - 任何回调抛异常都被隔离，一张坏卡片不能中断整条消息流。
  */
 import {
-  cardFromEvent, createCardGuard, normalizeCard, CARD_ERR,
+  cardFromEvent, createCardGuard, normalizeCard, cardTarget, CARD_ERR,
 } from './cards.js'
 
 export function createCardDelivery({
@@ -41,6 +41,9 @@ export function createCardDelivery({
       seq: Number.isInteger(ev?.seq) ? ev.seq : null,
       source,
       card: model,
+      // r25（S-8.4）：审批 / 产物卡的回传目标随模型一起交出，
+      // UI 拿它接 answerApproval / createArtifactTicket，不用自己猜 cardId 前缀。
+      target: cardTarget(model),
       verdict,
     }
     try { onCard?.(payload) } catch { /* 同上 */ }

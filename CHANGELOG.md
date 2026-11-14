@@ -4,6 +4,37 @@
 
 ---
 
+## [v2.3 P3 · r25] · 2026-11-14 · S-8.4 收尾：卡片动作回传 + 定时任务 hostId 分组
+
+S-8.4 的审批（r5）、产物（r13/r14）、附件（r3）早已落地，本轮收掉最后两块缺口。
+**发起人裁定：S-8.2 iOS PWA 降级视图不做**，从 P3 清单剔除（文档与差异清单同步标注）。
+协议字段零变更、Relay 服务端与 Host 插件零改动、无需重启。
+
+### 卡片动作回传（接 r23 卡片契约）
+
+- `p1/pwa/src/cards.js` 新增 `cardTarget()` / `resolveCardAction()` 与
+  `APPROVAL_ACTION_OUTCOMES`：`cardId` 封闭前缀 `approval:<approvalId>`、
+  `artifact:<artifactId>`；approval 卡 `allow → allowed-once`、`deny → rejected`
+  （与 `answerApproval` 同词表），其他前缀 / 前缀后为空 / 未知 actionId 一律不映射，
+  UI 不得猜测。`card-delivery` 的载荷以 `target` 随归一化模型交出。
+- **Host 侧发卡的能力边界**：卡片必须由宿主随会话日志写入（日志是唯一真源）；
+  插件遵循 ADR-008 铁律不伪造事件、不追加日志，宿主未暴露写事件入口前，
+  实际回传由既有审批转发与产物票承担。此边界写入 docs/04 §3.1。
+
+### 定时任务按 hostId 分组（TC-8.6）
+
+- PWA `listSchedules / createSchedule / runSchedule` 统一切正式参数 `hostId`
+  （取 `activeHostId`——切换器重绑后路由到新主机，不再拿初次配对的 `deviceId`
+  打到旧主机）。Relay 侧 r17 起双名兼容，服务端零改动。
+
+### 验证与文档
+
+- 新增 10 条确定性测试（卡片动作 6 + 定时任务 4），全量 **467 → 477 / 477 PASS**；
+  docs/04 升 r25（§3.1 动作回传表 + 边界说明 + §10）→ `PROTOCOL.md` 重生成
+  （G4 一致）→ 收口清单新增 r25 段；门禁快照按纪律重算。
+
+---
+
 ## [v2.3 P3 · r24] · 2026-11-14 · S-8.5 设备公钥 pin（TOFU 指纹阻断）
 
 P3 第二项。r21 已在 `client-core` 的 `SshCarrier` 做了 **SSH 主机指纹**守卫（防中间人），

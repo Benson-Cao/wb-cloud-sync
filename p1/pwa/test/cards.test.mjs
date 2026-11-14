@@ -7,7 +7,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createCardDelivery } from '../src/card-delivery.js'
-import { CARD_T, CARD_LIMITS, CARD_ERR } from '../src/cards.js'
+import { CARD_T, CARD_LIMITS, CARD_ERR, APPROVAL_ACTION_OUTCOMES, cardTarget, resolveCardAction } from '../src/cards.js'
 
 const card = (over = {}) => ({
   t: CARD_T,
@@ -131,4 +131,56 @@ test('P9 快照只暴露计数，不含任何卡片正文', () => {
   assert.deepEqual(Object.keys(h.delivery.snapshot()).sort(),
     ['consecutive', 'degraded', 'lastCode', 'problems', 'schema'])
   assert.equal(h.delivery.snapshot().lastCode, CARD_ERR.BAD_VIEW)
+})
+
+test('P10 approval 卡（cardId=approval:<id>）解析出回传目标并随投递载荷下发', () => {
+  const h = harness()
+  const payload = h.delivery.deliver({
+    sessionId: 's1',
+    ev: ev(card({ kind: 'approval', cardId: 'approval:appr-77', actions: [{ id: 'allow', label: '允许' }, { id: 'deny', label: '拒绝' }] })),
+    source: 'live',
+  })
+  assert.deepEqual(payload.target, { type: 'approval', approvalId: 'appr-77' })
+  assert.deepEqual(cardTarget(payload.card), { type: 'approval', approvalId: 'appr-77' })
+})
+
+test('P11 allow/deny 映射到 $events/result 的 outcome，未知 actionId 不映射', () => {
+  const model = cardTarget({ kind: 'approval', cardId: 'approval:appr-77' })
+  assert.deepEqual(resolveCardAction({ kind: 'approval', cardId: 'approval:appr-77' }, 'allow'),
+    { type: 'approval', approvalId: 'appr-77', outcome: APPROVAL_ACTION_OUTCOMES.allow })
+  assert.equal(APPROVAL_ACTION_OUTCOMES.allow, 'allowed-once')
+  assert.equal(APPROVAL_ACTION_OUTCOMES.deny, 'rejected')
+  assert.deepEqual(resolveCardAction({ kind: 'approval', cardId: 'approval:appr-77' }, 'deny'),
+    { type: 'approval', approvalId: 'appr-77', outcome: 'rejected' })
+  assert.equal(resolveCardAction({ kind: 'approval', cardId: 'approval:appr-77' }, 'later'), null)
+})
+
+test('P12 approval 前缀后为空 → 无回传目标（不给 UI 猜的口子）', () => {
+  assert.equal(cardTarget({ kind: 'approval', cardId: 'approval:' }), null)
+  assert.equal(resolveCardAction({ kind: 'approval', cardId: 'approval:' }, 'allow'), null)
+})
+
+test('P13 artifact 卡（cardId=artifact:<id>）解析出产物目标，动作不限 id', () => {
+  const m = { kind: 'artifact', cardId: 'artifact:file-42' }
+  assert.deepEqual(cardTarget(m), { type: 'artifact', artifactId: 'file-42' })
+  assert.deepEqual(resolveCardAction(m, 'preview'), { type: 'artifact', artifactId: 'file-42' })
+  assert.deepEqual(resolveCardAction(m, 'save'), { type: 'artifact', artifactId: 'file-42' })
+})
+
+test('P14 metric / table / 未知 kind 与无前缀 cardId 都无回传目标', () => {
+  for (const m of [
+    { kind: 'metric', cardId: 'metric:cpu' },
+    { kind: 'table', cardId: 'table:rows' },
+    { kind: 'unknown', cardId: 'approval:appr-77', placeholder: true },
+    { kind: 'approval', cardId: 'plain-77' },
+    { kind: 'artifact', cardId: 'file-42' },
+    null,
+  ]) {
+    assert.equal(cardTarget(m), null, JSON.stringify(m))
+  }
+})
+
+test('P15 resolveCardAction 对空 actionId 返回 null', () => {
+  assert.equal(resolveCardAction({ kind: 'artifact', cardId: 'artifact:file-42' }, ''), null)
+  assert.equal(resolveCardAction({ kind: 'artifact', cardId: 'artifact:file-42' }, null), null)
 })
