@@ -2,7 +2,7 @@
  * P1 W3 · 手机侧 PWA 客户端（纯逻辑核心，零依赖）
  * ---------------------------------------------------------------
  * 职责（docs/03 §3.2 / 05 W3「PWA 骨架」）：
- *   1. 会话列表：`GET /api/sessions?deviceId=`（设备令牌鉴权，W3 期由 Relay 代挂的
+ *   1. 会话列表：`GET /api/sessions?hostId=`（设备令牌鉴权，W3 期由 Relay 代挂的
  *      CP 读端点，P2 CP 独立成服务后 URL 不变）；
  *   2. 事件订阅：`WS /d/<deviceId>/events/<sessionId>?token=&sinceSeq=`——
  *      浏览器 WebSocket 不能设 Authorization 头，**令牌只能走 query，绝不写日志**；
@@ -44,6 +44,9 @@ const makeClientMsgId = () =>
 export function createPwaClient({
   baseUrl,
   deviceId,
+  // v2.3（r22）：当前执行位置。命名迁移期 hostId 与 deviceId 同值；列表响应会
+  // 回权威 hostId（r17），之后的写操作路径以它为准。缺省回落 deviceId。
+  hostId = null,
   token,
   clientId = 'pwa',
   fetchImpl = globalThis.fetch,
@@ -67,6 +70,9 @@ export function createPwaClient({
   }
 
   const base = String(baseUrl).replace(/\/$/, '')
+  // r22：写操作路径段的 hostId。初次缺省 deviceId（值兼容），refreshSessions
+  // 拿到服务端权威值后同步；服务端切换器重绑后不会仍拿旧主机段去写。
+  let activeHostId = hostId ?? deviceId
   const sessions = new Map()   // sessionId -> 会话索引行（最近一次刷新的缓存）
   const follows = new Map()    // sessionId -> 订阅记录
   // 这台电脑的在线状态（W7 状态点）：null = 还没探过，别画成离线
@@ -84,7 +90,9 @@ export function createPwaClient({
   /* -------------------------------------------------------- 会话列表 */
 
   const refreshSessions = async () => {
-    const r = await fetchImpl(`${base}/api/sessions?deviceId=${encodeURIComponent(deviceId)}`, {
+    // r22：正式参数名 hostId=（r17）；deviceId= 兼容期仍被服务端接受，但客户端
+    // 用正式名，避免「服务端已迁移、客户端还发旧名」的命名漂移。
+    const r = await fetchImpl(`${base}/api/sessions?hostId=${encodeURIComponent(activeHostId)}`, {
       headers: authHeaders(),
     })
     const payload = await r.json().catch(() => null)
@@ -100,6 +108,12 @@ export function createPwaClient({
       throw Object.assign(new Error(`会话列表获取失败：${code}`), { code })
     }
     hostMismatch = false
+    // r22：服务端回的 hostId 是权威值（r17），写操作路径段以它为准。注意 PWA
+    // 沿用 r9 的「多令牌档案切换」世界观——服务端切换器重绑不在这里自动跟随，
+    // 那种场景由 r20 的 409 HOST_MISMATCH 兜底提示用户切档案。
+    if (typeof payload.data?.hostId === 'string' && payload.data.hostId.trim()) {
+      activeHostId = payload.data.hostId.trim()
+    }
     sessions.clear()
     for (const row of payload.data?.rows ?? []) sessions.set(row.sessionId, row)
     // 状态点靠这一句更新：sessions 响应里带 host.online（协议 r10）
@@ -410,7 +424,8 @@ export function createPwaClient({
   }
 
   /**
-   * 置顶 / 取消置顶（r11）：`PATCH /api/sessions/:id { pinned }`。
+   * 置顶 / 取消置顶（r11，r22 路径形态）：`PATCH /api/sessions/:hostId/:id { pinned }`。
+   * hostId 走路径段（r21 服务端路径优先）；body 里的 deviceId 只是兼容期冗余字段。
    * 返回宿主给的最新行；**排序（pinnedOrder）由宿主权威**（最近置顶在前），
    * 客户端不改序——两端各自维护顺序只会打架。
    */
@@ -418,7 +433,7 @@ export function createPwaClient({
     if (!sessionId) {
       throw Object.assign(new Error('置顶缺 sessionId'), { code: 'INVALID_ARGUMENT' })
     }
-    const r = await fetchImpl(`${base}/api/sessions/${encodeURIComponent(sessionId)}?deviceId=${encodeURIComponent(deviceId)}`, {
+    const r = await fetchImpl(`${base}/api/sessions/${encodeURIComponent(activeHostId)}/${encodeURIComponent(sessionId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ deviceId, pinned: Boolean(pinned) }),
@@ -436,14 +451,14 @@ export function createPwaClient({
   }
 
   /**
-   * 归档 / 恢复（r12）：`PATCH /api/sessions/:id { archived }`。
+   * 归档 / 恢复（r12，r22 路径形态）：`PATCH /api/sessions/:hostId/:id { archived }`。
    * 软移除——只把会话从默认列表藏起来，落盘日志不动，随时能恢复。
    */
   const setArchived = async ({ sessionId, archived = true } = {}) => {
     if (!sessionId) {
       throw Object.assign(new Error('归档缺 sessionId'), { code: 'INVALID_ARGUMENT' })
     }
-    const r = await fetchImpl(`${base}/api/sessions/${encodeURIComponent(sessionId)}?deviceId=${encodeURIComponent(deviceId)}`, {
+    const r = await fetchImpl(`${base}/api/sessions/${encodeURIComponent(activeHostId)}/${encodeURIComponent(sessionId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ deviceId, archived: Boolean(archived) }),
@@ -462,7 +477,7 @@ export function createPwaClient({
 
   /** 只查已归档的行（恢复列表用）；不覆盖 refreshSessions 的内部缓存。 */
   const getArchivedSessions = async () => {
-    const r = await fetchImpl(`${base}/api/sessions?deviceId=${encodeURIComponent(deviceId)}&archived=true`, {
+    const r = await fetchImpl(`${base}/api/sessions?hostId=${encodeURIComponent(activeHostId)}&archived=true`, {
       headers: authHeaders(),
     })
     const payload = await r.json().catch(() => null)
@@ -513,9 +528,9 @@ export function createPwaClient({
     return payload.data
   }
 
-  /** 会话改名（M2-10）：标题由宿主写事件并权威回传。 */
+  /** 会话改名（M2-10，r22 路径形态）：`PATCH /api/sessions/:hostId/:id { title }`；标题由宿主写事件并权威回传。 */
   const renameSession = async ({ sessionId, title } = {}) => {
-    const r = await fetchImpl(`${base}/api/sessions/${encodeURIComponent(sessionId)}?deviceId=${encodeURIComponent(deviceId)}`, {
+    const r = await fetchImpl(`${base}/api/sessions/${encodeURIComponent(activeHostId)}/${encodeURIComponent(sessionId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ deviceId, title }),
@@ -743,6 +758,8 @@ export function createPwaClient({
 
   const snapshot = () => ({
     deviceId,
+    // r22：当前执行位置（TC-4.6 顶部常驻）；写操作路径段就是这个值。
+    hostId: activeHostId,
     host: { ...hostStatus },
     hostMismatch,
     stopped,

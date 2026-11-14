@@ -9,6 +9,8 @@ export {
   ERR, rpcOk, rpcError, assertCarrier, rpcFromResponse, RELAY_ENDPOINTS,
 } from './carrier.js'
 export { createDshMux } from './mux.js'
+export { createHostSwitcher, SWITCH_ERR } from './host-switch.js'
+export { createSessionWrites, SESSION_WRITE_ERR } from './session-writes.js'
 export { createLocalCarrier } from './carriers/local.js'
 export { createSshCarrier } from './carriers/ssh.js'
 export { createRelayCarrier } from './carriers/relay.js'

@@ -1,43 +1,33 @@
 {
   "schema": "wbsync-gate-check/5",
-  "capturedAt": "2026-11-13T13:48:27.411Z",
+  "capturedAt": "2026-11-14T05:56:52.648Z",
   "git": {
-    "head": "0cebbf34295722459c07933643af15d8f12607a4",
+    "head": "d44f1853ad7b7ccac7254cd528190214e5b41ccc",
     "branch": "main",
     "worktreeClean": false
   },
   "pinnedCommit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
   "freshness": {
     "status": "CURRENT",
-    "dataChanged": [
-      "package.json"
-    ],
+    "dataChanged": [],
     "signoffChanged": [],
-    "artifactChanged": [
-      "dist-tarball"
-    ],
+    "artifactChanged": [],
     "narrativeChanged": [
       "PROTOCOL.md"
     ],
-    "notes": [
-      "发布物已重建（仅记录，不影响判定）：dist-tarball"
-    ],
-    "previousCapturedAt": "2026-11-13T12:34:53.798Z",
-    "previousGitHead": "ae5bc6b9142a3d84a71780189074e689e8bef37a",
+    "notes": [],
+    "previousCapturedAt": "2026-11-13T13:48:27.411Z",
+    "previousGitHead": "0cebbf34295722459c07933643af15d8f12607a4",
     "ageDays": 0,
     "maxAgeDays": 30,
     "supersedes": {
-      "previousStatus": "STALE",
-      "previousReason": "已变化（阻断）：运行代码/证据：package.json",
-      "capturedAt": "2026-11-13T12:34:53.798Z",
-      "gitHead": "ae5bc6b9142a3d84a71780189074e689e8bef37a",
-      "dataChanged": [
-        "package.json"
-      ],
+      "previousStatus": "DRIFTED",
+      "previousReason": "描述文字变化（不阻断）：PROTOCOL.md",
+      "capturedAt": "2026-11-13T13:48:27.411Z",
+      "gitHead": "0cebbf34295722459c07933643af15d8f12607a4",
+      "dataChanged": [],
       "signoffChanged": [],
-      "artifactChanged": [
-        "dist-tarball"
-      ],
+      "artifactChanged": [],
       "narrativeChanged": [
         "PROTOCOL.md"
       ]
@@ -69,11 +59,11 @@
     },
     "narrative": {
       "REPORT.md": "5e3226f516c9a5936fcb2fc5f676915140097dacd8958b8c8e680c195c0a1927",
-      "PROTOCOL.md": "2dd9445cfce59976dbda93633e0391bbbb5359b1657832f3675c90812dcec290"
+      "PROTOCOL.md": "fa87486c97d706c8c07e5e7b5ad573efb37483d1371fd63d2192bdcbbdce66c2"
     }
   },
   "secretScan": {
-    "filesScanned": 211,
+    "filesScanned": 218,
     "patterns": [
       "github-classic",
       "github-fine-grained",
@@ -114,7 +104,7 @@
     "chaosFail": 0,
     "chaosError": null,
     "perfVerdict": "PASS",
-    "perfAgeDays": 3,
+    "perfAgeDays": 3.6,
     "perfReason": null
   },
   "automated": [

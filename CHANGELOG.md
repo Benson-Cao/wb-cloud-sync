@@ -4,6 +4,70 @@
 
 ---
 
+## [v2.3 P2 · r22] · 2026-11-14 · S-6.9 FE 切换器客户端半边 + 命名迁移第四步客户端落地
+
+本轮把收口清单 §3 里能在本仓库闭环的两项剩余工作收口。**协议字段零变更、Relay 服务端与
+Host 插件零改动、无需重启**：r19/r20/r21 已经把服务端与路径形态铺好，缺的是「没有客户端
+真正使用它们」。剩下一项 Postgres 版因需要真实数据库实例、本机未部署，本轮不实施（见
+收口清单 §3）。
+
+### `p1/client-core`（新增两个控制面模块）
+
+与 `DshCarrier`（数据面 `/d/<hostId>/*`）严格分开，都管控制面 CP REST `/api/*`：
+
+- **`src/host-switch.js` · `createHostSwitcher`（S-6.9 FE）**
+  - `listHosts()` 取可切主机清单，**当前执行位置以服务端 `bound` 行为准**（不自行猜
+    「第一个在线的」）；`selectHost({ hostId, confirmNoMigration })` 发切换。
+  - **客户端本地先拦**未显式 `=== true` 的确认（TC-4.2）：不发网络请求，字符串
+    `'true'` / `1` / 缺省一律不算；同主机 no-op 例外（与 r19 服务端 SW6 同口径）。
+  - 切换成功后 `viewEpoch++`，经 `onHostChanged` 要求 App 壳执行 `clearView` /
+    `resetCookieJar` / `rebuildIndex`（TC-4.3；12 号手册 S-6.9 的坑：独立 cookie jar
+    是挡住 R-22 串会话的关键）。本模块**不碰 WebView、不代管 carrier 生命周期**。
+  - `dshCommit` 与 `pinnedDshCommit` 不符 → `COMMIT_DRIFT`：**索引不合并、只提示升级**
+    （TC-1.11 / 04 §6⑦），但切换本身不回滚（服务端已重绑，回滚是另一次切换）。
+    未配置 pinned 时不启用比对（与 r16 服务端空串口径一致）。
+  - `canMergeIndex(hostId)` 是索引合并闸门：只允许当前主机，drift 期间一律拒绝；
+    `snapshot()` 供顶部执行位置常驻（TC-4.6）。
+  - 401 不傻重试（与 `DshMux` 同口径）；错误统一 `RpcOk/RpcError` 信封，不抛异常；
+    令牌只进 `Authorization` 头，不进 URL / body / 日志。
+  - **PWA 不接服务端切换器**：r20 已裁定 PWA 沿用 r9「多令牌档案切换」世界观，
+    绑定被换时按 409 `HOST_MISMATCH` 兜底提示切档案。服务端切换器供手机壳单令牌跳主机。
+
+- **`src/session-writes.js` · `createSessionWrites`（命名迁移第四步客户端落地）**
+  - r21 已落地 `PATCH|DELETE /api/sessions/:hostId/:id`，但当时没有任何客户端使用。
+    现在 `hostId` 只走路径段（不再塞 body/query），`setHostId()` 与切换器
+    `onHostChanged` 对接；列表查询用正式参数名 `hostId=`（r17）。
+  - `DELETE` 仍是归档别名（软移除，不真删）；`pinned` / `archived` / `title`
+    一次只给一个（与服务端 400 `INVALID_JSON` 同款约束，客户端先拦省一次往返）。
+  - 响应解包复用 carrier 的 `rpcFromResponse`，错误码不另起一套。
+
+### `p1/pwa`（现网客户端同步）
+
+- `setPinned` / `setArchived` / `renameSession` 三个写操作切到两段路径
+  `/api/sessions/:hostId/:id`；`refreshSessions` / `getArchivedSessions` 查询参数
+  由 `deviceId=` 统一为正式的 `hostId=`。
+- 新增可选构造参数 `hostId`（缺省回落 `deviceId`，命名迁移期值兼容）；列表响应里的
+  权威 `hostId` 同步到 `activeHostId`，`snapshot().hostId` 暴露执行位置。
+- `sessionId` 含斜杠时按段编码（`s%2F1`），不撑出额外路径段。
+- 既有 `HOST_MISMATCH` 兜底与 r9 多令牌档案切换保持不变。
+- `sw.js` 壳缓存 `v28 → v29`：`SHELL_ASSETS` 含 `../src/client.js`，改了客户端源码
+  却不递增缓存名会让真机一直拿旧代码（沿用 r20 的处置）。Relay 静态资源按请求
+  `readFileSync`，无需重启即可生效。
+
+### 测试与文档
+
+- 新增 **31 条**：`host-switch.test.mjs` 12 条（确认强制 / 视图重建 / COMMIT_DRIFT /
+  索引闸门 / 错误码 / 401 不重试 / 令牌不落 URL）、`host-switch-e2e.test.mjs` 4 条
+  （真 Relay：bound 标记、CP 重绑、旧 hostId 409、drift 不合并）、
+  `session-writes.test.mjs` 10 条（6 单测 + 4 真 Relay HTTP 降级通道往返）、
+  `session-path.test.mjs` 5 条（PWA URL 形态 / 参数名 / 斜杠编码 / 失败透传）。
+- 全量 **394 → 425 / 425**；`docs/04` 升 r22（§4 两条新约束、§9、§10）→
+  `PROTOCOL.md` 重生成（G4 PASS）→ 本文件；收口清单 §2duodecies + §3 + §5 r22 段。
+- 门禁快照按纪律重算（narrative 组的 `PROTOCOL.md` 变化）；spike 包未动（本轮
+  不触碰 bundle 五文件，G9 逐文件比对仍 5/5）。
+
+---
+
 ## [v2.3 P2 · r21] · 2026-11-13 · S-2.4/S-2.5 client-core Carrier 骨架 + PATCH/DELETE 路径形态（命名迁移第四步）
 
 两个遗留工作包一起收口：**Carrier 骨架**（S-2.4/S-2.5，P1 阶段工作包，本机可做）
