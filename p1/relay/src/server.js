@@ -86,6 +86,10 @@ const sanitizePhoneId = (raw) => (typeof raw === 'string' && PHONE_ID_RE.test(ra
 const sanitizeLabel = (raw) => (typeof raw === 'string'
   ? raw.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40) || null
   : null)
+/** v2.3（S-8.5）：设备公钥指纹，只认 SHA-256 hex；格式不符按「未携带」处理（旧客户端兼容）。 */
+const DEVICE_KEY_RE = /^[A-Fa-f0-9]{64}$/
+const sanitizeDeviceKey = (raw) => (typeof raw === 'string' && DEVICE_KEY_RE.test(raw)
+  ? raw.toLowerCase() : null)
 
 /**
  * 「客户端刚才是用哪个地址找到我的」——优先取反代给的 X-Forwarded-Proto，其次按 Host 头拼。
@@ -920,11 +924,18 @@ export function createRelay(options = {}) {
         })
         const phoneId = sanitizePhoneId(body.phoneId) ?? `phone-${hex(8)}`
         try {
-          cp.upsertPhone({ phoneId, hostId: c.deviceId, label: sanitizeLabel(body.clientName) })
+          // S-8.5：首次配对钉住设备公钥指纹，之后指纹变化由 CP 直接阻断。
+          cp.upsertPhone({
+            phoneId,
+            hostId: c.deviceId,
+            label: sanitizeLabel(body.clientName),
+            devicePubKey: sanitizeDeviceKey(body.devicePubKey),
+          })
           cp.setPhoneToken(phoneId, deviceToken)
         } catch (e) {
           // CP 的拒绝理由要如实回给手机：「已达上限」「该手机已吊销」与「码不对」是三种处置
           const code = e?.code ?? 'UNAUTHORIZED'
+          if (code === 'DEVICE_KEY_MISMATCH') return fail(res, 409, code, e.message)
           if (code === 'CLIENT_LIMIT') return fail(res, 409, code, e.message)
           if (code === 'HOST_OFFLINE') return fail(res, 409, code, e.message, true)
           return fail(res, 401, code === 'UNAUTHORIZED' ? 'UNAUTHORIZED' : code, e?.message ?? '配对被拒绝')

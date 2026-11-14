@@ -50,6 +50,15 @@ const safeEqualHex = (a, b) => {
 
 const num = (v, fallback = null) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
 
+/**
+ * v2.3（S-8.5 / B3 TOFU）：设备公钥指纹只认 SHA-256 hex（64 位）。
+ * 格式不符一律当作「未携带」而不是报错——旧客户端不带这个字段仍要能配对，
+ * 也不能让随机字符串变成探测钉住值的手段。
+ */
+const normalizeDeviceKey = (v) => (
+  typeof v === 'string' && /^[A-Fa-f0-9]{64}$/.test(v) ? v.toLowerCase() : null
+)
+
 const cloneDevice = (row) => (row
   ? { ...row, capabilities: [...(row.capabilities ?? [])] }
   : null)
@@ -123,6 +132,9 @@ export function createControlPlane({
         platform: raw.platform ?? null,
         capabilities: Array.isArray(raw.capabilities) ? [...raw.capabilities] : [],
         hostId: typeof raw.hostId === 'string' ? raw.hostId : null,
+        // v2.3（r24 / S-8.5）：钉住的设备公钥指纹必须随落盘恢复，
+        // 否则进程重启后指纹守卫被静默清空（r15 白名单教训的同类缺陷）。
+        devicePubKey: typeof raw.devicePubKey === 'string' ? raw.devicePubKey : null,
         // v2.3（r16）：注册帧声明的引擎基线与状态；hydrate 不恢复就会被静默丢掉（r15 教训）
         dshCommit: typeof raw.dshCommit === 'string' ? raw.dshCommit : null,
         engineState: typeof raw.engineState === 'string' ? raw.engineState : null,
@@ -196,6 +208,8 @@ export function createControlPlane({
         ? input.dshCommit.trim().slice(0, 64) : prev?.dshCommit ?? null,
       engineState: typeof input.engineState === 'string' && input.engineState.trim()
         ? input.engineState.trim().slice(0, 32) : prev?.engineState ?? null,
+      // S-8.5：注册报文不允许改写已钉住的设备公钥，只能原样保留。
+      devicePubKey: prev?.devicePubKey ?? null,
       // 令牌摘要只由 pair/verify 写入；注册时不许改，否则任何 Host 都能顶掉别人的令牌
       tokenDigest: prev?.tokenDigest ?? null,
       allowMobile: input.allowMobile ?? prev?.allowMobile ?? true,
@@ -255,8 +269,15 @@ export function createControlPlane({
     .filter((d) => d.role === 'phone' && d.boundHostId === hostId && !d.tombstone)
     .map(cloneDevice)
 
-  const upsertPhone = ({ phoneId, hostId, label = null } = {}) => {
+  const upsertPhone = ({ phoneId, hostId, label = null, devicePubKey = null } = {}) => {
     if (!phoneId || !hostId) throw new ControlPlaneError('UNAUTHORIZED', '缺少 phoneId / hostId')
+    // S-8.5：首次信任时钉住指纹；之后**指纹变化按不匹配处理并阻断**，
+    // 不给「提醒后继续」的口子。未携带字段的旧客户端不受影响。
+    const presented = normalizeDeviceKey(devicePubKey)
+    const pinned = normalizeDeviceKey(devices.get(phoneId)?.devicePubKey)
+    if (presented && pinned && presented !== pinned) {
+      throw new ControlPlaneError('DEVICE_KEY_MISMATCH', '设备公钥指纹与已钉住值不一致，已阻断')
+    }
     const host = devices.get(hostId)
     if (!host || host.tombstone) {
       throw new ControlPlaneError('HOST_OFFLINE', '目标 Host 未注册或已吊销', { retryable: true })
@@ -285,6 +306,7 @@ export function createControlPlane({
       deviceName: label ?? prev?.deviceName ?? null,
       platform: prev?.platform ?? 'mobile',
       capabilities: prev?.capabilities ?? [],
+      devicePubKey: pinned ?? presented,
       tokenDigest: prev?.tokenDigest ?? null,
       allowMobile: true,
       state: 'online',
@@ -346,6 +368,7 @@ export function createControlPlane({
     if (!row || row.role !== 'phone') return null
     row.tombstone = true
     row.tokenDigest = null
+    row.devicePubKey = null   // S-8.5：收回设备即撤销凭证，重新接纳时允许钉新指纹
     row.state = 'offline'
     touch()
     return cloneDevice(row)
