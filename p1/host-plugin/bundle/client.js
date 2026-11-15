@@ -1,9 +1,11 @@
 /**
  * WB-Cloud-Sync · PC 桌面设置页（v2.3 / D-005）
  * ---------------------------------------------------------------
- * 视觉改版 2026-11-15：参考「WB-Sync_电脑端插件UI_设计稿」pc.html 的
- * 02 插件设置 / 03 配对码浮层，落地同一套设计系统（品牌 #4B5CF6→#7C5CF2、
- * 薄荷 #16B394、三级文字、16px 卡片、11px 按钮、内联线性图标）。
+ * 视觉改版 2026-11-15：参考「WB-Sync_两端UI_原装黑白单色_设计稿」mono/pc.html
+ * 的 02 插件设置 / 03 配对码浮层，落地与手机端原生页同一套中性 token
+ * （零彩度灰阶、主按钮黑底白字、12/8/4 三级圆角、状态靠实心/空心/虚线区分）。
+ * 上一版按社区「DeepSeek 官网风」彩色稿做过一次（品牌 #4B5CF6、薄荷 #16B394），
+ * 那是判断失误 —— 官方 `dsh web` 本身近黑近白，壳层再上彩色会在切换主题时打架。
  *
  * 形态不变（13 §1）：`dsh.client` 半边**只做桌面设置页**，不托管 UI 资源、
  * 不渲染会话列表 / 对话 / 审批 / 镜像面板。手机界面由官方 `dsh web` 提供。
@@ -33,24 +35,45 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'wbsync-settings'
     const ACTION_ID = 'wbsync-settings-action'
 
-    // ---------- 设计系统（与手机端 13 屏共用）----------
-
+    // ---------- 设计系统（与手机端原生页共用同一套中性 token）----------
+    //
+    // 2026-11-15 第二次改版：上一版参照的是社区「DeepSeek 官网风」彩色稿
+    // （品牌 #4B5CF6 / 薄荷 #16B394 / 琥珀 #E09616），这是**判断错了**——
+    // DSH 自带的 `dsh web` 本身就是近黑近白，壳层再上彩色会在用户切换主题时打架。
+    // 现在全部收敛到零彩度灰阶，与 mono 设计稿 `--dsw-*` 数值逐项对齐。
+    //
+    // 旧语义名（brand / mint / amber / danger）**故意保留**：本文件有 50 处调用点
+    // 读的是语义而不是色相，改名只会制造 diff 噪音。它们现在全部指向灰阶，
+    // 任何一处漏改都不会再冒彩。
     const T = {
-      brand: '#4B5CF6',
-      brand2: '#7C5CF2',
-      mint: '#16B394',
-      amber: '#E09616',
-      danger: '#E1565B',
-      ink: '#151A27',
-      ink2: '#69728B',
-      ink3: '#9BA4B8',
+      brand: '#18181B',
+      brand2: '#18181B',
+      mint: '#18181B',
+      amber: '#3F3F46',
+      danger: '#18181B',
+      ink: '#18181B',
+      ink2: '#52525B',
+      ink3: '#8B8B93',
+      faint: '#A1A1AA',
       card: '#FFFFFF',
-      line: '#E9ECF4',
-      soft: '#F3F5FB',
-      shadow: '0 6px 18px rgba(28,38,80,.045)',
-      rCard: 16,
-      rBtn: 11,
-      rInput: 9,
+      canvas: '#FFFFFF',
+      subtle: '#F4F4F5',
+      soft: '#F4F4F5',
+      soft2: '#FAFAFA',
+      line: '#E4E4E7',
+      lineStrong: '#D4D4D8',
+      rule: '#C9C9CE',
+      // 状态三档：实心 / 空心 / 更淡的空心（靠形状区分，不靠颜色）
+      on: '#18181B',
+      wait: '#52525B',
+      off: '#B5B5BA',
+      // 单色体系里「阴影」只剩边线语义，真投影会把白底压出脏灰
+      shadow: 'none',
+      rCard: 12,
+      rBtn: 8,
+      rInput: 8,
+      rBadge: 4,
+      rAvatar: 8,
     }
     const FONT = 'WenQuanYi Micro Hei, system-ui, -apple-system, sans-serif'
     const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace'
@@ -98,12 +121,53 @@ window.__ModuleLoader__.load({
 
     // ---------- 基础组件 ----------
 
-    const dot = (color, size = 7) => h('span', {
+    // 单色状态语汇：实心点 = 在线 / 已完成；空心环 = 待处理 / 未开启。
+    // 加 hollow 参数而不是新造组件 —— 调用点关心的是「有没有点亮」，不是形状细节。
+    const dot = (color, size = 7, hollow = false) => h('span', {
       style: {
-        width: size, height: size, borderRadius: '50%', background: color,
+        boxSizing: 'border-box',
+        width: size, height: size, borderRadius: '50%',
+        background: hollow ? 'transparent' : color,
+        border: hollow ? `1.5px solid ${color}` : 'none',
         display: 'inline-block', flex: '0 0 auto',
       },
     })
+
+    /**
+     * 单色标签（对齐 pc.html 的 `.tag` 四档）。
+     *
+     * <p>设计稿把「状态」编码进**形状**，不靠颜色：
+     * <ul>
+     *   <li>{@code on} —— 浅灰底 + 实线描边（在线 / 已完成）</li>
+     *   <li>{@code off} —— 更淡的底 + **虚线**描边（离线 / 未开启）</li>
+     *   <li>{@code warn} —— 白底 + **虚线**描边（待处理）</li>
+     *   <li>{@code invert} —— 黑底白字（关键标识 / 当前选中）</li>
+     * </ul>
+     * 统一 4px 圆角（{@code --dsw-radius-badge}）。**不是胶囊** —— 20px 胶囊是上一版
+     * 彩色稿的语汇，在单色体系里会和「反白块」抢语义。
+     * 字体用等宽：设计稿里 tag 与诊断条同族，小字号下等宽更稳。
+     */
+    const Tag = ({ text, tone = 'on', dotTone }) => {
+      const TONES = {
+        on: { bg: T.subtle, fg: T.ink, bc: T.lineStrong, dashed: false },
+        off: { bg: T.soft2, fg: T.ink3, bc: T.line, dashed: true },
+        warn: { bg: T.card, fg: T.ink2, bc: T.faint, dashed: true },
+        invert: { bg: T.ink, fg: '#FFFFFF', bc: T.ink, dashed: false },
+      }
+      const s = TONES[tone] || TONES.on
+      return h('span', {
+        style: {
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          padding: '4px 8px', borderRadius: T.rBadge, boxSizing: 'border-box',
+          fontSize: 9.5, fontWeight: 700, fontFamily: MONO, letterSpacing: '.2px',
+          background: s.bg, color: s.fg,
+          border: `${s.dashed ? '1.5px dashed' : '1px solid'} ${s.bc}`,
+        },
+      }, [
+        dotTone ? dot(dotTone.color, 6, dotTone.hollow) : null,
+        h('span', { key: 't' }, text),
+      ])
+    }
 
     const Btn = ({ label, onClick, variant = 'ghost', disabled, glyph }) => h('button', {
       onClick, disabled: Boolean(disabled), type: 'button',
@@ -111,12 +175,13 @@ window.__ModuleLoader__.load({
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
         padding: '9px 15px', borderRadius: T.rBtn, fontSize: 12.5, fontFamily: FONT,
         cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1,
-        border: variant === 'primary' ? '1px solid transparent' : `1px solid ${T.line}`,
-        background: variant === 'primary'
-          ? `linear-gradient(110deg, ${T.brand}, ${T.brand2})`
-          : variant === 'danger' ? '#FFF3F3' : T.card,
-        color: variant === 'primary' ? '#FFFFFF' : variant === 'danger' ? T.danger : T.ink,
-        boxShadow: variant === 'primary' ? '0 5px 14px rgba(75,92,246,.22)' : 'none',
+        // 单色稿：主按钮 = 黑底白字（无渐变、无彩色外发光）；
+        // danger 不再是红底，而是「白底 + 近黑虚线框」—— 与手机端 dangerDrawable 同一语义。
+        border: variant === 'primary' ? `1px solid ${T.brand}`
+          : variant === 'danger' ? `1.5px dashed ${T.ink}` : `1px solid ${T.line}`,
+        background: variant === 'primary' ? T.brand : T.card,
+        color: variant === 'primary' ? '#FFFFFF' : T.ink,
+        boxShadow: 'none',
       },
     }, [glyph ? h('span', { key: 'i', style: { display: 'inline-flex' } }, icon(glyph, 14)) : null,
         h('span', { key: 't' }, label)])
@@ -186,18 +251,21 @@ window.__ModuleLoader__.load({
         h('div', { key: 'h', style: { fontSize: 10.5, color: T.ink3, marginTop: 3, lineHeight: 1.55 } }, hint),
       ]),
       h('span', { key: 's', style: { display: 'inline-flex', alignItems: 'center', gap: 5,
-        fontSize: 10.5, color: on ? T.mint : T.ink3 } }, [dot(on ? T.mint : '#C6CCD9', 6), on ? '已开启' : '未开启']),
+        fontSize: 10.5, color: on ? T.on : T.ink3 } },
+        [dot(on ? T.on : T.off, 6, !on), on ? '已开启' : '未开启']),
       h('span', {
         key: 'p', style: {
           width: 34, height: 19, borderRadius: 10, flex: '0 0 auto',
-          background: on ? `linear-gradient(110deg, ${T.brand}, ${T.brand2})` : '#DDE2EC',
+          boxSizing: 'border-box',
+          background: on ? T.on : T.subtle,
+          border: `1px solid ${on ? T.on : T.lineStrong}`,
           position: 'relative',
         },
       }, h('span', {
         style: {
-          position: 'absolute', top: 2, width: 15, height: 15, borderRadius: '50%',
-          background: '#FFFFFF', left: on ? 17 : 2,
-          boxShadow: '0 1px 3px rgba(28,38,80,.18)',
+          position: 'absolute', top: 1, width: 15, height: 15, borderRadius: '50%',
+          background: '#FFFFFF', left: on ? 16 : 1,
+          border: `1px solid ${on ? 'transparent' : T.lineStrong}`,
         },
       })),
     ])
@@ -209,13 +277,16 @@ window.__ModuleLoader__.load({
       return h('div', {
         'data-wbsync': 'pair-overlay',
         style: {
-          position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(21,26,39,.42)',
+          // 遮罩用中性近黑，不用蓝调黑（蓝调会在白底界面上透出一点冷色）
+          position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(24,24,27,.40)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
         },
       }, h('div', {
         style: {
           width: 470, maxWidth: '100%', background: T.card, borderRadius: T.rCard,
-          boxShadow: '0 24px 60px rgba(21,26,39,.22)', padding: 24, fontFamily: FONT,
+          // 单色稿去掉玻璃阴影：浮层靠「1px 近黑边线 + 中性投影」立起来
+          border: `1px solid ${T.rule}`,
+          boxShadow: '0 18px 44px rgba(24,24,27,.16)', padding: 24, fontFamily: FONT,
         },
       }, [
         h('div', { key: 'h', style: { display: 'flex', alignItems: 'center', gap: 8 } }, [
@@ -229,22 +300,36 @@ window.__ModuleLoader__.load({
         ]),
         h('p', { key: 's', style: { margin: '8px 0 18px', fontSize: 11.5, color: T.ink2, lineHeight: 1.65 } },
           '在手机端输入这 6 位配对码，并核对下面这串电脑指纹后再 pin。'),
+        // 设计稿 `.codebox` = **反白块**：配对码是这一屏唯一的关键标识，
+        // 单色体系里只能靠「黑底白字」把它从周围拉开，不能靠颜色。
+        // label / code / TTL 三层都塞进这个块里（原来是浅灰底 + TTL 挂在块外）。
         h('div', {
           key: 'code', style: {
-            padding: '18px 12px', borderRadius: 12, background: T.soft, textAlign: 'center',
-            fontSize: 34, letterSpacing: 10, fontWeight: 700, fontFamily: MONO, color: T.brand,
+            background: T.ink, borderRadius: T.rCard, padding: '16px 14px 18px',
+            textAlign: 'center', color: '#FFFFFF',
           },
-        }, String(pairing?.code ?? '------')),
-        pairing?.expiresIn ? h('div', {
-          key: 'ttl', style: { marginTop: 10, textAlign: 'center', fontSize: 11, color: T.ink3 },
-        }, `${pairing.expiresIn} 秒内有效 · 10 分钟 TTL`) : null,
+        }, [
+          h('div', {
+            key: 'l', style: { fontSize: 10, opacity: .75, letterSpacing: '.5px', fontFamily: MONO },
+          }, '配对码'),
+          h('div', {
+            key: 'v', style: {
+              fontSize: 38, fontWeight: 700, letterSpacing: 8, marginTop: 6, fontFamily: MONO,
+            },
+          }, String(pairing?.code ?? '------')),
+          pairing?.expiresIn ? h('div', {
+            key: 't', style: { fontSize: 10.5, opacity: .8, marginTop: 7, fontFamily: MONO },
+          }, `${pairing.expiresIn} 秒内有效 · 10 分钟 TTL`) : null,
+        ]),
         h('div', {
           key: 'fp', style: {
             marginTop: 18, padding: '12px 14px', borderRadius: 12,
             border: `1px solid ${T.line}`, background: T.card,
           },
         }, [
-          h('div', { key: 'l', style: { fontSize: 10.5, color: T.ink3 } }, '本机指纹（手机端核对这一串）'),
+          h('div', {
+            key: 'l', style: { fontSize: 9.5, color: T.ink3, fontWeight: 700, letterSpacing: '.4px' },
+          }, '本机指纹（手机端核对这一串）'),
           h('div', { key: 'v', style: { marginTop: 6, fontSize: 14, fontFamily: MONO,
             letterSpacing: 1.5, color: T.ink } }, fp || '由电脑端配对页显示'),
         ]),
@@ -316,7 +401,6 @@ window.__ModuleLoader__.load({
       }
 
       const connected = status?.connected === true
-      const stateColor = connected ? T.mint : (status ? T.ink3 : '#C6CCD9')
       const stateText = connected ? '已连接 Relay' : (status ? '未连接 Relay' : '读取中…')
       const tokenConfigured = Boolean(config && config.hostTokenConfigured)
 
@@ -329,13 +413,14 @@ window.__ModuleLoader__.load({
       }, [
         h('div', { key: 'head', style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 } }, [
           h('h2', { key: 't', style: { margin: 0, fontSize: 22, fontWeight: 700, color: T.ink } }, '手机连接'),
-          h('span', {
-            key: 's', style: {
-              display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 4,
-              padding: '4px 10px', borderRadius: 20, background: T.soft,
-              fontSize: 11, color: T.ink2,
-            },
-          }, [dot(stateColor, 7), stateText]),
+          // 原来是个 20px 胶囊 + 恒实心点。单色稿里状态必须靠形状：
+          // 已连接=实心点+浅灰底实线框；未连接=空心环+虚线框；读取中=更淡的一档。
+          h('span', { key: 's', style: { marginLeft: 4, display: 'inline-flex' } },
+            Tag({
+              text: stateText,
+              tone: connected ? 'on' : (status ? 'warn' : 'off'),
+              dotTone: { color: connected ? T.on : T.off, hollow: !connected },
+            })),
         ]),
         h('p', { key: 'sub', style: { margin: '0 0 20px', fontSize: 11.5, color: T.ink2 } },
           '让这台电脑作为 Host 被手机发现。会话与文件始终留在本机，插件只负责接入与事件转发。'),
@@ -344,7 +429,8 @@ window.__ModuleLoader__.load({
           key: 'err',
           style: {
             margin: '0 0 16px', padding: '10px 14px', borderRadius: 12,
-            background: '#FFF3F3', border: '1px solid #F6D6D7', color: T.danger, fontSize: 11.5,
+            // 单色稿：错误不再用粉红底 + 粉红边，而是「白底 + 1.5px 近黑虚线框 + 近黑文字」
+            background: T.card, border: `1.5px dashed ${T.ink}`, color: T.ink, fontSize: 11.5,
           },
         }, error) : null,
 
