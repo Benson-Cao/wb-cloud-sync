@@ -1,13 +1,20 @@
-# wb-cloud-sync · W1 Spike
+# wb-cloud-sync · DSH 宿主接缝与 Relay 联动
 
 [![gate](https://github.com/Benson-Cao/wb-cloud-sync/actions/workflows/gate.yml/badge.svg)](https://github.com/Benson-Cao/wb-cloud-sync/actions/workflows/gate.yml)
 
-**WB-Cloud-Sync 的 DSH 宿主接缝验证仓库**：https://github.com/Benson-Cao/wb-cloud-sync
+**仓库**：https://github.com/Benson-Cao/wb-cloud-sync
 
-根目录本身就是一个**可直接装进 DSH 的探针 bundle**（`dsh-wb-cloud-sync-spike`），用来在真机上跑 `09_风险登记册.md` R-02 的 P0 门禁三问。
+> **当前状态（2026-11-15，r25 `ae13979`）**：`p1/` 下的 v2.3 P3 实现已代码收口 ——
+> S-8.3 卡片归一化、S-8.5 设备公钥 pin / TOFU 阻断、S-8.4 定时任务按 hostId 分组。
+> 实测 `npm test` 482/482 通过、`npm run gate` PASS（自动项 10/10、快照 CURRENT）、
+> `node scripts/egress-audit.mjs --check` PASS。
+> **发布线尚未启动**：M3 / P4 / GA 未开始，发版检查单未勾选，r25 无 tag / release；
+> 逐项见 [`docs/v2.3/收口差异清单.md`](docs/v2.3/收口差异清单.md) 与 [`CHANGELOG.md`](CHANGELOG.md)。
 
-> ⚠️ **这不是 P1 产品插件**，不会同步任何会话、不连 Relay、不发消息。它只读、只取证、只注册一条状态路由。
-> 完整取证结论与 7 处文档偏差见 [`spike/REPORT.md`](spike/REPORT.md)。
+根目录本身仍是一个**可直接装进 DSH 的 W1 探针 bundle**（`dsh-wb-cloud-sync-spike`），
+用来在真机上跑 `09_风险登记册.md` R-02 的 P0 门禁三问：它只读、只取证、只注册一条状态路由，
+不参与会话同步。下面的安装说明针对的是这个探针 bundle；**P1 产品实现在 `p1/`**，两者不要混为一谈。
+完整取证结论与 7 处文档偏差见 [`spike/REPORT.md`](spike/REPORT.md)。
 
 ---
 

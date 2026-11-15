@@ -1,53 +1,132 @@
 {
   "schema": "wbsync-egress-audit/1",
-  "capturedAt": "2026-11-10T14:45:21.960Z",
+  "capturedAt": "2026-11-15T03:17:32.826Z",
   "scope": "p1",
   "extensions": [
     ".js",
     ".mjs",
     ".html"
   ],
-  "filesScanned": 33,
-  "urlLiterals": 42,
+  "filesScanned": 78,
+  "urlLiterals": 134,
   "hosts": [
     {
       "host": "127.0.0.1",
       "class": "loopback",
-      "count": 34,
+      "count": 78,
       "files": [
+        "p1/client-core/src/carriers/local.js",
+        "p1/client-core/src/carriers/ssh.js",
+        "p1/client-core/test/carriers.test.mjs",
+        "p1/client-core/test/host-switch-e2e.test.mjs",
+        "p1/client-core/test/mux.test.mjs",
+        "p1/client-core/test/session-writes.test.mjs",
         "p1/host-plugin/build-bundle.mjs",
         "p1/host-plugin/test/bundle.test.mjs",
         "p1/host-plugin/test/host-adapters.test.mjs",
         "p1/host-plugin/test/plugin.test.mjs",
+        "p1/host-plugin/test/v23-contract.test.mjs",
         "p1/pwa/test/create.test.mjs",
         "p1/pwa/test/pairing.test.mjs",
         "p1/pwa/test/pwa.test.mjs",
         "p1/relay/run.mjs",
         "p1/relay/src/server.js",
+        "p1/relay/test/approvals.test.mjs",
+        "p1/relay/test/beta-check.test.mjs",
         "p1/relay/test/chaos.test.mjs",
         "p1/relay/test/cp-separation.test.mjs",
+        "p1/relay/test/device-key.test.mjs",
         "p1/relay/test/events.test.mjs",
+        "p1/relay/test/host-switch.test.mjs",
         "p1/relay/test/listen.test.mjs",
+        "p1/relay/test/multi-device.test.mjs",
+        "p1/relay/test/register-negotiation.test.mjs",
         "p1/relay/test/relay.test.mjs",
         "p1/relay/test/security.test.mjs",
         "p1/relay/test/static.test.mjs",
+        "p1/relay/test/ui-proxy.test.mjs",
+        "p1/relay/test/ws-limits.test.mjs",
         "p1/relay/test/ws.test.mjs"
       ]
     },
     {
       "host": "localhost",
       "class": "loopback",
-      "count": 2,
+      "count": 4,
       "files": [
-        "p1/relay/src/server.js"
+        "p1/relay/src/server.js",
+        "p1/relay/test/relay.test.mjs"
+      ]
+    },
+    {
+      "host": "relay.test",
+      "class": "placeholder",
+      "count": 21,
+      "files": [
+        "p1/client-core/test/carriers.test.mjs",
+        "p1/client-core/test/host-switch.test.mjs",
+        "p1/client-core/test/mux.test.mjs",
+        "p1/client-core/test/session-writes.test.mjs",
+        "p1/pwa/test/session-path.test.mjs"
+      ]
+    },
+    {
+      "host": "r.test",
+      "class": "placeholder",
+      "count": 13,
+      "files": [
+        "p1/client-core/test/carriers.test.mjs",
+        "p1/client-core/test/host-switch.test.mjs"
       ]
     },
     {
       "host": "x",
       "class": "placeholder",
-      "count": 3,
+      "count": 6,
       "files": [
+        "p1/pwa/test/pwa.test.mjs",
         "p1/relay/test/static.test.mjs"
+      ]
+    },
+    {
+      "host": "sync.example.com",
+      "class": "placeholder",
+      "count": 2,
+      "files": [
+        "p1/relay/test/relay.test.mjs"
+      ]
+    },
+    {
+      "host": "evil.example",
+      "class": "placeholder",
+      "count": 2,
+      "files": [
+        "p1/relay/test/relay.test.mjs"
+      ]
+    },
+    {
+      "host": "relay",
+      "class": "placeholder",
+      "count": 1,
+      "files": [
+        "p1/pwa/test/schedules.test.mjs"
+      ]
+    },
+    {
+      "host": "mock",
+      "class": "placeholder",
+      "count": 1,
+      "files": [
+        "p1/relay/test/ui-proxy.test.mjs"
+      ]
+    },
+    {
+      "host": "192.168.1.5",
+      "class": "private",
+      "count": 2,
+      "files": [
+        "p1/host-plugin/test/plugin.test.mjs",
+        "p1/relay/test/ui-proxy.test.mjs"
       ]
     },
     {
@@ -57,6 +136,14 @@
       "files": [
         "p1/pwa/src/hmac-sha256.js",
         "p1/pwa/src/pairing.js"
+      ]
+    },
+    {
+      "host": "192.168.0.103",
+      "class": "private",
+      "count": 1,
+      "files": [
+        "p1/host-plugin/test/plugin.test.mjs"
       ]
     },
     {
@@ -91,9 +178,9 @@
       }
     ],
     "external": [],
-    "note": "只覆盖 Relay 进程；DSH 宿主进程组不在审计范围（第三方应用的更新/遥测会干扰结论） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:22:33.009Z 的实测；要刷新请加 --runtime） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:32:44.996Z 的实测；要刷新请加 --runtime） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:45:08.454Z 的实测；要刷新请加 --runtime）",
+    "note": "只覆盖 Relay 进程；DSH 宿主进程组不在审计范围（第三方应用的更新/遥测会干扰结论） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:22:33.009Z 的实测；要刷新请加 --runtime） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:32:44.996Z 的实测；要刷新请加 --runtime） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:45:08.454Z 的实测；要刷新请加 --runtime） （本次只跑了静态档，运行时数字沿用 2026-11-10T14:45:21.960Z 的实测；要刷新请加 --runtime）",
     "carriedOver": true,
-    "measuredAt": "2026-11-10T14:45:08.454Z"
+    "measuredAt": "2026-11-10T14:45:21.960Z"
   },
   "dshGroupObservation": {
     "status": "OBSERVED_EXTERNAL",

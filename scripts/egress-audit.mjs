@@ -20,6 +20,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, extname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { classifyHost } from './egress-classify.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = join(ROOT, 'spike', 'evidence', 'egress-audit.json')
@@ -40,19 +41,13 @@ const walk = (dir, out = []) => {
 // 只捕获主机名，端口不进捕获组：模板串 `http://127.0.0.1:${port}` 不能被截成 `127.0.0.1:`
 const URL_RE = /\b(?:https?|wss?):\/\/([A-Za-z0-9._-]+)/g
 
-/** 归属分类：只有 `external` 需要人确认，其余都是自托管 / 占位。 */
-export const classifyHost = (rawHost) => {
-  const h = String(rawHost).toLowerCase().replace(/:\d+$/, '')
-  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]') return 'loopback'
-  if (h === '0.0.0.0' || h === '::' || h === '[::]') return 'bind-any'
-  if (h.startsWith('fe80:') || h.startsWith('fd') || h.startsWith('fc')) return 'private'   // IPv6 链路本地 / ULA
-  if (/^10\./.test(h) || /^192\.168\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h)) return 'private'
-  if (h === 'host.docker.internal') return 'loopback'
-  if (/(^|\.)example\.(com|org|net)$/.test(h)) return 'placeholder'
-  // 单标签 host（如测试里的相对 URL 基准 `http://x/app/`）无法构成真实域名（真实域名必须有 TLD）
-  if (/^[a-z0-9-]+$/.test(h)) return 'placeholder'
-  return 'external'
-}
+/**
+ * 归属分类已抽到 `./egress-classify.mjs`（纯函数，单测覆盖）。
+ * 保留 re-export，避免以后有调用方依赖本文件导出的 `classifyHost`。
+ * 分类原则：只有 `external` 需要人确认；RFC 6761 / 2606 保留域
+ * （.test / .example / .invalid / .localhost / example.com|org|net）归 placeholder。
+ */
+export { classifyHost }
 
 const files = TARGETS
   .map((t) => join(ROOT, t))
