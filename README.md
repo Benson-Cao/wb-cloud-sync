@@ -4,12 +4,16 @@
 
 **仓库**：https://github.com/Benson-Cao/wb-cloud-sync
 
-> **当前状态（2026-11-15，r25 `ae13979`）**：`p1/` 下的 v2.3 P3 实现已代码收口 ——
+> **当前状态（2026-11-16，r27 `2ad4e10`，bundle 0.2.10）**：`p1/` 下的 v2.3 P3 实现已代码收口 ——
 > S-8.3 卡片归一化、S-8.5 设备公钥 pin / TOFU 阻断、S-8.4 定时任务按 hostId 分组。
+> r26/r27 补上电脑端设置页的单色化与「插件没看到入口」修复：注册 `plugins.row.config`、
+> 侧栏入口改原生几何、写死色值改走宿主 `--dsw-alias-*` 令牌（深浅主题自动跟随），
+> CDP 深浅双主题实测见 `CHANGELOG.md`。
 > 实测 `npm test` 482/482 通过、`npm run gate` PASS（自动项 10/10、快照 CURRENT）、
 > `node scripts/egress-audit.mjs --check` PASS。
-> **发布线尚未启动**：M3 / P4 / GA 未开始，发版检查单未勾选，r25 无 tag / release；
+> **发布线尚未启动**：M3 / P4 / GA 未开始，发版检查单未勾选，r25~r27 无 tag / release；
 > 逐项见 [`docs/v2.3/收口差异清单.md`](docs/v2.3/收口差异清单.md) 与 [`CHANGELOG.md`](CHANGELOG.md)。
+> `SIGN-OFF.md` §零的 263 单测是 2026-11-10 的历史快照，当前数以本段为准。
 
 根目录本身仍是一个**可直接装进 DSH 的 W1 探针 bundle**（`dsh-wb-cloud-sync-spike`），
 用来在真机上跑 `09_风险登记册.md` R-02 的 P0 门禁三问：它只读、只取证、只注册一条状态路由，
