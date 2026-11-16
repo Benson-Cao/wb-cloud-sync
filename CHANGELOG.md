@@ -4,6 +4,54 @@
 
 ---
 
+## [v2.3 UI · r27] · 2026-11-15 · 修「没看到入口」：补 `plugins.row.config` + 换掉写死色值
+
+**纯前端改动，协议字段零变更、后端零改动。** 用户反馈「没看到入口」，实测证实是真缺陷，不是看漏。
+
+### 三处错，逐条
+
+1. **入口放错了 slot。** 上一版只往 `sidebar.footer.action` 塞了一个小条目；
+   而宿主承认的插件入口是 `plugins.row.config`（keyed by `<包名>#<行 id>`），
+   它才会给「插件」页里这一行挂上**「配置」控件**并生成行页面。
+   宿主文档原文：「A row's page exists only while a `plugins.row.config` entry names the row」——
+   不注册，等于用户在 UI 里无路可走。现在 `key = 'dsh-wb-cloud-sync#wb-cloud-sync'`
+   （行 id 来自 `cordis.patch.yml` 的 `insert[0].id`，不是包名；`dsh-nas-sync` 就是 `id: nas-sync`）。
+2. **颜色写死，深色主题下自我隐身。** 上次单色化把 `brand` 塌成 `#18181B`，
+   深色侧栏上「近黑点压近黑底」+ `opacity: .75` + 11px，等于看不见。
+   现在全部改走宿主 `--dsw-alias-*` 令牌（`label-primary/secondary/tertiary/caption`、
+   `bg-base`、`bg-layer-1/2/3`、`border-l2/l3`、`brand-primary`、
+   `button-contrast-fill` + `label-primary-inverted` 这一对做反白块）。
+   宿主按 `body[data-ds-dark-theme]` 整组换值，引用变量即自动跟随，**切主题即时生效不用重载**。
+3. **几何不合规。** footer action 的原生规格是 36px 高 / 8px 内缩 / 6px 图标-文字间距 / 14px 字号，
+   且宿主会传 `wide` 告诉侧栏是否展开（窄栏只留图标位，36px 见方）。
+   上一版的 11px + `opacity .75` 完全不在规范内；现在按 `ds-harness-remote`（同版本唯一跑通的同类插件）对齐。
+
+### 落地
+
+- 新增 `plugins.row.config` 注册 → 插件页 → `dsh-wb-cloud-sync` → 组件行出现 **「配置」** 控件 → 打开行页面
+  （`data-wbsync="settings-page"`，`embedded` 模式不重复画标题，因为宿主自己画标题/图标/面包屑）。
+- `summary` 档返回 `null`：本包有 `description`，宿主已把描述画在标题下，再补一行状态会和正文状态标签重复
+  （实测出现过两行都写「未连接 Relay」）。
+- 侧栏 footer 入口改为原生几何按钮（`wide` 时显示「云同步」文字，窄栏只留点），
+  点击开**浮层**；浮层用 `react-dom` 的 `createPortal` 挂到 `body`（侧栏可能有 transform 祖先会把 fixed 拽偏），
+  拿不到 `react-dom` 就退回就地渲染。加 `max-height: calc(100vh - 96px)` + 头部 sticky。
+- 新增注入式 `<style>`（`wbsync-client-style`）：内联 style 写不了 `:hover` / `:focus-visible`，
+  而没有 hover 反馈的侧栏条目会被当成静态文字。
+
+### 实测证据（CDP，`--remote-debugging-port=9333`）
+
+| 项 | 深色 | 浅色 |
+|---|---|---|
+| 侧栏入口文字色 | `rgb(207,211,214)` | `rgb(97,102,107)` |
+| 侧栏入口尺寸 | 71×36，14px，opacity 1 | 同 |
+| 卡片底色 | `rgb(44,44,46)` | `rgb(255,255,255)` |
+| 行页面 | 899×695，`data-wbsync="settings-page"` 命中 | 同 |
+| 浮层 | 760×726，`parentElement === body` | 同 |
+
+另外确认：**改 `client.js` 后只需重载渲染进程，不必重启 DSH**（宿主从 node_modules 现读，未缓存）。
+
+---
+
 ## [v2.3 UI · r26] · 2026-11-15 · 设置页与配对浮层换成「原装黑白单色」
 
 **纯视觉改动，协议字段零变更、后端零改动。** 但**需要重启 DSH 才会生效**（`dsh.client` 是加载时求值的）。

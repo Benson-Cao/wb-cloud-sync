@@ -1,15 +1,27 @@
 /**
  * WB-Cloud-Sync · PC 桌面设置页（v2.3 / D-005）
  * ---------------------------------------------------------------
- * 视觉改版 2026-11-15：参考「WB-Sync_两端UI_原装黑白单色_设计稿」mono/pc.html
+ * 视觉：参考「WB-Sync_两端UI_原装黑白单色_设计稿」mono/pc.html
  * 的 02 插件设置 / 03 配对码浮层，落地与手机端原生页同一套中性 token
- * （零彩度灰阶、主按钮黑底白字、12/8/4 三级圆角、状态靠实心/空心/虚线区分）。
+ * （零彩度灰阶、主按钮反白块、12/8/4 三级圆角、状态靠实心/空心/虚线区分）。
  * 上一版按社区「DeepSeek 官网风」彩色稿做过一次（品牌 #4B5CF6、薄荷 #16B394），
  * 那是判断失误 —— 官方 `dsh web` 本身近黑近白，壳层再上彩色会在切换主题时打架。
  *
  * 形态不变（13 §1）：`dsh.client` 半边**只做桌面设置页**，不托管 UI 资源、
  * 不渲染会话列表 / 对话 / 审批 / 镜像面板。手机界面由官方 `dsh web` 提供。
  * 设置页与插件同源，直接读 `/__wbsync/status` 与 `/__wbsync/config`（已脱敏）。
+ *
+ * ⚠️ 入口位置（2026-11-15 修正，用户反馈「没看到入口」）
+ * ---------------------------------------------------------------
+ * 上一版只往 `sidebar.footer.action` 塞了一个 11px、opacity .75、颜色写死 #18181B
+ * 的小条目。同时犯了两处错：
+ *   1. **位置不对** —— 用户在「插件」页看 dsh-wb-cloud-sync 这一行，那里才是宿主
+ *      承认的入口位。`plugins.row.config`（keyed by `<包名>#<行 id>`）会给该行一个
+ *      「设置」控件并生成独立行页面，这才是官方入口。行页面**只在该 slot 命名了
+ *      这一行时才存在**，不注册就等于没有页面。
+ *   2. **颜色写死** —— 深色主题下 #18181B 的点压在近黑侧栏上，等于自我隐身。
+ *      现在全部改走宿主 `--dsw-alias-*` 令牌；宿主按 `body[data-ds-dark-theme]`
+ *      换一遍令牌值，引用变量即自动跟随深浅色。
  *
  * 视觉稿与运行契约的取舍（不造假交互）：
  *   - 设计稿的两个开关在 v2.3 后端没有写接口 → 做成**只读状态指示**，
@@ -32,41 +44,70 @@ window.__ModuleLoader__.load({
     const h = React.createElement
     const { useState, useEffect, useCallback } = React
 
-    const PANEL_ID = 'wbsync-settings'
-    const ACTION_ID = 'wbsync-settings-action'
+    // react-dom 只用来把浮层 portal 到 body（侧栏里可能有 transform 祖先，
+    // 单靠 position:fixed 会被拽到错误位置）。拿不到就退回就地渲染，不报错。
+    let createPortal = null
+    try {
+      const RD = require('react-dom')
+      if (RD && typeof RD.createPortal === 'function') createPortal = RD.createPortal
+    } catch { /* 没有 react-dom 就直接渲染 */ }
 
-    // ---------- 设计系统（与手机端原生页共用同一套中性 token）----------
+    // `<包名>#<行 id>`。行 id 来自 cordis.patch.yml 的 insert[0].id = wb-cloud-sync，
+    // 包名来自 package.json = dsh-wb-cloud-sync。写错任何一个，宿主都不会把
+    // 「设置」控件挂到 dsh-wb-cloud-sync 那一行上。
+    const ROW_KEY = 'dsh-wb-cloud-sync#wb-cloud-sync'
+    const ACTION_ID = 'wbsync-settings-action'
+    const STYLE_ID = 'wbsync-client-style'
+
+    // ---------- 设计系统（与手机端原生页共用同一套中性语汇）----------
     //
-    // 2026-11-15 第二次改版：上一版参照的是社区「DeepSeek 官网风」彩色稿
-    // （品牌 #4B5CF6 / 薄荷 #16B394 / 琥珀 #E09616），这是**判断错了**——
-    // DSH 自带的 `dsh web` 本身就是近黑近白，壳层再上彩色会在用户切换主题时打架。
-    // 现在全部收敛到零彩度灰阶，与 mono 设计稿 `--dsw-*` 数值逐项对齐。
+    // 两条纪律：
+    //   1. **零彩度**：DSH 自带的 dsh web 是近黑近白，壳层上彩色会在切主题时打架。
+    //   2. **不写死色值**：全部走宿主 `--dsw-alias-*` 令牌。这是上一版踩的坑 ——
+    //      写死 #18181B 后，深色主题下侧栏入口成了近黑点压近黑底，用户看不见。
     //
-    // 旧语义名（brand / mint / amber / danger）**故意保留**：本文件有 50 处调用点
-    // 读的是语义而不是色相，改名只会制造 diff 噪音。它们现在全部指向灰阶，
-    // 任何一处漏改都不会再冒彩。
+    // 令牌的深浅色对照（来自宿主 app.asar 里 `body` / `body[data-ds-dark-theme]`
+    // 两段声明，2026-11-15 实测）：
+    //   label-primary     浅=近黑   深=近白
+    //   label-secondary   浅=#52525B 深=中性 300
+    //   label-tertiary    浅=中性600 深=中性400
+    //   label-caption     浅=中性400 深=中性600
+    //   bg-base           浅=白      深=近黑
+    //   bg-layer-1/2/3    浅=白      深=875/850/800 三档
+    //   border-l1/2/3     浅=黑alpha 深=白alpha
+    //   button-contrast-fill + label-primary-inverted = 「反白块」成对令牌，自动反转
+    const v = (name, fallback) => `var(--dsw-alias-${name}, ${fallback})`
+    // 半透明叠色：不绑具体底色，浅色下压深、深色下提亮
+    const tint = (pct) => `color-mix(in srgb, var(--dsw-alias-label-primary, #18181B) ${pct}%, transparent)`
+
     const T = {
-      brand: '#18181B',
-      brand2: '#18181B',
-      mint: '#18181B',
-      amber: '#3F3F46',
-      danger: '#18181B',
-      ink: '#18181B',
-      ink2: '#52525B',
-      ink3: '#8B8B93',
-      faint: '#A1A1AA',
-      card: '#FFFFFF',
-      canvas: '#FFFFFF',
-      subtle: '#F4F4F5',
-      soft: '#F4F4F5',
-      soft2: '#FAFAFA',
-      line: '#E4E4E7',
-      lineStrong: '#D4D4D8',
-      rule: '#C9C9CE',
+      // 旧语义名（brand / mint / amber / danger）**故意保留**：本文件几十处调用点
+      // 读的是语义而不是色相，改名只会制造 diff 噪音。它们现在全部指向令牌。
+      brand: v('brand-primary', '#18181B'),
+      brand2: v('brand-primary', '#18181B'),
+      mint: v('brand-primary', '#18181B'),
+      amber: v('label-secondary', '#3F3F46'),
+      danger: v('label-primary', '#18181B'),
+      ink: v('label-primary', '#18181B'),
+      ink2: v('label-secondary', '#52525B'),
+      ink3: v('label-tertiary', '#6B6B75'),
+      faint: v('label-caption', '#A1A1AA'),
+      card: v('bg-layer-2', '#FFFFFF'),
+      canvas: v('bg-base', '#FFFFFF'),
+      subtle: tint(6),
+      soft: tint(6),
+      soft2: tint(3),
+      line: v('border-l2', '#E4E4E7'),
+      lineStrong: v('border-l3', '#D4D4D8'),
+      rule: v('border-l3', '#C9C9CE'),
       // 状态三档：实心 / 空心 / 更淡的空心（靠形状区分，不靠颜色）
-      on: '#18181B',
-      wait: '#52525B',
-      off: '#B5B5BA',
+      on: v('label-primary', '#18181B'),
+      wait: v('label-secondary', '#52525B'),
+      off: v('label-caption', '#B5B5BA'),
+      // 反白块：浅色=近黑底白字，深色=近白底近黑字
+      invertBg: v('button-contrast-fill', '#18181B'),
+      invertFg: v('label-primary-inverted', '#FFFFFF'),
+      hover: v('interactive-bg-hover', 'rgba(24,24,27,.06)'),
       // 单色体系里「阴影」只剩边线语义，真投影会把白底压出脏灰
       shadow: 'none',
       rCard: 12,
@@ -77,6 +118,63 @@ window.__ModuleLoader__.load({
     }
     const FONT = 'WenQuanYi Micro Hei, system-ui, -apple-system, sans-serif'
     const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace'
+
+    /**
+     * 类样式只能靠注入 <style>：内联 style 写不了 :hover / :focus-visible，
+     * 而侧栏入口没有 hover 反馈会被当成静态文字（正是上一版「看不见」的一半原因）。
+     *
+     * 几何按宿主原生 footer 行对齐（36px 高 / 8px 内缩 / 6px 图标-文字间距 /
+     * 14px 字号），参考同版本里已跑通的 ds-harness-remote：
+     * “Match native workspace rows: 8px inset, 16px icon slot and 6px label gap.”
+     */
+    const CSS = `
+.wbsEntry{box-sizing:border-box;display:flex;align-items:center;min-width:0}
+.wbsEntryBtn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:36px;min-height:36px;min-width:36px;max-width:100%;padding:0 8px;border:0;border-radius:8px;
+  background:transparent;color:var(--dsw-alias-label-secondary,#52525B);
+  font:inherit;font-size:14px;line-height:20px;cursor:pointer;text-align:start}
+.wbsEntryBtn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(24,24,27,.06));
+  color:var(--dsw-alias-label-primary,#18181B)}
+.wbsEntryBtn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#18181B);outline-offset:-2px}
+.wbsEntryDot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.wbsEntryLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wbsEntryBtn:not(.isWide){width:36px;padding:0}
+.wbsEntryBtn:not(.isWide) .wbsEntryLabel{display:none}
+.wbsEntryBtn.isOn .wbsEntryDot{background:var(--dsw-alias-brand-primary,#18181B)}
+.wbsBackdrop{position:fixed;inset:0;z-index:9998;background:var(--dsw-alias-bg-mask-3,rgba(24,24,27,.5));
+  display:flex;align-items:flex-start;justify-content:center;padding:48px 20px;overflow:auto;
+  font-family:${FONT}}
+.wbsDialog{box-sizing:border-box;width:760px;max-width:100%;background:var(--dsw-alias-bg-layer-1,#FFF);
+  border:1px solid var(--dsw-alias-border-l3,#C9C9CE);border-radius:12px;padding:0;
+  max-height:calc(100vh - 96px);overflow:auto;
+  box-shadow:0 18px 44px rgba(24,24,27,.18)}
+.wbsDialogBar{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:10px;padding:14px 20px;
+  border-bottom:1px solid var(--dsw-alias-border-l2,#E4E4E7);background:var(--dsw-alias-bg-layer-1,#FFF)}
+.wbsDialogBar strong{font-size:14px;color:var(--dsw-alias-label-primary,#18181B)}
+.wbsDialogX{margin-inline-start:auto;width:28px;height:28px;border:0;border-radius:7px;
+  background:transparent;color:var(--dsw-alias-label-secondary,#52525B);font-size:18px;
+  line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.wbsDialogX:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(24,24,27,.06));
+  color:var(--dsw-alias-label-primary,#18181B)}
+.wbsMini:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(24,24,27,.06));
+  color:var(--dsw-alias-label-primary,#18181B)}
+.wbsBtn:hover:not(:disabled){border-color:var(--dsw-alias-border-l3,#C9C9CE)}
+.wbsBtn.wbsBtn-primary:hover:not(:disabled),.wbsBtn.wbsBtn-danger:hover:not(:disabled){
+  opacity:.88}
+.wbsBtn:focus-visible,.wbsMini:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#18181B);
+  outline-offset:1px}
+`
+
+    let styleInstalled = false
+    function installStyle() {
+      if (styleInstalled || typeof document === 'undefined') return () => {}
+      styleInstalled = true
+      const el = document.createElement('style')
+      el.id = STYLE_ID
+      el.textContent = CSS
+      document.head.appendChild(el)
+      return () => { el.remove(); styleInstalled = false }
+    }
 
     // ---------- 网络：只走同源 /__wbsync/* ----------
 
@@ -139,9 +237,9 @@ window.__ModuleLoader__.load({
      * <p>设计稿把「状态」编码进**形状**，不靠颜色：
      * <ul>
      *   <li>{@code on} —— 浅灰底 + 实线描边（在线 / 已完成）</li>
-     *   <li>{@code off} —— 更淡的底 + **虚线**描边（离线 / 未开启）</li>
-     *   <li>{@code warn} —— 白底 + **虚线**描边（待处理）</li>
-     *   <li>{@code invert} —— 黑底白字（关键标识 / 当前选中）</li>
+     *   <li>{@code off} —— 透明底 + **虚线**描边（离线 / 未开启）</li>
+     *   <li>{@code warn} —— 卡片底 + **虚线**描边（待处理）</li>
+     *   <li>{@code invert} —— 反白块（关键标识 / 当前选中）</li>
      * </ul>
      * 统一 4px 圆角（{@code --dsw-radius-badge}）。**不是胶囊** —— 20px 胶囊是上一版
      * 彩色稿的语汇，在单色体系里会和「反白块」抢语义。
@@ -150,16 +248,16 @@ window.__ModuleLoader__.load({
     const Tag = ({ text, tone = 'on', dotTone }) => {
       const TONES = {
         on: { bg: T.subtle, fg: T.ink, bc: T.lineStrong, dashed: false },
-        off: { bg: T.soft2, fg: T.ink3, bc: T.line, dashed: true },
+        off: { bg: 'transparent', fg: T.ink3, bc: T.line, dashed: true },
         warn: { bg: T.card, fg: T.ink2, bc: T.faint, dashed: true },
-        invert: { bg: T.ink, fg: '#FFFFFF', bc: T.ink, dashed: false },
+        invert: { bg: T.invertBg, fg: T.invertFg, bc: T.invertBg, dashed: false },
       }
       const s = TONES[tone] || TONES.on
       return h('span', {
         style: {
           display: 'inline-flex', alignItems: 'center', gap: 5,
           padding: '4px 8px', borderRadius: T.rBadge, boxSizing: 'border-box',
-          fontSize: 9.5, fontWeight: 700, fontFamily: MONO, letterSpacing: '.2px',
+          fontSize: 10, fontWeight: 700, fontFamily: MONO, letterSpacing: '.2px',
           background: s.bg, color: s.fg,
           border: `${s.dashed ? '1.5px dashed' : '1px solid'} ${s.bc}`,
         },
@@ -171,23 +269,24 @@ window.__ModuleLoader__.load({
 
     const Btn = ({ label, onClick, variant = 'ghost', disabled, glyph }) => h('button', {
       onClick, disabled: Boolean(disabled), type: 'button',
+      className: `wbsBtn wbsBtn-${variant}`,
       style: {
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
         padding: '9px 15px', borderRadius: T.rBtn, fontSize: 12.5, fontFamily: FONT,
         cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.5 : 1,
-        // 单色稿：主按钮 = 黑底白字（无渐变、无彩色外发光）；
-        // danger 不再是红底，而是「白底 + 近黑虚线框」—— 与手机端 dangerDrawable 同一语义。
-        border: variant === 'primary' ? `1px solid ${T.brand}`
+        // 单色稿：主按钮 = 反白块（浅色黑底白字 / 深色白底黑字，成对令牌自动反转）；
+        // danger 不再是红底，而是「卡片底 + 近黑虚线框」—— 与手机端 dangerDrawable 同一语义。
+        border: variant === 'primary' ? `1px solid ${T.invertBg}`
           : variant === 'danger' ? `1.5px dashed ${T.ink}` : `1px solid ${T.line}`,
-        background: variant === 'primary' ? T.brand : T.card,
-        color: variant === 'primary' ? '#FFFFFF' : T.ink,
+        background: variant === 'primary' ? T.invertBg : T.card,
+        color: variant === 'primary' ? T.invertFg : T.ink,
         boxShadow: 'none',
       },
     }, [glyph ? h('span', { key: 'i', style: { display: 'inline-flex' } }, icon(glyph, 14)) : null,
         h('span', { key: 't' }, label)])
 
     const MiniBtn = ({ label, onClick, glyph }) => h('button', {
-      onClick, type: 'button', title: label,
+      onClick, type: 'button', title: label, className: 'wbsMini',
       style: {
         display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 9px',
         borderRadius: T.rInput, border: `1px solid ${T.line}`, background: T.card,
@@ -264,7 +363,7 @@ window.__ModuleLoader__.load({
       }, h('span', {
         style: {
           position: 'absolute', top: 1, width: 15, height: 15, borderRadius: '50%',
-          background: '#FFFFFF', left: on ? 16 : 1,
+          background: T.canvas, left: on ? 16 : 1,
           border: `1px solid ${on ? 'transparent' : T.lineStrong}`,
         },
       })),
@@ -278,7 +377,7 @@ window.__ModuleLoader__.load({
         'data-wbsync': 'pair-overlay',
         style: {
           // 遮罩用中性近黑，不用蓝调黑（蓝调会在白底界面上透出一点冷色）
-          position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(24,24,27,.40)',
+          position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(24,24,27,.45)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
         },
       }, h('div', {
@@ -286,7 +385,7 @@ window.__ModuleLoader__.load({
           width: 470, maxWidth: '100%', background: T.card, borderRadius: T.rCard,
           // 单色稿去掉玻璃阴影：浮层靠「1px 近黑边线 + 中性投影」立起来
           border: `1px solid ${T.rule}`,
-          boxShadow: '0 18px 44px rgba(24,24,27,.16)', padding: 24, fontFamily: FONT,
+          boxShadow: '0 18px 44px rgba(24,24,27,.18)', padding: 24, fontFamily: FONT,
         },
       }, [
         h('div', { key: 'h', style: { display: 'flex', alignItems: 'center', gap: 8 } }, [
@@ -301,12 +400,12 @@ window.__ModuleLoader__.load({
         h('p', { key: 's', style: { margin: '8px 0 18px', fontSize: 11.5, color: T.ink2, lineHeight: 1.65 } },
           '在手机端输入这 6 位配对码，并核对下面这串电脑指纹后再 pin。'),
         // 设计稿 `.codebox` = **反白块**：配对码是这一屏唯一的关键标识，
-        // 单色体系里只能靠「黑底白字」把它从周围拉开，不能靠颜色。
+        // 单色体系里只能靠「反白」把它从周围拉开，不能靠颜色。
         // label / code / TTL 三层都塞进这个块里（原来是浅灰底 + TTL 挂在块外）。
         h('div', {
           key: 'code', style: {
-            background: T.ink, borderRadius: T.rCard, padding: '16px 14px 18px',
-            textAlign: 'center', color: '#FFFFFF',
+            background: T.invertBg, borderRadius: T.rCard, padding: '16px 14px 18px',
+            textAlign: 'center', color: T.invertFg,
           },
         }, [
           h('div', {
@@ -339,8 +438,13 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- 设置面板 ----------
+    //
+    // `embedded` 用来区分两个宿主场合：
+    //   - 行页面（plugins.row.config → view:'page'）：宿主**自己**画标题/图标/面包屑，
+    //     所以这里不再渲染 <h2>，也不加外层 26px 内边距，否则会出现两个标题。
+    //   - 浮层（侧栏入口点开）：自己要有标题栏，所以 padding 与 maxWidth 都打开。
 
-    function SettingsPanel() {
+    function SettingsBody({ embedded }) {
       const [status, setStatus] = useState(null)
       const [config, setConfig] = useState(null)
       const [error, setError] = useState(null)
@@ -405,17 +509,20 @@ window.__ModuleLoader__.load({
       const tokenConfigured = Boolean(config && config.hostTokenConfigured)
 
       return h('div', {
-        'data-wbsync': 'settings-panel',
+        'data-wbsync': embedded ? 'settings-page' : 'settings-panel',
         style: {
-          padding: '26px 28px 32px', maxWidth: 900, fontFamily: FONT,
+          padding: embedded ? '0 0 6px' : '26px 28px 32px',
+          maxWidth: 900, fontFamily: FONT,
           color: T.ink, fontSize: 12.5, lineHeight: 1.65,
         },
       }, [
         h('div', { key: 'head', style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 } }, [
-          h('h2', { key: 't', style: { margin: 0, fontSize: 22, fontWeight: 700, color: T.ink } }, '手机连接'),
+          // 行页面模式下宿主已画标题，这里只留状态标签
+          embedded ? null
+            : h('h2', { key: 't', style: { margin: 0, fontSize: 22, fontWeight: 700, color: T.ink } }, '手机连接'),
           // 原来是个 20px 胶囊 + 恒实心点。单色稿里状态必须靠形状：
-          // 已连接=实心点+浅灰底实线框；未连接=空心环+虚线框；读取中=更淡的一档。
-          h('span', { key: 's', style: { marginLeft: 4, display: 'inline-flex' } },
+          // 已连接=实心点+实底实线框；未连接=空心环+虚线框；读取中=更淡的一档。
+          h('span', { key: 's', style: { marginLeft: embedded ? 0 : 4, display: 'inline-flex' } },
             Tag({
               text: stateText,
               tone: connected ? 'on' : (status ? 'warn' : 'off'),
@@ -429,7 +536,7 @@ window.__ModuleLoader__.load({
           key: 'err',
           style: {
             margin: '0 0 16px', padding: '10px 14px', borderRadius: 12,
-            // 单色稿：错误不再用粉红底 + 粉红边，而是「白底 + 1.5px 近黑虚线框 + 近黑文字」
+            // 单色稿：错误不再用粉红底 + 粉红边，而是「卡片底 + 1.5px 近黑虚线框 + 正文色文字」
             background: T.card, border: `1.5px dashed ${T.ink}`, color: T.ink, fontSize: 11.5,
           },
         }, error) : null,
@@ -490,7 +597,8 @@ window.__ModuleLoader__.load({
             background: T.card, border: `1px solid ${T.line}`, boxShadow: T.shadow,
           },
         }, [
-          h('div', { key: 't', style: { fontSize: 12, fontWeight: 600, marginBottom: 8 } }, '连接诊断 · 同源状态快照'),
+          h('div', { key: 't', style: { fontSize: 12, fontWeight: 600, marginBottom: 8, color: T.ink } },
+            '连接诊断 · 同源状态快照'),
           h('pre', { key: 'p', style: {
             margin: 0, fontSize: 10.5, fontFamily: MONO, color: T.ink2,
             whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 220, overflow: 'auto',
@@ -515,21 +623,95 @@ window.__ModuleLoader__.load({
       ])
     }
 
-    /** 侧栏底部入口：只渲染图标与文字，外层 slot 提供按钮语义。 */
-    function SettingsAction() {
-      return h('span', {
-        title: 'WB-Cloud-Sync 设置',
-        'data-wbsync': 'settings-action',
-        style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, opacity: 0.75 },
-      }, [dot(T.brand, 6), h('span', { key: 't' }, '云同步')])
+    /**
+     * 插件行页面（`plugins.row.config`）。
+     *
+     * <p>宿主对这个 slot 的契约（app.asar 内文档原文）：
+     * <blockquote>`plugins.row.config` (keyed by `&lt;package name&gt;#&lt;row id&gt;`) for one
+     * row's configuration, which gives that row a **Configure** control opening the
+     * row's page. The page renders `view: 'page'` for forms with their own save
+     * controls. … a row's detail page uses `summary` view only when its package
+     * description is absent.</blockquote>
+     * 也就是说：注册了这个 slot 插件页那一行才会出现「配置」控件，且**行页面本身
+     * 才存在**；不注册就等于用户在 UI 里无路可走。
+     *
+     * <p>`summary` 一档返回 {@code null}：本包 package.json 有 description，宿主会把
+     * 描述画在标题下，再补一行连接状态就和正文里那个状态标签重复了（实测两行都写着
+     * 「未连接 Relay」，很啰嗦）。
+     */
+    function PluginRowConfig(props) {
+      if (props?.view === 'summary') return null
+      return h(SettingsBody, { embedded: true })
+    }
+
+    /**
+     * 侧栏底部入口（`sidebar.footer.action`）。
+     *
+     * <p>宿主对这个 slot 的两条事实（照着已跑通的 ds-harness-remote 抄）：
+     * <ul>
+     *   <li>slot **不包按钮**，入口元素要自己渲染；</li>
+     *   <li>宿主传 `wide` 告诉侧栏是展开还是窄栏，窄栏只留图标位（36px）。</li>
+     * </ul>
+     * 颜色一律 `currentColor` / 令牌 —— 上一版写死 #18181B，深色主题下点就消失了。
+     */
+    function SettingsAction(props) {
+      const [open, setOpen] = useState(false)
+      const wide = props?.wide !== false
+
+      const entry = h('div', { key: 'e', className: 'wbsEntry' },
+        h('button', {
+          type: 'button',
+          className: `wbsEntryBtn${wide ? ' isWide' : ''}`,
+          title: 'WB 云同步',
+          'aria-label': 'WB 云同步',
+          'data-wbsync': 'settings-action',
+          onClick: () => setOpen(true),
+        }, [
+          h('span', { key: 'd', className: 'wbsEntryDot', 'aria-hidden': 'true' }),
+          h('span', { key: 't', className: 'wbsEntryLabel' }, '云同步'),
+        ]))
+
+      if (!open) return entry
+
+      const overlay = h('div', {
+        key: 'o', className: 'wbsBackdrop', role: 'presentation',
+        onMouseDown: (ev) => { if (ev.target === ev.currentTarget) setOpen(false) },
+      }, h('section', {
+        className: 'wbsDialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'WB 云同步',
+      }, [
+        h('div', { key: 'bar', className: 'wbsDialogBar' }, [
+          h('span', { key: 'i', style: { color: T.brand, display: 'inline-flex' } }, icon('link', 16)),
+          h('strong', { key: 't' }, 'WB 云同步'),
+          h('button', {
+            key: 'x', type: 'button', className: 'wbsDialogX',
+            'aria-label': '关闭', onClick: () => setOpen(false),
+          }, '\u00D7'),
+        ]),
+        h(SettingsBody, { key: 'b', embedded: false }),
+      ]))
+
+      // 侧栏里可能有 transform 祖先，固定定位会被拽偏；能 portal 就 portal 到 body。
+      return h(React.Fragment, null, [
+        entry,
+        createPortal && typeof document !== 'undefined'
+          ? createPortal(overlay, document.body)
+          : overlay,
+      ])
     }
 
     function apply(ctx) {
-      ctx.slots.inject('main', () =>
-        ctx.slots.register({ name: 'main', key: PANEL_ID }, SettingsPanel))
+      const install = () => installStyle()
+      if (typeof ctx.effect === 'function') ctx.effect(install, 'wbsync: client styles')
+      else install()
+
+      // 主入口：插件页 → dsh-wb-cloud-sync 行 → 「设置」。这也是行页面存在的前提。
+      ctx.slots.inject('plugins.row.config', () =>
+        ctx.slots.register({ name: 'plugins.row.config', key: ROW_KEY }, PluginRowConfig))
+
+      // 快捷入口：侧栏底部。order -20 与 ds-harness-remote 一致，排在官方条目之前。
       ctx.slots.inject('sidebar.footer.action', () =>
         ctx.slots.register(
-          { name: 'sidebar.footer.action', id: ACTION_ID, order: 5, label: () => '云同步' },
+          { name: 'sidebar.footer.action', id: ACTION_ID, order: -20, label: () => '云同步' },
           SettingsAction))
     }
 

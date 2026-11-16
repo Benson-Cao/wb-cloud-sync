@@ -2287,11 +2287,101 @@ function __apply(ctx, config = {}) {
     state.reconnectTimer = setTimeout(() => { state.reconnectTimer = null; connect() }, delay)
   }
 
+  /**
+   * 一次性自检：把「宿主主进程里的 WebSocket 到底是什么」钉死（2026-11-15）。
+   *
+   * 已知三条事实并存：①插件用 `fetch` 打同一个 host:port 是通的（配对码就是这么取到的）；
+   * ②同一台机器上用 node CLI 与 `ELECTRON_RUN_AS_NODE` 起同一段注册代码都能拿到
+   * `host/registered`；③DSH 主进程里每次连接都是 `1006`、error 事件不带 message，
+   * 而且 **Relay 侧连一条连接记录都没有**（根本没过 TCP 层以上的东西）。
+   * ③里「Relay 什么都没看见」和「HTTP 能通」只能同时成立在一种情况下：
+   * 主进程里的全局 `WebSocket` 不是那个能正常工作的实现。
+   *
+   * **2026-11-15 实测结论（已定案）**：宿主的 `WebSocket` 是它自己打包的一份 undici，
+   * 会走**环境代理**（`HTTP_PROXY=http://127.0.0.1:54464`，`NO_PROXY` 只含 localhost/127.0.0.1），
+   * 于是发往非回环地址的连接被塞进代理、CONNECT 隧道被拒 → 1006 且不带任何 message；
+   * 而 `fetch` 走同一代理的普通 HTTP 是通的、裸 TCP 直连也是通的 —— 三种表现并存，
+   * 所以「HTTP 通就以为网络没问题」是这里最容易踩的误判。
+   * A/B 证据（`WBSYNC_WS_DIAG=1` 可复现）：127.0.0.1 OPEN，192.168.0.104 与
+   * 100.99.226.70 均 1006。修法是让 Host 连**回环**上的 Relay（Relay 与 Host 同机），
+   * 或把 Relay 主机加进 NO_PROXY。下面这段自检保留，用来在换地址后快速复验。
+   * 这段自检把实现名/源码片段、同地址 HTTP、裸 TCP、以及回环地址上的对照连接
+   * 一起打出来，判断依据全部落日志，不靠猜。
+   */
+  const diagnoseOnce = () => {
+    if (state.wsDiagDone) return
+    state.wsDiagDone = true
+    // 默认关：这三条探测连接在 Relay 侧是真实连接，不该每次启动都发一遍。
+    // 排查时 `WBSYNC_WS_DIAG=1` 起宿主即可复现整套 A/B（回环 / Tailscale / 局域网）。
+    if (process.env.WBSYNC_WS_DIAG !== '1') return
+    const base = String(cfg.relayUrl || '').replace(/\/$/, '')
+    console.log('[wbsync] ws diag', JSON.stringify({
+      electron: process.versions?.electron ?? null,
+      node: process.versions?.node ?? null,
+      wsType: typeof WebSocket,
+      wsName: typeof WebSocket === 'function' ? (WebSocket.name || '(anonymous)') : null,
+      wsSource: typeof WebSocket === 'function' ? String(WebSocket).slice(0, 140) : null,
+      hasPrototypeClose: typeof WebSocket?.prototype?.close,
+    }))
+    void fetch(`${base}/health`)
+      .then((r) => r.text().then((t) => console.log('[wbsync] diag http /health', r.status, t.slice(0, 80))))
+      .catch((e) => console.log('[wbsync] diag http /health FAIL', e?.message ?? e))
+    void import('node:net').then(({ connect: tcp }) => {
+      const u = new URL(base)
+      const s = tcp({ host: u.hostname, port: Number(u.port || 80) })
+      s.setTimeout(3000)
+      s.once('connect', () => { console.log('[wbsync] diag tcp ok', u.hostname, u.port); s.destroy() })
+      s.once('timeout', () => { console.log('[wbsync] diag tcp TIMEOUT', u.hostname); s.destroy() })
+      s.once('error', (e) => console.log('[wbsync] diag tcp FAIL', e?.code ?? e?.message))
+    }).catch((e) => console.log('[wbsync] diag tcp import FAIL', e?.message))
+    // 代理变量：本机环境里 http(s)_proxy 是全局设置的。若宿主的 WS 实现挂的是
+    // 「吃环境变量的 dispatcher」，那么非回环地址会被塞进代理、CONNECT 隧道被拒，
+    // 而回环地址通常被 no_proxy 放行 —— 正好解释「127.0.0.1 能开、Tailscale IP 1006」。
+    console.log('[wbsync] diag proxy env', JSON.stringify({
+      HTTP_PROXY: process.env.HTTP_PROXY ?? null,
+      http_proxy: process.env.http_proxy ?? null,
+      HTTPS_PROXY: process.env.HTTPS_PROXY ?? null,
+      ALL_PROXY: process.env.ALL_PROXY ?? null,
+      NO_PROXY: process.env.NO_PROXY ?? null,
+      no_proxy: process.env.no_proxy ?? null,
+      NODE_USE_ENV_PROXY: process.env.NODE_USE_ENV_PROXY ?? null,
+    }))
+    /** 逐个地址试一次 WS（只连不注册），用同一份实现做 A/B。 */
+    const probeWs = (label, url) => {
+      try {
+        const alt = new WebSocket(url)
+        alt.addEventListener('open', () => { console.log('[wbsync] diag ws OPEN', label, url); try { alt.close() } catch { } })
+        alt.addEventListener('error', (e) => console.log('[wbsync] diag ws ERROR', label, e?.error?.message ?? null))
+        alt.addEventListener('close', (e) => console.log('[wbsync] diag ws close', label, e?.code))
+      } catch (e) {
+        console.log('[wbsync] diag ws THROW', label, e?.message ?? e)
+      }
+    }
+    {
+      const u = new URL(base)
+      const port = u.port || '8899'
+      probeWs('loopback', `ws://127.0.0.1:${port}/ws/host`)
+      probeWs('tailscale', `ws://100.99.226.70:${port}/ws/host`)
+      probeWs('lan', `ws://192.168.0.104:${port}/ws/host`)
+    }
+  }
+
   const connect = () => {
     if (state.stopped || state.hostMismatch || !cfg.relayUrl || !cfg.deviceId) return
     let ws
-    try { ws = new WebSocket(`${toWsUrl(cfg.relayUrl)}/ws/host`) }
-    catch { return scheduleReconnect() }
+    diagnoseOnce()
+    // ⚠ 这里原来是一行 `try { new WebSocket(...) } catch { return scheduleReconnect() }`：
+    // 宿主运行时若没有全局 WebSocket（Electron 主进程常见），它抛 ReferenceError 被 catch 吃掉，
+    // 外部只看到 reconnects 一直涨、connected 永远 false —— 2026-11-15 排查配对时就卡在这里。
+    // 现在把原因记下来并进 /status（lastConnectError），不再静默。
+    if (typeof WebSocket !== 'function') {
+      state.lastConnectError = 'runtime has no global WebSocket (typeof WebSocket !== function)'
+      return scheduleReconnect()
+    }
+    const wsUrl = `${toWsUrl(cfg.relayUrl)}/ws/host`
+    try { ws = new WebSocket(wsUrl) }
+    catch (e) { state.lastConnectError = `new WebSocket failed: ${e?.message ?? e}`; return scheduleReconnect() }
+    console.log('[wbsync] ws connect ->', wsUrl, 'attempt=', state.attempts)
     state.ws = ws
 
     ws.addEventListener('open', () => {
@@ -2320,6 +2410,9 @@ function __apply(ctx, config = {}) {
       try { msg = JSON.parse(String(event.data)) } catch { return }
       if (msg.t === 'host/registered') {
         state.connected = true
+        state.lastConnectError = null
+        state.lastCloseInfo = null   // 注册成功即清掉上一次的失败残影，避免误读旧原因
+        state.lastWsError = null
         // 重连后 Relay/CP 可能已重建：清空增量基线，重新发一份 full 快照
         collectIndex?.resetBaseline?.()
         startHeartbeat()
@@ -2337,13 +2430,38 @@ function __apply(ctx, config = {}) {
       // v2.3（r16）：注册被拒是**部署错误**而非瞬时故障——记下原因并停住重连，
       // 让 status 能把拒绝原因如实暴露给设置页，而不是无限重连掩盖问题。
       const reason = String(event?.reason ?? '')
+      // 2026-11-15：除 HOST_MISMATCH/COMMIT_DRIFT 之外的关闭一律走重连，于是
+      // 「Relay 用 1008 把注册打回来」「TLS/握手被中间设备掐断」这类**确定性错误**
+      // 在外表和「网络抖动」一模一样：reconnects 涨、connected:false、别无信息。
+      // 记下最近一次 close 的 code/reason，供 /status 的 lastCloseInfo 暴露；
+      // 只留一条，不累积、不落盘。
+      //
+      // ⚠️ close 的 reason 常常是空串（1006 异常断开就永远为空），真正的原因只在
+      //    前一步的 error 事件里 —— 所以两者**分开存**：lastWsError 不随 close 清掉。
+      //    早期版本让 close 覆盖同一个字段，于是 error 刚写下就被盖成「什么都没说」，
+      //    真机上只看得到 `{code:1006, reason:""}`，排查等于从零开始。
+      state.lastCloseInfo = { code: event?.code ?? null, reason: reason.slice(0, 200), at: Date.now() }
+      console.log('[wbsync] ws close', event?.code, JSON.stringify(reason),
+        'reconnects=', state.reconnects)
       if (/^(HOST_MISMATCH|COMMIT_DRIFT)\b/.test(reason)) {
         state.hostMismatch = reason.slice(0, 200)
         return
       }
       scheduleReconnect()
     })
-    ws.addEventListener('error', () => { /* close 紧随其后 */ })
+    ws.addEventListener('error', (event) => {
+      // close 紧随其后，但 error 里带着 close 拿不到的底层原因（ECONNREFUSED /
+      // 证书错误 / HTTP 非 101 升级失败…）。
+      const err = event?.error ?? event
+      const msg = err?.message ?? null
+      const cause = err?.cause?.message ?? err?.cause?.code ?? null
+      state.lastWsError = {
+        message: msg ? String(msg).slice(0, 300) : null,
+        cause: cause ? String(cause).slice(0, 300) : null,
+        at: Date.now(),
+      }
+      console.log('[wbsync] ws error', JSON.stringify(state.lastWsError))
+    })
   }
 
   /** 本地路由：状态与配对码（配对码由 Relay/CP 登记，插件只代理一次 HTTP 调用）。 */
@@ -2361,6 +2479,11 @@ function __apply(ctx, config = {}) {
           dropped: state.dropped,
           downlinks: state.downlinks,
           reconnects: state.reconnects,
+          lastConnectError: state.lastConnectError ?? null,
+          // 最近一次 WS close/error 的原始原因，仅一条、不落盘。
+          // 「reconnects 一直涨但 connected:false」时先看这两项，别再从网络层猜。
+          lastCloseInfo: state.lastCloseInfo ?? null,
+          lastWsError: state.lastWsError ?? null,
           oversized: state.oversized,
           replayReady: Boolean(openSession),
           indexReady: Boolean(collectIndex),
